@@ -73,3 +73,6 @@ class DataserviceSpider(scrapy.Spider):
                 callback=self.parse_geotype,
                 cb_kwargs=dict(geo_type=geo_type),
             )
+
+    def spider_closed(self, spider):
+        spider.logger.info("Spider closed: %s", spider.name)
