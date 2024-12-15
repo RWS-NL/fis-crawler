@@ -26,12 +26,14 @@ class PerGeoTypeExportPipeline:
             exporter.finish_exporting()
             json_file.close()
 
-    def _exporter_for_item(self, item):
+    def _exporter_for_item(self, item, spider):
         adapter = ItemAdapter(item)
         geo_type = adapter["GeoType"]
+
+        data_dir = spider.data_dir
+
         if geo_type not in self.geo_type_to_exporter:
-            data_dir = pathlib.Path("fis")
-            data_dir.mkdir(exist_ok=True)
+
             json_path = data_dir / f"{geo_type}.jsonl"
             json_file = json_path.open("wb")
             exporter = scrapy.exporters.JsonLinesItemExporter(json_file)
@@ -41,6 +43,7 @@ class PerGeoTypeExportPipeline:
         return exporter
 
     def process_item(self, item, spider):
-        exporter = self._exporter_for_item(item)
+        exporter = self._exporter_for_item(item, spider)
         exporter.export_item(item)
+
         return item
