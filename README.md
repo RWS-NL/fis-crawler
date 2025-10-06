@@ -28,6 +28,14 @@ You can specify different formats by changing the file extension (`.jsonl`, `.js
 
 Scrapy will also store processed output in the configured export directory (default: `fis-export`) if pipelines are enabled.
 
+To reduce excessive logging and only show informational messages and above, add the `-L INFO` option:
+
+```bash
+scrapy crawl dataservice -L INFO
+```
+
+You can combine this with the `-o` option as needed.
+
 ### 2. Jupyter Notebooks (`notebooks`)
 
 - A collection of notebooks for data analysis, visualization, and further processing of the scraped data.

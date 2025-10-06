@@ -1,3 +1,9 @@
+
+# Ignore export and file storage directories
+fis-export/
+files-store/
+
+
 # data files
 notebooks/data/*.json
 notebooks/data/*.geojson
