@@ -14,6 +14,11 @@ import pandas as pd
 import geopandas as gpd
 import re
 from tqdm.auto import tqdm
+import networkx as nx
+import shapely
+import pickle
+import matplotlib.pyplot as plt
+import pyproj
 
 
 class VaarweginformatiePipeline:
@@ -79,6 +84,7 @@ class EurisFilesPipeline(FilesPipeline):
     def close_spider(self, spider):
         self.process_ris_files(spider)
         self.concat_network(spider)
+        self.generate_graph(spider)  # <-- Add this line
 
     def process_ris_files(self, spider):
         # After all downloads and extractions, process RIS Excel files into a GeoDataFrame
@@ -157,3 +163,113 @@ class EurisFilesPipeline(FilesPipeline):
             spider.logger.info(f"Saved concatenated sections to {out_dir / f'sections-{version}.geojson'}")
         else:
             spider.logger.info("No section files found for concatenation.")
+
+    def generate_graph(self, spider):
+        # Paths
+        data_dir = pathlib.Path(self.store.basedir)
+        version = getattr(spider, "version", "v0.1.0")
+        out_dir = data_dir / version
+        node_path = out_dir / f'nodes-{version}.geojson'
+        section_path = out_dir / f'sections-{version}.geojson'
+        export_node_path = out_dir / f'export-nodes-{version}.geojson'
+        export_edge_path = out_dir / f'export-edges-{version}.geojson'
+        export_pickle_path = out_dir / f'export-graph-{version}.pickle'
+
+        spider.logger.info(f"Reading nodes from {node_path}")
+        spider.logger.info(f"Reading sections from {section_path}")
+
+        # Read data
+        section_gdf = gpd.read_file(section_path)
+        node_gdf = gpd.read_file(node_path)
+
+        spider.logger.info(f"Building node-section administration...")
+        node_section = section_gdf[['code']].merge(
+            node_gdf[['sectionref', 'node_id']],
+            left_on='code',
+            right_on='sectionref'
+        )[['sectionref', 'node_id']]
+
+        left_df = node_section.groupby('sectionref').first()
+        right_df = node_section.groupby('sectionref').last()
+
+        edge_df = pd.merge(left_df, right_df, left_index=True, right_index=True, suffixes=['_from', '_to'])
+        edge_df = edge_df.rename(columns={"node_id_from": "source", "node_id_to": "target"})
+
+        section_gdf = section_gdf.merge(edge_df.reset_index(), left_on='code', right_on='sectionref')
+
+        spider.logger.info(f"Building graph from {len(section_gdf)} sections...")
+        graph = nx.from_pandas_edgelist(section_gdf, source='source', target='target', edge_attr=True)
+
+        # Update node info
+        spider.logger.info(f"Updating node information for {len(node_gdf)} nodes...")
+        for _, row in tqdm(node_gdf.iterrows(), total=len(node_gdf), desc="Updating nodes"):
+            n = row['node_id']
+            node = graph.nodes[n]
+            euris_nodes = node.get('euris_nodes', [])
+            euris_nodes.append(row.to_dict())
+            node['euris_nodes'] = euris_nodes
+            node.update(row.to_dict())
+
+        # Connect borders
+        spider.logger.info("Connecting border nodes...")
+        border_node_gdf = node_gdf[~node_gdf['borderpoint'].isna()]
+        border_locode_connections = pd.merge(
+            border_node_gdf[['node_id', 'borderpoint']],
+            border_node_gdf[['node_id', 'locode']],
+            left_on='borderpoint',
+            right_on='locode'
+        )
+        border_locode_connections = border_locode_connections.rename(columns={'node_id_x': 'source', 'node_id_y': 'target'})
+
+        def geometry_for_border(row):
+            source_geometry = graph.nodes[row['source']]['geometry']
+            target_geometry = graph.nodes[row['target']]['geometry']
+            return shapely.LineString([source_geometry, target_geometry])
+
+        spider.logger.info(f"Generating geometry for {len(border_locode_connections)} border connections...")
+        border_locode_connections['geometry'] = tqdm(
+            border_locode_connections.apply(geometry_for_border, axis=1),
+            total=len(border_locode_connections),
+            desc="Border geometries"
+        )
+
+        border_graph = nx.from_pandas_edgelist(border_locode_connections, source='source', target='target', edge_attr=True)
+        graph.add_edges_from(
+            (e[0], e[1], attrs)
+            for e, attrs in border_graph.edges.items()
+        )
+
+        for e, edge in graph.edges.items():
+            edge['is_border'] = False
+            if e in border_graph.edges:
+                edge['is_border'] = True
+
+        # Compute subgraphs
+        spider.logger.info("Computing subgraphs...")
+        for i, component in tqdm(enumerate(nx.connected_components(graph)), desc="Subgraphs"):
+            subgraph = graph.subgraph(component)
+            for edge in subgraph.edges.values():
+                edge['subgraph'] = i
+            for node in subgraph.nodes.values():
+                node['subgraph'] = i
+
+        # Add length
+        spider.logger.info("Computing edge lengths...")
+        geod = pyproj.Geod(ellps="WGS84")
+        for edge in tqdm(graph.edges.values(), total=graph.number_of_edges(), desc="Edge lengths"):
+            edge['length_m'] = geod.geometry_length(edge['geometry'])
+
+        # Export
+        spider.logger.info(f"Exporting edges and nodes to GeoJSON and graph to pickle...")
+        edge_df = pd.DataFrame(data=graph.edges.values(), index=graph.edges.keys()).reset_index(names=['source', 'target'])
+        edge_gdf = gpd.GeoDataFrame(edge_df, crs='EPSG:4326')
+        node_df = pd.DataFrame(data=graph.nodes.values(), index=graph.nodes.keys()).reset_index(names=['n'])
+        node_gdf_out = gpd.GeoDataFrame(node_df, crs='EPSG:4326')
+
+        edge_gdf.to_file(export_edge_path)
+        node_gdf_out.to_file(export_node_path)
+
+        with export_pickle_path.open('wb') as f:
+            pickle.dump(graph, f)
+
+        spider.logger.info(f"Graph exported to {export_edge_path}, {export_node_path}, and {export_pickle_path}")
