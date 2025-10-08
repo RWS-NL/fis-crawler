@@ -1,26 +1,59 @@
 import scrapy
+import scrapy.utils.defer
 import re
 import pandas as pd
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 class EurisLatestFilesSpider(scrapy.Spider):
-    name = "euris_latest_files"
+    name = "euris"
     allowed_domains = ["eurisportal.eu"]
 
     files_url = 'https://www.eurisportal.eu/AWFImportData/api/ExportFile/GetFiles?countryCode={country_code}'
+    all_files_url = 'https://www.eurisportal.eu/AWFImportData/api/ExportFile/GetFiles'
     download_url = 'https://www.eurisportal.eu/AWFImportData/api/ExportFile/DownloadFile?fileName={filename}'
-    countries = ['NL', 'BE', 'DE', 'FR', 'CH', 'BG', 'UA', 'HU', 'HR', 'SK', 'RO', 'CS', 'LU', 'AT', 'GE']
+    # countries_expected = ['NL', 'BE', 'DE', 'FR', 'CH', 'BG', 'UA', 'HU', 'HR', 'SK', 'RO', 'CS', 'LU', 'AT', 'GE']
+    # countries_observed = ['CZ', 'XX', 'BE', 'HU', 'SK', 'FR', 'HR', 'DE', 'LU', 'RS', 'NL', 'BG', 'AT', 'RO']
+    # Not available: 'CH', 'UA', 'CS', 'GE'
+    # New codes: 'CZ', 'XX', 'RS'
+    #
     path_re = re.compile(r'(?P<country>[A-Z]{2})_(?P<dataset>[\w]+)_(?P<date>[\d]+)_(?P<version>v\d+\.\d+)\.zip')
 
     custom_settings = {
+        # not too fast....
+        "DOWNLOAD_DELAY": 2.5,
+        # it's bit error prone
+        "RETRY_TIMES": 5,
         "ITEM_PIPELINES": {
             "vaarweginformatie.pipelines.EurisFilesPipeline": 1,
         },
         "FILES_STORE": "files-store",
     }
 
-    def start_requests(self):
-        for country_code in self.countries:
+
+    async def start(self):
+
+        # this will download country codes
+        # we will loop over all country codes and fire eextra requests in the callback
+        all_files_request = scrapy.Request(
+            self.all_files_url,
+            headers={"Accept": "application/json", "User-Agent": "euris-scraper"},
+            callback=self.parse_all_files
+        )
+        yield all_files_request
+
+    def parse_all_files(self, response):
+        data = response.json()
+        country_codes = set()
+        for row in data:
+            country_codes.add(row['countryCode'])
+        country_codes = list(country_codes)
+        self.country_codes = country_codes
+        logger.info('Country codes: %s', country_codes)
+
+        for country_code in self.country_codes:
             url = self.files_url.format(country_code=country_code)
             yield scrapy.Request(
                 url,

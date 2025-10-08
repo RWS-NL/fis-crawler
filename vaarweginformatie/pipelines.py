@@ -4,22 +4,25 @@
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
 
+import logging
+import os
+import pathlib
+import pickle
+import re
+
+import geopandas as gpd
+import matplotlib.pyplot as plt
+import networkx as nx
+import pandas as pd
+import pyproj
+import scrapy.exporters
+import shapely
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
-import scrapy.exporters
-import pathlib
 from scrapy.pipelines.files import FilesPipeline
-import os
-import pandas as pd
-import geopandas as gpd
-import re
 from tqdm.auto import tqdm
-import networkx as nx
-import shapely
-import pickle
-import matplotlib.pyplot as plt
-import pyproj
 
+logger = logging.getLogger(__name__)
 
 class VaarweginformatiePipeline:
     def process_item(self, item, spider):
@@ -213,13 +216,15 @@ class EurisFilesPipeline(FilesPipeline):
         # Connect borders
         spider.logger.info("Connecting border nodes...")
         border_node_gdf = node_gdf[~node_gdf['borderpoint'].isna()]
+        # 3 border connections are not reciprocal
         border_locode_connections = pd.merge(
             border_node_gdf[['node_id', 'borderpoint']],
-            border_node_gdf[['node_id', 'locode']],
+            node_gdf[['node_id', 'locode']],
             left_on='borderpoint',
             right_on='locode'
         )
         border_locode_connections = border_locode_connections.rename(columns={'node_id_x': 'source', 'node_id_y': 'target'})
+        logger.info('Border locodes: %s', border_locode_connections)
 
         def geometry_for_border(row):
             source_geometry = graph.nodes[row['source']]['geometry']
