@@ -20,7 +20,7 @@ scrapy crawl dataservice
 scrapy crawl euris
 ```
 
-Scrapy will store processed output in the configured export directory (default: `fis-export`) if pipelines are enabled.
+Scrapy will store processed output in the configured export directory (default: `fis-export` and `euris-export` for euris) .
 
 To reduce excessive logging and only show informational messages and above, add the `-L INFO` option:
 
