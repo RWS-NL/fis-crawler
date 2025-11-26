@@ -27,9 +27,9 @@ class EurisLatestFilesSpider(scrapy.Spider):
         # it's bit error prone
         "RETRY_TIMES": 5,
         "ITEM_PIPELINES": {
-            "vaarweginformatie.pipelines.EurisFilesPipeline": 1,
+            "fis.pipelines.EurisFilesPipeline": 1,
         },
-        "FILES_STORE": "files-store",
+        "FILES_STORE": "euris-export",
     }
 
 

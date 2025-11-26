@@ -22,6 +22,11 @@ from itemadapter import ItemAdapter
 from scrapy.pipelines.files import FilesPipeline
 from tqdm.auto import tqdm
 
+from scrapy.utils.project import get_project_settings
+
+settings = get_project_settings()   
+version = settings.get("VERSION", "v0.1.0")  
+
 logger = logging.getLogger(__name__)
 
 class VaarweginformatiePipeline:
@@ -109,7 +114,7 @@ class EurisFilesPipeline(FilesPipeline):
             ris_gdfs.append(ris_gdf)
         if ris_gdfs:
             ris_gdf = pd.concat(ris_gdfs)
-            version = getattr(spider, "version", "v0.1.0")
+
             out_dir = data_dir / version
             out_dir.mkdir(exist_ok=True)
             out_path = out_dir / f"ris_index_{version}.gpkg"
@@ -121,7 +126,6 @@ class EurisFilesPipeline(FilesPipeline):
 
     def concat_network(self, spider):
         data_dir = pathlib.Path(self.store.basedir)
-        version = getattr(spider, "version", "v0.1.0")
         out_dir = data_dir / version
         out_dir.mkdir(exist_ok=True)
 
@@ -170,7 +174,6 @@ class EurisFilesPipeline(FilesPipeline):
     def generate_graph(self, spider):
         # Paths
         data_dir = pathlib.Path(self.store.basedir)
-        version = getattr(spider, "version", "v0.1.0")
         out_dir = data_dir / version
         node_path = out_dir / f'nodes-{version}.geojson'
         section_path = out_dir / f'sections-{version}.geojson'
