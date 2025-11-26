@@ -94,3 +94,5 @@ AUTOTHROTTLE_ENABLED = True
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
 FIS_EXPORT_DIR = "fis-export"
+
+VERSION = "0.2.0"
