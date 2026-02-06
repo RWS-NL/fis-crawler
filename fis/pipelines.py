@@ -35,7 +35,7 @@ class VaarweginformatiePipeline:
 
 
 class PerGeoTypeExportPipeline:
-    """Distribute items across multiple XML files according to their 'year' field"""
+    """Distribute items across multiple json files according to their geotype"""
 
     def open_spider(self, spider):
         self.geo_type_to_exporter = {}
