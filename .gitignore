@@ -1,6 +1,7 @@
 
 # Ignore export and file storage directories
 fis-export/
+euris-export/
 files-store/
 euris-export/
 
