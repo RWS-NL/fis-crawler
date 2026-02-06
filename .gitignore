@@ -3,7 +3,6 @@
 fis-export/
 euris-export/
 files-store/
-euris-export/
 
 
 # data files
@@ -98,6 +97,10 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# Data
+fis-export/
+geotypes.json
 
 # IPython
 profile_default/
