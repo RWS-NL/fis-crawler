@@ -1,10 +1,11 @@
 [project]
 name = "fis"
-version = "0.1.0"
+version = "0.2.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "click>=8.3.0",
     "dask>=2025.5.1",
     "geopandas>=1.1.0",
     "geoviews>=1.14.0",
