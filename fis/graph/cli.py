@@ -203,10 +203,19 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
     
     # Export nodes as geoparquet and geojson
     node_data = []
+    skip_cols = {'euris_nodes'}  # Non-serializable columns to skip
     for node_id, attrs in merged.nodes(data=True):
-        row = {"node_id": node_id, **attrs}
-        if "geometry_wkt" in row:
-            row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
+        row = {"node_id": node_id}
+        for k, v in attrs.items():
+            if k in skip_cols or isinstance(v, (list, dict)):
+                continue
+            if hasattr(v, 'wkt'):  # Geometry object
+                if k == 'geometry':
+                    row['geometry'] = v
+            elif k == 'geometry_wkt':
+                row['geometry'] = wkt.loads(v)
+            else:
+                row[k] = v
         node_data.append(row)
     if node_data:
         nodes_gdf = gpd.GeoDataFrame(node_data, crs="EPSG:4326")
