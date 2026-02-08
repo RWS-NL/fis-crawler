@@ -8,7 +8,7 @@ import click
 import pandas as pd
 import geopandas as gpd
 from shapely import wkt
-from shapely.geometry import Point, LineString
+from shapely.geometry import Point, LineString, mapping
 from shapely.ops import substring
 from fis.ris_index import load_ris_index
 
@@ -283,6 +283,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths):
                  "name": chamber["Name"],
                  "length": float(chamber["Length"]) if pd.notna(chamber["Length"]) else None,
                  "width": float(chamber["Width"]) if pd.notna(chamber["Width"]) else None,
+                 "geometry": chamber["Geometry"] if "Geometry" in chamber and pd.notna(chamber["Geometry"]) else None
              }
              complex_obj["locks"][0]["chambers"].append(c_obj)
              
@@ -322,35 +323,119 @@ def main(export_dir):
 
     # 2. Geospatial Outputs (GeoJSON / GeoParquet)
     if result:
-        df = pd.DataFrame(result)
+        # Generate flattened features for visualization
+        features = flatten_to_feature_collection(result)
+        gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
         
-        # Enforce integer type for fairway_id (nullable)
-        if "fairway_id" in df.columns:
-            df["fairway_id"] = df["fairway_id"].astype("Int64")
+        # Enforce integer type for IDs (nullable)
+        for col in ["fairway_id", "lock_id", "chamber_id", "berth_id"]:
+            if col in gdf.columns:
+                gdf[col] = gdf[col].astype("Int64")
         
-        # Convert WKT geometry back to shapely
-        if "geometry" in df.columns:
-            df["geometry"] = df["geometry"].apply(lambda x: wkt.loads(x) if x else None)
-            gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+        # Save GeoJSON
+        output_geojson = output_dir / "lock_schematization.geojson"
+        gdf.to_file(output_geojson, driver="GeoJSON")
+        logger.info(f"Saved GeoJSON to {output_geojson}")
+        
+        # Save GeoParquet
+        output_geoparquet = output_dir / "lock_schematization.geoparquet"
+        gdf.to_parquet(output_geoparquet)
+        logger.info(f"Saved GeoParquet to {output_geoparquet}")
+
+def flatten_to_feature_collection(complexes):
+    """
+    Flatten hierarchical complex objects into a list of GeoJSON features.
+    
+    Features created:
+    - Lock (Point): The main lock complex location.
+    - Chamber (Polygon): Each chamber within the lock.
+    - Berth (Point/Polygon): Each nearby berth.
+    - Fairway Segment (LineString): 'before' and 'after' segments.
+    """
+    features = []
+    
+    for c in complexes:
+        # 1. Lock Feature
+        geom = wkt.loads(c["geometry"]) if c.get("geometry") else None
+        if geom:
+             # Basic properties
+             props = {k: v for k, v in c.items() if k not in ["geometry", "locks", "berths", "geometry_before_wkt", "geometry_after_wkt"]}
+             props["feature_type"] = "lock"
+             features.append({
+                 "type": "Feature",
+                 "geometry": mapping(geom),
+                 "properties": props
+             })
+             
+        # 2. Fairway Segments
+        if c.get("geometry_before_wkt"):
+            features.append({
+                "type": "Feature",
+                "geometry": mapping(wkt.loads(c["geometry_before_wkt"])),
+                "properties": {
+                    "feature_type": "fairway_segment",
+                    "segment_type": "before",
+                    "lock_id": c["id"],
+                    "fairway_id": c.get("fairway_id")
+                }
+            })
             
-            # Serialize nested 'locks' (chambers) for GIS formats that don't support objects
-            # For GeoParquet it might be supported depending on the viewer, but string is safest for GeoJSON.
-            # Actually Geopandas to_file (fiona) fails with dict/list properties.
-            gdf_flat = gdf.copy()
-            gdf_flat["locks"] = gdf_flat["locks"].apply(json.dumps)
-            # Serialize berths as well if they are distinct objects
-            if "berths" in gdf_flat.columns:
-                 gdf_flat["berths"] = gdf_flat["berths"].apply(json.dumps)
-            
-            # Save GeoJSON
-            output_geojson = output_dir / "lock_schematization.geojson"
-            gdf_flat.to_file(output_geojson, driver="GeoJSON")
-            logger.info(f"Saved GeoJSON to {output_geojson}")
-            
-            # Save GeoParquet (supports better types usually, but let's stick to flattened for consistency)
-            output_geoparquet = output_dir / "lock_schematization.geoparquet"
-            gdf_flat.to_parquet(output_geoparquet)
-            logger.info(f"Saved GeoParquet to {output_geoparquet}")
+        if c.get("geometry_after_wkt"):
+            features.append({
+                "type": "Feature",
+                "geometry": mapping(wkt.loads(c["geometry_after_wkt"])),
+                "properties": {
+                    "feature_type": "fairway_segment",
+                    "segment_type": "after",
+                    "lock_id": c["id"],
+                    "fairway_id": c.get("fairway_id")
+                }
+            })
+
+        # 3. Chambers
+        # 'locks' is a list of dicts, each having 'chambers' list
+        for l_obj in c.get("locks", []):
+            for chamber in l_obj.get("chambers", []):
+                if chamber.get("geometry"):
+                    try:
+                        c_geom = wkt.loads(chamber["geometry"])
+                        features.append({
+                            "type": "Feature",
+                            "geometry": mapping(c_geom),
+                            "properties": {
+                                "feature_type": "chamber",
+                                "name": chamber.get("name"),
+                                "lock_id": c["id"],
+                                "chamber_id": chamber.get("id"),
+                                "length": chamber.get("length"),
+                                "width": chamber.get("width")
+                            }
+                        })
+                    except Exception:
+                        pass
+
+        # 4. Berths
+        for berth in c.get("berths", []):
+             if berth.get("geometry"):
+                 try:
+                     b_geom = wkt.loads(berth["geometry"])
+                     features.append({
+                         "type": "Feature",
+                         "geometry": mapping(b_geom),
+                         "properties": {
+                             "feature_type": "berth",
+                             "name": berth.get("name"),
+                             "lock_id": c["id"],
+                             "berth_id": berth.get("id"),
+                             "dist_m": berth.get("dist_m"),
+                             "relation": berth.get("relation")
+                         }
+                     })
+                 except Exception:
+                     pass
+
+    return features
+
 
 if __name__ == "__main__":
     main()
