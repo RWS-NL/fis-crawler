@@ -308,10 +308,14 @@ def main(export_dir):
     except Exception as e:
         logger.warning(f"Could not load RIS Index: {e}")
 
+    # Create output directory
+    output_dir = data_dir.parent / "lock-output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     result = group_complexes(locks, chambers, isrs, ris_df, fairways, berths)
     
     # 1. Standard JSON Output (Full Detail)
-    output_json = data_dir / "lock_schematization.json"
+    output_json = output_dir / "lock_schematization.json"
     with open(output_json, "w") as f:
         json.dump(result, f, indent=2)
     logger.info(f"Saved JSON to {output_json}")
@@ -330,14 +334,17 @@ def main(export_dir):
             # Actually Geopandas to_file (fiona) fails with dict/list properties.
             gdf_flat = gdf.copy()
             gdf_flat["locks"] = gdf_flat["locks"].apply(json.dumps)
+            # Serialize berths as well if they are distinct objects
+            if "berths" in gdf_flat.columns:
+                 gdf_flat["berths"] = gdf_flat["berths"].apply(json.dumps)
             
             # Save GeoJSON
-            output_geojson = data_dir / "lock_schematization.geojson"
+            output_geojson = output_dir / "lock_schematization.geojson"
             gdf_flat.to_file(output_geojson, driver="GeoJSON")
             logger.info(f"Saved GeoJSON to {output_geojson}")
             
             # Save GeoParquet (supports better types usually, but let's stick to flattened for consistency)
-            output_geoparquet = data_dir / "lock_schematization.geoparquet"
+            output_geoparquet = output_dir / "lock_schematization.geoparquet"
             gdf_flat.to_parquet(output_geoparquet)
             logger.info(f"Saved GeoParquet to {output_geoparquet}")
 

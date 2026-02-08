@@ -100,6 +100,7 @@ target/
 
 # Data
 fis-export/
+lock-output/
 geotypes.json
 
 # IPython
