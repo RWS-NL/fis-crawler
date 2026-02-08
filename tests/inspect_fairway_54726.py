@@ -1,6 +1,10 @@
 
-import geopandas as gpd
+import sys
+import pathlib
+sys.path.append(str(pathlib.Path(__file__).parent.parent))
+
 import pandas as pd
+import geopandas as gpd
 from shapely import wkt
 
 def inspect_fairway_54726():

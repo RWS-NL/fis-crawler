@@ -1,8 +1,12 @@
-
 import geopandas as gpd
 import pandas as pd
 from shapely import wkt
-from fis.lock.utils import find_chamber_doors, project_geometry
+import sys
+import pathlib
+sys.path.append(str(pathlib.Path(__file__).parent.parent))
+
+from fis.lock.utils import find_chamber_doors
+from fis.lock.core import process_fairway_geometry
 from shapely.geometry import Point, LineString
 
 def inspect_lock_6951():
