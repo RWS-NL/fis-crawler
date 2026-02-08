@@ -43,10 +43,10 @@ def fis(export_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
 
 @cli.command()
 @click.option(
-    "--euris-pickle",
+    "--euris-export",
     type=click.Path(exists=True, path_type=pathlib.Path),
-    default="output/euris-export/v0.1.0/export-graph-v0.1.0.pickle",
-    help="Path to EURIS graph pickle.",
+    default="output/euris-export",
+    help="Path to EURIS export directory with Node_*.geojson and FairwaySection_*.geojson files.",
 )
 @click.option(
     "--output-dir",
@@ -54,28 +54,16 @@ def fis(export_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
     default="output/euris-graph",
     help="Output directory for EURIS graph.",
 )
-def euris(euris_pickle: pathlib.Path, output_dir: pathlib.Path) -> None:
-    """Export EURIS graph (nodes/edges only)."""
-    logger.info("Loading EURIS graph from %s", euris_pickle)
-    graph = load_euris_graph(euris_pickle)
+def euris(euris_export: pathlib.Path, output_dir: pathlib.Path) -> None:
+    """Build EURIS graph from crawled GeoJSON files."""
+    from .euris import concat_nodes, concat_sections, build_euris_graph, export_euris_graph
     
-    output_dir = pathlib.Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Building EURIS graph from %s", euris_export)
     
-    import pickle
-    import json
-    import networkx as nx
-    
-    with open(output_dir / "graph.pickle", "wb") as f:
-        pickle.dump(graph, f)
-    
-    summary = {
-        "num_nodes": graph.number_of_nodes(),
-        "num_edges": graph.number_of_edges(),
-        "num_connected_components": nx.number_connected_components(graph),
-    }
-    with open(output_dir / "summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
+    node_gdf = concat_nodes(euris_export)
+    section_gdf = concat_sections(euris_export)
+    graph = build_euris_graph(node_gdf, section_gdf)
+    export_euris_graph(graph, output_dir)
     
     logger.info("EURIS graph exported to %s", output_dir)
 
