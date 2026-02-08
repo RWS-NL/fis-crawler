@@ -11,364 +11,21 @@ from shapely import wkt
 from shapely.geometry import Point, LineString, mapping
 from shapely.ops import substring
 from fis.ris_index import load_ris_index
+from fis.lock.core import load_data, group_complexes
+from fis.lock.graph import build_graph_features
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def load_data(export_dir: pathlib.Path):
-    """Load necessary parquet files."""
-    def read_geo_or_parquet(stem):
-        gpq = export_dir / f"{stem}.geoparquet"
-        pq = export_dir / f"{stem}.parquet"
-        if gpq.exists():
-            return gpd.read_parquet(gpq)
-        if pq.exists():
-            df = pd.read_parquet(pq)
-            if "Geometry" in df.columns and df["Geometry"].dtype == "object":
-                df["geometry"] = df["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
-                return gpd.GeoDataFrame(df, geometry="geometry")
-            return df
-        return None
-
-    locks = read_geo_or_parquet("lock")
-    chambers = read_geo_or_parquet("chamber")
-    isrs = read_geo_or_parquet("isrs")
-    fairways = read_geo_or_parquet("fairway")
-    berths = read_geo_or_parquet("berth")
-    sections = read_geo_or_parquet("section")
-    
-    if locks is None or chambers is None:
-        raise FileNotFoundError("Missing essential lock/chamber data.")
-
-    return locks, chambers, isrs, fairways, berths, sections
-
-def split_fairway(fairway_geom, lock_km, fairway_start_km, fairway_end_km):
-    """
-    Split the fairway geometry at the lock's location based on KM mark.
-    """
-    if not fairway_geom or not isinstance(fairway_geom, LineString):
-        return None, None
-        
-    total_len = fairway_geom.length
-    section_len_km = abs(fairway_end_km - fairway_start_km)
-    
-    if section_len_km == 0:
-        return None, None
-
-    # Determine ratio
-    if fairway_end_km > fairway_start_km:
-        ratio = (lock_km - fairway_start_km) / section_len_km
-    else:
-        # Decreasing KM mapping
-        ratio = (fairway_start_km - lock_km) / section_len_km
-
-    dist_on_line = ratio * total_len
-    dist_on_line = max(0.0, min(total_len, dist_on_line)) # Clamp
-
-    before = substring(fairway_geom, 0, dist_on_line)
-    after = substring(fairway_geom, dist_on_line, total_len)
-    
-    return before, after
-
-def process_fairway_geometry(fw_row, lock_row):
-    """
-    Calculate fairway segments and distance using metric projection (EPSG:28992).
-    """
-    fairway_data = {}
-    
-    # Extract geometries safely
-    fw_geom = fw_row.geometry if hasattr(fw_row, "geometry") else None
-    lock_geom = lock_row.geometry if hasattr(lock_row, "geometry") else None
-    
-    # 1. Fallback / Initial Calculation: KM-based Split
-    # We only try this if we have RouteKmBegin
-    if fw_geom and pd.notna(lock_row.get("RouteKmBegin")):
-         geom_before, geom_after = split_fairway(
-             fw_geom, 
-             lock_row["RouteKmBegin"], 
-             fw_row.get("RouteKmBegin", 0), 
-             fw_row.get("RouteKmEnd", 0)
-         )
-         # Populate early as fallback
-         if geom_before:
-             fairway_data["geometry_before_wkt"] = geom_before.wkt
-             fairway_data["geometry_after_wkt"] = geom_after.wkt
-
-    # 2. Refinement: Accurate Spatial Projection (EPSG:28992)
-    # If we have both geometries, we can project to get precise metric distance/split
-    if lock_geom and fw_geom:
-        try:
-            # Create GeoSeries for projection
-            gs_lock = gpd.GeoSeries([lock_geom], crs="EPSG:4326")
-            gs_fw = gpd.GeoSeries([fw_geom], crs="EPSG:4326")
-            
-            # Reproject to RD New (EPSG:28992) for meters
-            gs_lock = gs_lock.to_crs("EPSG:28992")
-            gs_fw = gs_fw.to_crs("EPSG:28992")
-            
-            lock_point_rd = gs_lock.iloc[0]
-            fw_line_rd = gs_fw.iloc[0]
-            
-            # Ensure lock geometry is a point
-            if lock_point_rd.geom_type != 'Point':
-                lock_point_rd = lock_point_rd.centroid
-
-            # Project lock point to line (in meters)
-            projected_dist = fw_line_rd.project(lock_point_rd)
-            projected_point = fw_line_rd.interpolate(projected_dist)
-            
-            fairway_data["lock_to_fairway_distance_meters"] = lock_point_rd.distance(projected_point)
-            
-            # Split using spatial projection (more accurate than KM)
-            before_spatial_rd = substring(fw_line_rd, 0, projected_dist)
-            after_spatial_rd = substring(fw_line_rd, projected_dist, fw_line_rd.length)
-            
-            # Project back to 4326 for WKT output
-            before_spatial = gpd.GeoSeries([before_spatial_rd], crs="EPSG:28992").to_crs("EPSG:4326").iloc[0]
-            after_spatial = gpd.GeoSeries([after_spatial_rd], crs="EPSG:28992").to_crs("EPSG:4326").iloc[0]
-
-            fairway_data["geometry_before_wkt"] = before_spatial.wkt
-            fairway_data["geometry_after_wkt"] = after_spatial.wkt
-            
-        except Exception as e:
-            logger.warning(f"Projection/Splitting failed for lock {lock_row['Id']}: {e}")
-
-    return fairway_data
-
-def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_after, max_dist_m=2000):
-    """
-    Find berths associated with the lock's fairway and determine if they are before or after.
-    Enforces a strict distance check (default 2km).
-    """
-    nearby = []
-    if berths_gdf is None or "FairwayId" not in berths_gdf.columns:
-        return nearby
-        
-    # 1. Filter by FairwayId
-    fw_id = lock_row.get("FairwayId")
-    if pd.isna(fw_id):
-        return nearby
-        
-    # Filter candidates
-    candidates = berths_gdf[berths_gdf["FairwayId"] == fw_id].copy()
-    
-    if candidates.empty:
-        return nearby
-        
-    lock_geom = lock_row.geometry if hasattr(lock_row, "geometry") else None
-    lock_km = lock_row.get("RouteKmBegin")
-    
-    for _, berth in candidates.iterrows():
-        is_nearby = False
-        dist_m = None
-        
-        # 1. KM Check (Fast and robust for fairways)
-        berth_km = berth.get("RouteKmBegin")
-        if pd.notna(lock_km) and pd.notna(berth_km):
-            # Calculate absolute KM distance
-            km_diff = abs(lock_km - berth_km)
-            # Convert to meters (approx)
-            dist_m = km_diff * 1000
-            if dist_m <= max_dist_m:
-                is_nearby = True
-                
-        # 2. Spatial Check (Fallback if KM missing or verification needed)
-        elif lock_geom and berth.geometry:
-            try:
-                # Project to EPSG:28992 for metric distance
-                gs = gpd.GeoSeries([lock_geom, berth.geometry], crs="EPSG:4326")
-                gs_rd = gs.to_crs("EPSG:28992")
-                dist_m = gs_rd.iloc[0].distance(gs_rd.iloc[1])
-                
-                if dist_m <= max_dist_m:
-                    is_nearby = True
-            except Exception:
-                pass # Fail silently on projection errors
-
-        if is_nearby:
-            nearby.append({
-                "id": int(berth["Id"]),
-                "name": berth.get("Name"),
-                "km": float(berth_km) if pd.notna(berth_km) else None,
-                "dist_m": round(dist_m, 1) if dist_m is not None else None,
-                "geometry": berth.geometry.wkt if hasattr(berth, "geometry") and berth.geometry else None,
-                "relation": "nearby" 
-            })
-
-    return nearby
 
 
-def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
-    """
-    Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, and Section data.
-    """
-    complexes = []
-    
-    # Convert locks to GeoDataFrame for spatial ops if needed
-    if "Geometry" in locks.columns and locks["Geometry"].dtype == "object":
-         locks["geometry"] = locks["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
-    locks_gdf = gpd.GeoDataFrame(locks, geometry="geometry")
 
-    # Convert berths to GDF if needed
-    berths_gdf = None
-    if berths is not None:
-        if "Geometry" in berths.columns and berths["Geometry"].dtype == "object":
-             berths["geometry"] = berths["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
-        berths_gdf = gpd.GeoDataFrame(berths, geometry="geometry") if "geometry" in berths.columns else berths
 
-    # Convert sections to GDF if needed
-    sections_gdf = None
-    if sections is not None:
-        if "Geometry" in sections.columns and sections["Geometry"].dtype == "object":
-             sections["geometry"] = sections["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
-        sections_gdf = gpd.GeoDataFrame(sections, geometry="geometry") if "geometry" in sections.columns else sections
 
-    for idx, lock in locks_gdf.iterrows():
-        # Get chambers for this lock (using confirmed ParentId key)
-        lock_chambers = chambers[chambers["ParentId"] == lock["Id"]]
-        
-        # Resolve ISRS
-        lock_isrs_code = None
-        if pd.notna(lock.get("IsrsId")) and isrs is not None:
-             isrs_row = isrs[isrs["Id"] == lock["IsrsId"]]
-             if not isrs_row.empty:
-                 lock_isrs_code = isrs_row.iloc[0]["Code"]
 
-        # RIS Enrichment
-        ris_info = {}
-        if lock_isrs_code and ris_df is not None:
-             match = ris_df[ris_df["isrs_code"] == lock_isrs_code]
-             if not match.empty:
-                 ris_info = {
-                     "ris_name": match.iloc[0]["name"],
-                     "ris_function": match.iloc[0]["function"]
-                 }
 
-        # Fairway Mapping
-        fairway_data = {}
-        fw_obj = None # Keep reference for processing
-        if fairways is not None and pd.notna(lock.get("FairwayId")):
-             fw_row = fairways[fairways["Id"] == lock["FairwayId"]]
-             if not fw_row.empty:
-                 fw_obj = fw_row.iloc[0]
-                 fairway_data = {
-                     "fairway_name": fw_obj["Name"],
-                     "fairway_id": int(fw_obj["Id"])
-                 }
-                 # Delegate complexity to helper function
-                 geom_data = process_fairway_geometry(fw_obj, lock)
-                 fairway_data.update(geom_data)
-
-        # Chamber Route Generation (Virtual Fairways)
-        # If we have valid split/merge points from the fairway, we can route through chambers
-        chamber_routes = {}
-        if "geometry_before_wkt" in fairway_data and "geometry_after_wkt" in fairway_data:
-             try:
-                 bwkt = fairway_data["geometry_before_wkt"]
-                 awkt = fairway_data["geometry_after_wkt"]
-                 if bwkt and awkt:
-                     # Load geometries
-                     g_before = wkt.loads(bwkt)
-                     g_after = wkt.loads(awkt)
-                     
-                     # Identify connection points
-                     # curve.coords is a list of tuples
-                     split_point = Point(g_before.coords[-1])
-                     merge_point = Point(g_after.coords[0])
-                     
-                     # We will calculate routes when iterating chambers below
-                     chamber_routes["split_point"] = split_point
-                     chamber_routes["merge_point"] = merge_point
-             except Exception as e:
-                 logger.warning(f"Failed to generate chamber route endpoints for lock {lock['Id']}: {e}")
-        
-        # Berth Identification
-        berths_data = []
-        if berths_gdf is not None:
-             # We pass the WKTs from fairway_data if we want to parse them, 
-             # or we rely on KM/FairwayId in the helper function.
-             berths_data = find_nearby_berths(lock, berths_gdf, fairway_data.get("geometry_before_wkt"), fairway_data.get("geometry_after_wkt"))
-
-        # Section Overlap Identification
-        sections_data = []
-        if sections_gdf is not None:
-            # Define complex geometry: Union of lock + chambers
-            # Start with lock geometry
-            complex_geoms = [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
-            
-            # Add chamber geometries
-            if "Geometry" in lock_chambers.columns:
-                 for _, c_row in lock_chambers.iterrows():
-                      if pd.notna(c_row["Geometry"]):
-                           try:
-                                c_geom = wkt.loads(c_row["Geometry"])
-                                complex_geoms.append(c_geom)
-                           except Exception:
-                                pass
-            
-            if complex_geoms:
-                 from shapely.ops import unary_union
-                 complex_union = unary_union([g for g in complex_geoms if g])
-                 if complex_union:
-                      # Find intersecting sections
-                      intersecting = sections_gdf[sections_gdf.intersects(complex_union)]
-                      
-                      for _, s_row in intersecting.iterrows():
-                           sections_data.append({
-                               "id": int(s_row["Id"]),
-                               "name": s_row["Name"],
-                               "fairway_id": int(s_row["FairwayId"]) if pd.notna(s_row.get("FairwayId")) else None,
-                               "length": float(s_row["Length"]) if pd.notna(s_row.get("Length")) else None,
-                               "geometry": s_row.geometry.wkt if hasattr(s_row, "geometry") and s_row.geometry else None,
-                               "relation": "overlap"
-                           })
-
-        complex_obj = {
-            "id": int(lock["Id"]),
-            "name": lock["Name"],
-            "isrs_code": lock_isrs_code,
-            "geometry": lock.geometry.wkt if hasattr(lock, "geometry") and lock.geometry else None,
-            **ris_info,
-            **fairway_data,
-            "berths": berths_data,
-            "sections": sections_data,
-            "locks": [  
-                {
-                     "id": int(lock["Id"]),
-                     "name": lock["Name"],
-                     "chambers": []
-                }
-            ]
-        }
-        
-        # Add chambers
-        for _, chamber in lock_chambers.iterrows():
-             # Add Chamber Route (Virtual Fairway)
-             route_wkt = None
-             if "split_point" in chamber_routes and "merge_point" in chamber_routes:
-                 try:
-                     if "Geometry" in chamber and pd.notna(chamber["Geometry"]):
-                         ch_geom = wkt.loads(chamber["Geometry"])
-                         centroid = ch_geom.centroid
-                         route = LineString([chamber_routes["split_point"], centroid, chamber_routes["merge_point"]])
-                         route_wkt = route.wkt
-                 except Exception:
-                     pass
-
-             c_obj = {
-                 "id": int(chamber["Id"]),
-                 "name": chamber["Name"],
-                 "length": float(chamber["Length"]) if pd.notna(chamber["Length"]) else None,
-                 "width": float(chamber["Width"]) if pd.notna(chamber["Width"]) else None,
-                 "geometry": chamber["Geometry"] if "Geometry" in chamber and pd.notna(chamber["Geometry"]) else None,
-                 "route_geometry": route_wkt
-             }
-             complex_obj["locks"][0]["chambers"].append(c_obj)
-             
-        complexes.append(complex_obj)
-        
-    return complexes
+from fis.lock.graph import build_graph_features
 
 @click.command()
 @click.option("--export-dir", default="fis-export", help="Directory containing input parquet files.")
@@ -377,13 +34,23 @@ def main(export_dir):
     try:
         locks, chambers, isrs, fairways, berths, sections = load_data(data_dir)
     except FileNotFoundError as e:
-        logger.error(str(e))
+        logger.exception("Failed to load data")
         sys.exit(1)
 
     # Load RIS Index
     ris_df = None
     try:
-        ris_df = load_ris_index(data_dir / "RisIndexNL.xlsx")
+        if (data_dir / "RisIndexNL.xlsx").exists():
+            ris_path = data_dir / "RisIndexNL.xlsx"
+        else: 
+             # Fallback or check if user meant output/fis-export/RisIndexNL.xlsx?
+             # The user log showed failure to load input/fis-export/RisIndexNL.xlsx
+             # But load_ris_index comes from existing import.
+             ris_path = data_dir / "RisIndexNL.xlsx"
+
+        # Check existing imports for load_ris_index
+        from fis.ris_index import load_ris_index
+        ris_df = load_ris_index(ris_path)
         logger.info(f"Loaded {len(ris_df)} RIS Index entries")
     except Exception as e:
         logger.warning(f"Could not load RIS Index: {e}")
@@ -394,161 +61,36 @@ def main(export_dir):
 
     result = group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections)
     
-    # 1. Standard JSON Output (Full Detail)
+    # Standard JSON Output (Full Detail)
     output_json = output_dir / "lock_schematization.json"
     with open(output_json, "w") as f:
         json.dump(result, f, indent=2)
     logger.info(f"Saved JSON to {output_json}")
 
-    # 2. Geospatial Outputs (GeoJSON / GeoParquet)
-    if result:
-        # Generate flattened features for visualization
-        features = flatten_to_feature_collection(result)
-        gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
-        
-        # Enforce integer type for IDs (nullable)
-        for col in ["fairway_id", "lock_id", "chamber_id", "berth_id"]:
-            if col in gdf.columns:
-                gdf[col] = gdf[col].astype("Int64")
-        
-        # Save GeoJSON
-        output_geojson = output_dir / "lock_schematization.geojson"
-        gdf.to_file(output_geojson, driver="GeoJSON")
-        logger.info(f"Saved GeoJSON to {output_geojson}")
-        
-        # Save GeoParquet
-        output_geoparquet = output_dir / "lock_schematization.geoparquet"
-        gdf.to_parquet(output_geoparquet)
-        logger.info(f"Saved GeoParquet to {output_geoparquet}")
+    # Geospatial Outputs (GeoJSON / GeoParquet)
+    if not result:
+        return
 
-def flatten_to_feature_collection(complexes):
-    """
-    Flatten hierarchical complex objects into a list of GeoJSON features.
+    # Generate flattened features for visualization
+    features = build_graph_features(result)
+    gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
     
-    Features created:
-    - Lock (Point): The main lock complex location.
-    - Chamber (Polygon): Each chamber within the lock.
-    - Berth (Point/Polygon): Each nearby berth.
-    - Fairway Segment (LineString): 'before' and 'after' segments.
-    """
-    features = []
+    # Enforce integer type for IDs (nullable)
+    for col in ["fairway_id", "lock_id", "chamber_id", "berth_id"]:
+        if col in gdf.columns:
+            gdf[col] = gdf[col].astype("Int64")
     
-    for c in complexes:
-        # 1. Lock Feature
-        geom = wkt.loads(c["geometry"]) if c.get("geometry") else None
-        if geom:
-             # Basic properties
-             props = {k: v for k, v in c.items() if k not in ["geometry", "locks", "berths", "geometry_before_wkt", "geometry_after_wkt"]}
-             props["feature_type"] = "lock"
-             features.append({
-                 "type": "Feature",
-                 "geometry": mapping(geom),
-                 "properties": props
-             })
-             
-        # 2. Fairway Segments
-        if c.get("geometry_before_wkt"):
-            features.append({
-                "type": "Feature",
-                "geometry": mapping(wkt.loads(c["geometry_before_wkt"])),
-                "properties": {
-                    "feature_type": "fairway_segment",
-                    "segment_type": "before",
-                    "lock_id": c["id"],
-                    "fairway_id": c.get("fairway_id")
-                }
-            })
-            
-        if c.get("geometry_after_wkt"):
-            features.append({
-                "type": "Feature",
-                "geometry": mapping(wkt.loads(c["geometry_after_wkt"])),
-                "properties": {
-                    "feature_type": "fairway_segment",
-                    "segment_type": "after",
-                    "lock_id": c["id"],
-                    "fairway_id": c.get("fairway_id")
-                }
-            })
+    # Save GeoJSON
+    output_geojson = output_dir / "lock_schematization.geojson"
+    gdf.to_file(output_geojson, driver="GeoJSON")
+    logger.info(f"Saved GeoJSON to {output_geojson}")
+    
+    # Save GeoParquet
+    output_geoparquet = output_dir / "lock_schematization.geoparquet"
+    gdf.to_parquet(output_geoparquet)
+    logger.info(f"Saved GeoParquet to {output_geoparquet}")
 
-        # 3. Intersecting Fairway Sections
-        for section in c.get("sections", []):
-            if section.get("geometry"):
-                try:
-                    s_geom = wkt.loads(section["geometry"])
-                    features.append({
-                        "type": "Feature",
-                        "geometry": mapping(s_geom),
-                        "properties": {
-                            "feature_type": "fairway_section",
-                            "name": section.get("name"),
-                            "lock_id": c["id"],
-                            "section_id": section.get("id"),
-                            "fairway_id": section.get("fairway_id"),
-                            "length": section.get("length"),
-                            "relation": section.get("relation")
-                        }
-                    })
-                except Exception:
-                    pass
 
-        # 3. Chambers
-        # 'locks' is a list of dicts, each having 'chambers' list
-        for l_obj in c.get("locks", []):
-            for chamber in l_obj.get("chambers", []):
-                # Chamber Route Feature
-                if chamber.get("route_geometry"):
-                     features.append({
-                         "type": "Feature",
-                         "geometry": mapping(wkt.loads(chamber["route_geometry"])),
-                         "properties": {
-                             "feature_type": "fairway_segment",
-                             "segment_type": "chamber_route",
-                             "lock_id": c["id"],
-                             "chamber_id": chamber.get("id"),
-                             "fairway_id": c.get("fairway_id")
-                         }
-                     })
-
-                if chamber.get("geometry"):
-                    try:
-                        c_geom = wkt.loads(chamber["geometry"])
-                        features.append({
-                            "type": "Feature",
-                            "geometry": mapping(c_geom),
-                            "properties": {
-                                "feature_type": "chamber",
-                                "name": chamber.get("name"),
-                                "lock_id": c["id"],
-                                "chamber_id": chamber.get("id"),
-                                "length": chamber.get("length"),
-                                "width": chamber.get("width")
-                            }
-                        })
-                    except Exception:
-                        pass
-
-        # 4. Berths
-        for berth in c.get("berths", []):
-             if berth.get("geometry"):
-                 try:
-                     b_geom = wkt.loads(berth["geometry"])
-                     features.append({
-                         "type": "Feature",
-                         "geometry": mapping(b_geom),
-                         "properties": {
-                             "feature_type": "berth",
-                             "name": berth.get("name"),
-                             "lock_id": c["id"],
-                             "berth_id": berth.get("id"),
-                             "dist_m": berth.get("dist_m"),
-                             "relation": berth.get("relation")
-                         }
-                     })
-                 except Exception:
-                     pass
-
-    return features
 
 
 if __name__ == "__main__":
