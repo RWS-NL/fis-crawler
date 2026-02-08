@@ -7,7 +7,7 @@ import click
 
 from .build import build_graph
 from .io import export_graph, load_fis_data
-from .integrate import load_euris_graph, load_border_nodes, find_border_connections, merge_graphs
+from .integrate import load_euris_graph, load_border_nodes, find_geometric_border_connections, merge_graphs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -191,8 +191,7 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
     with open(euris_enriched / "graph.pickle", "rb") as f:
         euris = pickle.load(f)
     
-    border_nodes = load_border_nodes(export_dir)
-    connections = find_border_connections(fis, euris, border_nodes)
+    connections = find_geometric_border_connections(fis, euris)
     merged = merge_graphs(fis, euris, connections)
     
     output_dir = pathlib.Path(output_dir)
@@ -248,34 +247,29 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
         json.dump(summary, f, indent=2)
     
     # Export border connections for inspection
-    euris_locode = {}
-    for node_id, attrs in euris.nodes(data=True):
-        if "locode" in attrs:
-            euris_locode[attrs["locode"]] = node_id
-        if "borderpoint" in attrs and attrs["borderpoint"] and len(attrs["borderpoint"]) > 2:
-            euris_locode[attrs["borderpoint"]] = node_id
+    # Convert list of dicts to GeoDataFrame
+    # Keys: foreign_node, foreign_cc, bridgehead_node, fis_node, distance
     
     border_rows = []
-    for _, row in border_nodes.iterrows():
-        fis_jid = int(row["JunctionId"]) if row["JunctionId"] else None
-        locode = row.get("LocationCode")
-        euris_node = euris_locode.get(locode)
-        fis_in_graph = fis.has_node(fis_jid) if fis_jid else False
+    for c in connections:
+        # Get geometry from bridgehead node
+        bh_node = euris.nodes[c['bridgehead_node']]
+        geom = None
+        if 'geometry' in bh_node:
+           geom = bh_node['geometry']
         
         border_rows.append({
-            "fis_junction_id": fis_jid,
-            "euris_node_id": euris_node if euris_node else "NOT_FOUND",
-            "locode": locode,
-            "name": row.get("Name"),
-            "matched": euris_node is not None and fis_in_graph,
-            "geometry": row.geometry,
+            "fis_junction_id": c['fis_node'],
+            "euris_node_id": c['foreign_node'],
+            "bridgehead": c['bridgehead_node'],
+            "distance": c['distance'],
+            "geometry": geom
         })
     
     if border_rows:
         border_gdf = gpd.GeoDataFrame(border_rows, crs="EPSG:4326")
         border_gdf.to_file(output_dir / "border_connections.geojson", driver="GeoJSON")
-        matched = border_gdf["matched"].sum()
-        logger.info("Exported %d border connections (%d matched)", len(border_gdf), matched)
+        logger.info("Exported %d geometric border connections", len(border_gdf))
     
     logger.info("Merged graph exported to %s", output_dir)
 
