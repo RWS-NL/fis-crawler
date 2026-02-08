@@ -23,7 +23,7 @@ def cli():
 @click.option(
     "--export-dir",
     type=click.Path(exists=True, path_type=pathlib.Path),
-    default="fis-export",
+    default="output/fis-export",
     help="Path to FIS export directory.",
 )
 @click.option(
@@ -45,7 +45,7 @@ def fis(export_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
 @click.option(
     "--euris-pickle",
     type=click.Path(exists=True, path_type=pathlib.Path),
-    default="euris-export/v0.1.0/export-graph-v0.1.0.pickle",
+    default="output/euris-export/v0.1.0/export-graph-v0.1.0.pickle",
     help="Path to EURIS graph pickle.",
 )
 @click.option(
@@ -96,7 +96,7 @@ def enrich_fis(fis_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
 
 @cli.command()
 @click.option("--euris-dir", type=click.Path(exists=True, path_type=pathlib.Path), default="output/euris-graph")
-@click.option("--euris-export", type=click.Path(exists=True, path_type=pathlib.Path), default="euris-export")
+@click.option("--euris-export", type=click.Path(exists=True, path_type=pathlib.Path), default="output/euris-export")
 @click.option("--output-dir", type=click.Path(path_type=pathlib.Path), default="output/euris-enriched")
 def enrich_euris(euris_dir: pathlib.Path, euris_export: pathlib.Path, output_dir: pathlib.Path) -> None:
     """Enrich EURIS graph with SailingSpeed attributes."""
@@ -137,13 +137,16 @@ def enrich_euris(euris_dir: pathlib.Path, euris_export: pathlib.Path, output_dir
 @cli.command()
 @click.option("--fis-enriched", type=click.Path(exists=True, path_type=pathlib.Path), default="output/fis-enriched")
 @click.option("--euris-enriched", type=click.Path(exists=True, path_type=pathlib.Path), default="output/euris-enriched")
-@click.option("--export-dir", type=click.Path(exists=True, path_type=pathlib.Path), default="fis-export")
+@click.option("--export-dir", type=click.Path(exists=True, path_type=pathlib.Path), default="output/fis-export")
 @click.option("--output-dir", type=click.Path(path_type=pathlib.Path), default="output/merged-graph")
 def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
     """Merge FIS and EURIS graphs via border nodes."""
     import pickle
     import json
     import networkx as nx
+    import geopandas as gpd
+    import pandas as pd
+    from shapely import wkt
     
     logger.info("Merging FIS and EURIS graphs")
     
@@ -161,6 +164,34 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
     
     with open(output_dir / "graph.pickle", "wb") as f:
         pickle.dump(merged, f)
+    
+    # Export nodes as geoparquet and geojson
+    node_data = []
+    for node_id, attrs in merged.nodes(data=True):
+        row = {"node_id": node_id, **attrs}
+        if "geometry_wkt" in row:
+            row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
+        node_data.append(row)
+    if node_data:
+        nodes_gdf = gpd.GeoDataFrame(node_data, crs="EPSG:4326")
+        nodes_gdf.to_parquet(output_dir / "nodes.geoparquet")
+        nodes_gdf.to_file(output_dir / "nodes.geojson", driver="GeoJSON")
+        logger.info("Exported %d nodes", len(nodes_gdf))
+    
+    # Export edges as geoparquet and geojson
+    edge_data = []
+    for u, v, attrs in merged.edges(data=True):
+        row = {"source": u, "target": v, **attrs}
+        if "geometry_wkt" in row:
+            row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
+        elif "geometry" in row and isinstance(row["geometry"], str):
+            row["geometry"] = wkt.loads(row["geometry"])
+        edge_data.append(row)
+    if edge_data:
+        edges_gdf = gpd.GeoDataFrame(edge_data, crs="EPSG:4326")
+        edges_gdf.to_parquet(output_dir / "edges.geoparquet")
+        edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
+        logger.info("Exported %d edges", len(edges_gdf))
     
     summary = {
         "num_nodes": merged.number_of_nodes(),

@@ -93,6 +93,6 @@ AUTOTHROTTLE_ENABLED = True
 # Set settings whose default value is deprecated to a future-proof value
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
-FIS_EXPORT_DIR = "fis-export"
+FIS_EXPORT_DIR = "output/fis-export"
 
 VERSION = "0.2.0"

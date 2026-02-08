@@ -35,34 +35,38 @@ Build network graphs from FIS (Dutch) and EURIS (European) fairway data.
 Download data using the scrapy crawlers from the project root:
 
 ```bash
-# FIS (Dutch fairways) → fis-export/
-scrapy crawl dataservice -L INFO
+# FIS (Dutch fairways) → output/fis-export/
+uv run scrapy crawl dataservice -L INFO
 
-# EURIS (European fairways) → euris-export/
-scrapy crawl euris -L INFO
+# EURIS (European fairways) → output/euris-export/
+uv run scrapy crawl euris -L INFO
 ```
 
 ## Directory Structure
 
 ```
-fis-export/              # Raw FIS data (scrapy: dataservice)
-├── section.geoparquet
-├── sectionjunction.geoparquet
-├── commonbordernode.geoparquet
-└── ...
-
-euris-export/            # Raw EURIS data (scrapy: euris)
-├── SailingSpeed_*.geojson
-├── FairwaySection_*.geojson
-└── v0.1.0/
-    └── export-graph-v0.1.0.pickle
-
-output/                  # Pipeline outputs
-├── fis-graph/           # Basic FIS graph
-├── euris-graph/         # Basic EURIS graph
-├── fis-enriched/        # Enriched FIS
-├── euris-enriched/      # Enriched EURIS (+SailingSpeed)
-└── merged-graph/        # Combined FIS+EURIS
+output/                      # All generated data
+├── fis-export/              # Raw FIS data (scrapy: dataservice)
+│   ├── section.geoparquet
+│   ├── sectionjunction.geoparquet
+│   ├── commonbordernode.geoparquet
+│   └── ...
+├── euris-export/            # Raw EURIS data (scrapy: euris)
+│   ├── SailingSpeed_*.geojson
+│   ├── FairwaySection_*.geojson
+│   └── v0.1.0/
+│       └── export-graph-v0.1.0.pickle
+├── fis-graph/               # Basic FIS graph
+├── euris-graph/             # Basic EURIS graph
+├── fis-enriched/            # Enriched FIS
+├── euris-enriched/          # Enriched EURIS (+SailingSpeed)
+└── merged-graph/            # Combined FIS+EURIS
+    ├── graph.pickle
+    ├── nodes.geoparquet
+    ├── nodes.geojson
+    ├── edges.geoparquet
+    ├── edges.geojson
+    └── summary.json
 ```
 
 ## CLI Usage
