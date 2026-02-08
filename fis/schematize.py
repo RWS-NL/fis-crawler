@@ -36,11 +36,12 @@ def load_data(export_dir: pathlib.Path):
     isrs = read_geo_or_parquet("isrs")
     fairways = read_geo_or_parquet("fairway")
     berths = read_geo_or_parquet("berth")
+    sections = read_geo_or_parquet("section")
     
     if locks is None or chambers is None:
         raise FileNotFoundError("Missing essential lock/chamber data.")
 
-    return locks, chambers, isrs, fairways, berths
+    return locks, chambers, isrs, fairways, berths, sections
 
 def split_fairway(fairway_geom, lock_km, fairway_start_km, fairway_end_km):
     """
@@ -198,9 +199,9 @@ def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_a
     return nearby
 
 
-def group_complexes(locks, chambers, isrs, ris_df, fairways, berths):
+def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
     """
-    Group locks into complexes and enrich with ISRS, RIS, Fairway, and Berth data.
+    Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, and Section data.
     """
     complexes = []
     
@@ -215,6 +216,13 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths):
         if "Geometry" in berths.columns and berths["Geometry"].dtype == "object":
              berths["geometry"] = berths["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
         berths_gdf = gpd.GeoDataFrame(berths, geometry="geometry") if "geometry" in berths.columns else berths
+
+    # Convert sections to GDF if needed
+    sections_gdf = None
+    if sections is not None:
+        if "Geometry" in sections.columns and sections["Geometry"].dtype == "object":
+             sections["geometry"] = sections["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
+        sections_gdf = gpd.GeoDataFrame(sections, geometry="geometry") if "geometry" in sections.columns else sections
 
     for idx, lock in locks_gdf.iterrows():
         # Get chambers for this lock (using confirmed ParentId key)
@@ -259,6 +267,40 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths):
              # or we rely on KM/FairwayId in the helper function.
              berths_data = find_nearby_berths(lock, berths_gdf, fairway_data.get("geometry_before_wkt"), fairway_data.get("geometry_after_wkt"))
 
+        # Section Overlap Identification
+        sections_data = []
+        if sections_gdf is not None:
+            # Define complex geometry: Union of lock + chambers
+            # Start with lock geometry
+            complex_geoms = [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
+            
+            # Add chamber geometries
+            if "Geometry" in lock_chambers.columns:
+                 for _, c_row in lock_chambers.iterrows():
+                      if pd.notna(c_row["Geometry"]):
+                           try:
+                                c_geom = wkt.loads(c_row["Geometry"])
+                                complex_geoms.append(c_geom)
+                           except Exception:
+                                pass
+            
+            if complex_geoms:
+                 from shapely.ops import unary_union
+                 complex_union = unary_union([g for g in complex_geoms if g])
+                 if complex_union:
+                      # Find intersecting sections
+                      intersecting = sections_gdf[sections_gdf.intersects(complex_union)]
+                      
+                      for _, s_row in intersecting.iterrows():
+                           sections_data.append({
+                               "id": int(s_row["Id"]),
+                               "name": s_row["Name"],
+                               "fairway_id": int(s_row["FairwayId"]) if pd.notna(s_row.get("FairwayId")) else None,
+                               "length": float(s_row["Length"]) if pd.notna(s_row.get("Length")) else None,
+                               "geometry": s_row.geometry.wkt if hasattr(s_row, "geometry") and s_row.geometry else None,
+                               "relation": "overlap"
+                           })
+
         complex_obj = {
             "id": int(lock["Id"]),
             "name": lock["Name"],
@@ -267,6 +309,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths):
             **ris_info,
             **fairway_data,
             "berths": berths_data,
+            "sections": sections_data,
             "locks": [  
                 {
                      "id": int(lock["Id"]),
@@ -296,7 +339,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths):
 def main(export_dir):
     data_dir = pathlib.Path(export_dir)
     try:
-        locks, chambers, isrs, fairways, berths = load_data(data_dir)
+        locks, chambers, isrs, fairways, berths, sections = load_data(data_dir)
     except FileNotFoundError as e:
         logger.error(str(e))
         sys.exit(1)
@@ -313,7 +356,7 @@ def main(export_dir):
     output_dir = data_dir.parent / "lock-output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    result = group_complexes(locks, chambers, isrs, ris_df, fairways, berths)
+    result = group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections)
     
     # 1. Standard JSON Output (Full Detail)
     output_json = output_dir / "lock_schematization.json"
@@ -391,6 +434,27 @@ def flatten_to_feature_collection(complexes):
                     "fairway_id": c.get("fairway_id")
                 }
             })
+
+        # 3. Intersecting Fairway Sections
+        for section in c.get("sections", []):
+            if section.get("geometry"):
+                try:
+                    s_geom = wkt.loads(section["geometry"])
+                    features.append({
+                        "type": "Feature",
+                        "geometry": mapping(s_geom),
+                        "properties": {
+                            "feature_type": "fairway_section",
+                            "name": section.get("name"),
+                            "lock_id": c["id"],
+                            "section_id": section.get("id"),
+                            "fairway_id": section.get("fairway_id"),
+                            "length": section.get("length"),
+                            "relation": section.get("relation")
+                        }
+                    })
+                except Exception:
+                    pass
 
         # 3. Chambers
         # 'locks' is a list of dicts, each having 'chambers' list
