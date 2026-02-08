@@ -324,6 +324,10 @@ def main(export_dir):
     if result:
         df = pd.DataFrame(result)
         
+        # Enforce integer type for fairway_id (nullable)
+        if "fairway_id" in df.columns:
+            df["fairway_id"] = df["fairway_id"].astype("Int64")
+        
         # Convert WKT geometry back to shapely
         if "geometry" in df.columns:
             df["geometry"] = df["geometry"].apply(lambda x: wkt.loads(x) if x else None)
