@@ -259,6 +259,29 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                  # Delegate complexity to helper function
                  geom_data = process_fairway_geometry(fw_obj, lock)
                  fairway_data.update(geom_data)
+
+        # Chamber Route Generation (Virtual Fairways)
+        # If we have valid split/merge points from the fairway, we can route through chambers
+        chamber_routes = {}
+        if "geometry_before_wkt" in fairway_data and "geometry_after_wkt" in fairway_data:
+             try:
+                 bwkt = fairway_data["geometry_before_wkt"]
+                 awkt = fairway_data["geometry_after_wkt"]
+                 if bwkt and awkt:
+                     # Load geometries
+                     g_before = wkt.loads(bwkt)
+                     g_after = wkt.loads(awkt)
+                     
+                     # Identify connection points
+                     # curve.coords is a list of tuples
+                     split_point = Point(g_before.coords[-1])
+                     merge_point = Point(g_after.coords[0])
+                     
+                     # We will calculate routes when iterating chambers below
+                     chamber_routes["split_point"] = split_point
+                     chamber_routes["merge_point"] = merge_point
+             except Exception as e:
+                 logger.warning(f"Failed to generate chamber route endpoints for lock {lock['Id']}: {e}")
         
         # Berth Identification
         berths_data = []
@@ -321,12 +344,25 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
         
         # Add chambers
         for _, chamber in lock_chambers.iterrows():
+             # Add Chamber Route (Virtual Fairway)
+             route_wkt = None
+             if "split_point" in chamber_routes and "merge_point" in chamber_routes:
+                 try:
+                     if "Geometry" in chamber and pd.notna(chamber["Geometry"]):
+                         ch_geom = wkt.loads(chamber["Geometry"])
+                         centroid = ch_geom.centroid
+                         route = LineString([chamber_routes["split_point"], centroid, chamber_routes["merge_point"]])
+                         route_wkt = route.wkt
+                 except Exception:
+                     pass
+
              c_obj = {
                  "id": int(chamber["Id"]),
                  "name": chamber["Name"],
                  "length": float(chamber["Length"]) if pd.notna(chamber["Length"]) else None,
                  "width": float(chamber["Width"]) if pd.notna(chamber["Width"]) else None,
-                 "geometry": chamber["Geometry"] if "Geometry" in chamber and pd.notna(chamber["Geometry"]) else None
+                 "geometry": chamber["Geometry"] if "Geometry" in chamber and pd.notna(chamber["Geometry"]) else None,
+                 "route_geometry": route_wkt
              }
              complex_obj["locks"][0]["chambers"].append(c_obj)
              
@@ -460,6 +496,20 @@ def flatten_to_feature_collection(complexes):
         # 'locks' is a list of dicts, each having 'chambers' list
         for l_obj in c.get("locks", []):
             for chamber in l_obj.get("chambers", []):
+                # Chamber Route Feature
+                if chamber.get("route_geometry"):
+                     features.append({
+                         "type": "Feature",
+                         "geometry": mapping(wkt.loads(chamber["route_geometry"])),
+                         "properties": {
+                             "feature_type": "fairway_segment",
+                             "segment_type": "chamber_route",
+                             "lock_id": c["id"],
+                             "chamber_id": chamber.get("id"),
+                             "fairway_id": c.get("fairway_id")
+                         }
+                     })
+
                 if chamber.get("geometry"):
                     try:
                         c_geom = wkt.loads(chamber["geometry"])
