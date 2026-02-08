@@ -46,3 +46,33 @@ If you can't run the scrapy executable, you can also run the module `python -m s
 - `pyproject.toml`: Python project configuration.
 - `scrapy.cfg`: Scrapy configuration file.
 - `qgis`: QGIS project and style files for geospatial visualization.
+
+### 3. Lock Graph Schematization
+
+The `fis/schematize.py` script generates a graph representation of lock complexes, exporting to `output/lock-output/lock_schematization.geojson`.
+
+#### Feature Types (`feature_type`)
+- **`lock`**: The lock complex (polygon).
+- **`chamber`**: Individual lock chambers (polygon).
+- **`berth`**: Waiting areas near the lock.
+- **`fairway_segment`**: LineStrings representing the sailing path.
+  - `segment_type="before"`: Upstream fairway segment.
+  - `segment_type="after"`: Downstream fairway segment.
+  - `segment_type="chamber_approach"`: Split node to Chamber Start.
+  - `segment_type="chamber_route"`: Inside the chamber (Start to End).
+  - `segment_type="chamber_exit"`: Chamber End to Merge node.
+- **`node`**: Topological points.
+  - `node_type="lock_split"`: Divergence point from main fairway.
+  - `node_type="lock_merge"`: Convergence point back to main fairway.
+  - `node_type="chamber_start"`: Entrance of the chamber.
+  - `node_type="chamber_end"`: Exit of the chamber.
+
+#### ID and Naming Scheme
+- **Lock**: Uses raw FIS `Id`.
+- **Chamber**: Uses raw FIS `Id`.
+- **Nodes**:
+  - Split: `lock_{lock_id}_split`
+  - Merge: `lock_{lock_id}_merge`
+  - Chamber Start: `chamber_{chamber_id}_start`
+  - Chamber End: `chamber_{chamber_id}_end`
+

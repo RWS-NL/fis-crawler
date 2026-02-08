@@ -29,7 +29,7 @@ class EurisLatestFilesSpider(scrapy.Spider):
         "ITEM_PIPELINES": {
             "fis.pipelines.EurisFilesPipeline": 1,
         },
-        "FILES_STORE": "euris-export",
+        "FILES_STORE": "output/euris-export",
     }
 
 
