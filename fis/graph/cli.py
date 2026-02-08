@@ -247,6 +247,36 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
     with open(output_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
     
+    # Export border connections for inspection
+    euris_locode = {}
+    for node_id, attrs in euris.nodes(data=True):
+        if "locode" in attrs:
+            euris_locode[attrs["locode"]] = node_id
+        if "borderpoint" in attrs and attrs["borderpoint"] and len(attrs["borderpoint"]) > 2:
+            euris_locode[attrs["borderpoint"]] = node_id
+    
+    border_rows = []
+    for _, row in border_nodes.iterrows():
+        fis_jid = int(row["JunctionId"]) if row["JunctionId"] else None
+        locode = row.get("LocationCode")
+        euris_node = euris_locode.get(locode)
+        fis_in_graph = fis.has_node(fis_jid) if fis_jid else False
+        
+        border_rows.append({
+            "fis_junction_id": fis_jid,
+            "euris_node_id": euris_node if euris_node else "NOT_FOUND",
+            "locode": locode,
+            "name": row.get("Name"),
+            "matched": euris_node is not None and fis_in_graph,
+            "geometry": row.geometry,
+        })
+    
+    if border_rows:
+        border_gdf = gpd.GeoDataFrame(border_rows, crs="EPSG:4326")
+        border_gdf.to_file(output_dir / "border_connections.geojson", driver="GeoJSON")
+        matched = border_gdf["matched"].sum()
+        logger.info("Exported %d border connections (%d matched)", len(border_gdf), matched)
+    
     logger.info("Merged graph exported to %s", output_dir)
 
 
