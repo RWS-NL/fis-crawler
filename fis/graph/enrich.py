@@ -19,90 +19,228 @@ logger = logging.getLogger(__name__)
 # FIS Enrichment
 # =============================================================================
 
-def load_fis_enrichment_data(
-    export_dir: pathlib.Path,
-) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, gpd.GeoDataFrame]:
-    """Load FIS enrichment data: sections, maximumdimensions, navigability.
+def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataFrame]:
+    """Load all FIS enrichment datasets.
     
     Args:
         export_dir: Path to fis-export directory.
         
     Returns:
-        Tuple of (sections, maxdim, navigability) GeoDataFrames.
+        Dict of dataset name to GeoDataFrame.
     """
-    sections = gpd.read_parquet(export_dir / "section.geoparquet")
-    maxdim = gpd.read_parquet(export_dir / "maximumdimensions.geoparquet")
-    navigability = gpd.read_parquet(export_dir / "navigability.geoparquet")
+    datasets = {}
+    required = ['section', 'maximumdimensions', 'navigability']
+    optional = ['navigationspeed', 'fairwaydepth', 'fairwaytype', 'tidalarea']
     
-    logger.info(
-        "Loaded FIS data: %d sections, %d maximumdimensions, %d navigability",
-        len(sections), len(maxdim), len(navigability)
-    )
+    for name in required + optional:
+        path = export_dir / f"{name}.geoparquet"
+        if path.exists():
+            datasets[name] = gpd.read_parquet(path)
+            logger.info("Loaded %s: %d records", name, len(datasets[name]))
+        elif name in required:
+            raise FileNotFoundError(f"Required file not found: {path}")
+        else:
+            logger.warning("Optional file not found: %s", path)
     
-    return sections, maxdim, navigability
+    return datasets
 
 
-def build_section_enrichment(
+def match_by_geometry(
     sections: gpd.GeoDataFrame,
-    maxdim: gpd.GeoDataFrame,
-    navigability: gpd.GeoDataFrame,
+    data: gpd.GeoDataFrame,
+    columns: list[str],
+    prefix: str,
 ) -> pd.DataFrame:
-    """Build enrichment lookup by joining sections with attributes.
-    
-    Uses geometry-based matching (since FIS uses same geometries for related data).
+    """Match data to sections by exact geometry WKT.
     
     Args:
-        sections: Sections GeoDataFrame.
-        maxdim: Maximum dimensions GeoDataFrame.
-        navigability: Navigability (CEMT classification) GeoDataFrame.
+        sections: Sections GeoDataFrame with Id column.
+        data: Data GeoDataFrame to match.
+        columns: Columns to extract from data.
+        prefix: Prefix to add to column names.
         
     Returns:
-        DataFrame indexed by section Id with enrichment columns.
+        DataFrame indexed by section Id with prefixed columns.
     """
-    # Use geometry WKT as join key (FIS uses exact matching geometries)
+    if data is None or data.empty:
+        return pd.DataFrame(index=sections['Id'])
+    
+    available = [c for c in columns if c in data.columns]
+    if not available:
+        return pd.DataFrame(index=sections['Id'])
+    
+    # Use geometry WKT as join key
     sections = sections.copy()
     sections['_geom_key'] = sections.geometry.apply(lambda g: g.wkt)
     
-    # Prepare maximumdimensions columns
-    dim_cols = [
+    data = data.copy()
+    data['_geom_key'] = data.geometry.apply(lambda g: g.wkt)
+    
+    # Select and deduplicate
+    data_select = data[['_geom_key'] + available].drop_duplicates('_geom_key')
+    data_select = data_select.rename(columns={c: f'{prefix}{c}' for c in available})
+    
+    # Join
+    result = sections[['Id', '_geom_key']].merge(
+        data_select, on='_geom_key', how='left'
+    ).drop(columns=['_geom_key']).set_index('Id')
+    
+    matched = result.notna().any(axis=1).sum()
+    logger.info("Matched %d sections by geometry for %s", matched, prefix)
+    
+    return result
+
+
+def match_by_route_km(
+    sections: gpd.GeoDataFrame,
+    data: gpd.GeoDataFrame,
+    columns: list[str],
+    prefix: str,
+) -> pd.DataFrame:
+    """Match data to sections by RouteId and overlapping km ranges.
+    
+    Uses range overlap: section [km_begin, km_end] overlaps data [km_begin, km_end]
+    when they share the same RouteId.
+    
+    Args:
+        sections: Sections with RouteId, RouteKmBegin, RouteKmEnd.
+        data: Data with same columns.
+        columns: Columns to extract.
+        prefix: Prefix for output columns.
+        
+    Returns:
+        DataFrame indexed by section Id with prefixed columns.
+    """
+    if data is None or data.empty:
+        return pd.DataFrame(index=sections['Id'])
+    
+    # Check required columns
+    required = ['RouteId', 'RouteKmBegin', 'RouteKmEnd']
+    for col in required:
+        if col not in sections.columns or col not in data.columns:
+            logger.warning("Missing %s column for route/km matching", col)
+            return pd.DataFrame(index=sections['Id'])
+    
+    available = [c for c in columns if c in data.columns]
+    if not available:
+        return pd.DataFrame(index=sections['Id'])
+    
+    # Build section index
+    sections = sections.copy()
+    sections = sections.dropna(subset=['RouteId', 'RouteKmBegin', 'RouteKmEnd'])
+    
+    data = data.copy()
+    data = data.dropna(subset=['RouteId', 'RouteKmBegin', 'RouteKmEnd'])
+    
+    # Group data by RouteId for efficient lookup
+    data_by_route = data.groupby('RouteId')
+    
+    results = []
+    for _, section in sections.iterrows():
+        section_id = section['Id']
+        route_id = section['RouteId']
+        s_begin = min(section['RouteKmBegin'], section['RouteKmEnd'])
+        s_end = max(section['RouteKmBegin'], section['RouteKmEnd'])
+        
+        if route_id not in data_by_route.groups:
+            continue
+        
+        route_data = data_by_route.get_group(route_id)
+        
+        # Find overlapping records
+        for _, row in route_data.iterrows():
+            d_begin = min(row['RouteKmBegin'], row['RouteKmEnd'])
+            d_end = max(row['RouteKmBegin'], row['RouteKmEnd'])
+            
+            # Overlap check: ranges overlap if not (s_end < d_begin or d_end < s_begin)
+            if not (s_end < d_begin or d_end < s_begin):
+                result_row = {'Id': section_id}
+                for col in available:
+                    result_row[f'{prefix}{col}'] = row[col]
+                results.append(result_row)
+                break  # Take first match
+    
+    if not results:
+        return pd.DataFrame(index=sections['Id'])
+    
+    result_df = pd.DataFrame(results).drop_duplicates('Id').set_index('Id')
+    
+    # Reindex to include all section IDs
+    all_ids = sections['Id'].unique()
+    result_df = result_df.reindex(all_ids)
+    
+    matched = result_df.notna().any(axis=1).sum()
+    logger.info("Matched %d sections by route/km for %s", matched, prefix)
+    
+    return result_df
+
+
+def build_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.DataFrame:
+    """Build enrichment lookup by joining all datasets to sections.
+    
+    Args:
+        datasets: Dict of dataset name to GeoDataFrame.
+        
+    Returns:
+        DataFrame indexed by section Id with all enrichment columns.
+    """
+    sections = datasets['section']
+    
+    # Geometry-based matching
+    maxdim_cols = [
         'GeneralDepth', 'GeneralLength', 'GeneralWidth', 'GeneralHeight',
         'SeaFairingDepth', 'SeaFairingLength', 'SeaFairingWidth', 'SeaFairingHeight',
         'PushedDepth', 'PushedLength', 'PushedWidth',
         'CoupledDepth', 'CoupledLength', 'CoupledWidth',
     ]
-    dim_available = [c for c in dim_cols if c in maxdim.columns]
+    maxdim_df = match_by_geometry(
+        sections, datasets.get('maximumdimensions'), maxdim_cols, 'dim_'
+    )
     
-    maxdim = maxdim.copy()
-    maxdim['_geom_key'] = maxdim.geometry.apply(lambda g: g.wkt)
-    maxdim_select = maxdim[['_geom_key'] + dim_available].drop_duplicates('_geom_key')
-    # Prefix columns
-    maxdim_select = maxdim_select.rename(columns={c: f'dim_{c}' for c in dim_available})
-    
-    # Prepare navigability columns  
     nav_cols = ['Classification', 'Code', 'Description']
-    nav_available = [c for c in nav_cols if c in navigability.columns]
+    nav_df = match_by_geometry(
+        sections, datasets.get('navigability'), nav_cols, 'nav_'
+    )
+    # Add cemt_class alias
+    if 'nav_Code' in nav_df.columns:
+        nav_df['cemt_class'] = nav_df['nav_Code']
     
-    navigability = navigability.copy()
-    navigability['_geom_key'] = navigability.geometry.apply(lambda g: g.wkt)
-    nav_select = navigability[['_geom_key'] + nav_available].drop_duplicates('_geom_key')
-    # Prefix and add cemt_class alias
-    nav_select = nav_select.rename(columns={c: f'nav_{c}' for c in nav_available})
-    if 'nav_Code' in nav_select.columns:
-        nav_select['cemt_class'] = nav_select['nav_Code']
+    # Route/km-based matching
+    speed_cols = ['Speed', 'MaxSpeedUp', 'MaxSpeedDown', 'CalibratedSpeedUp', 'CalibratedSpeedDown']
+    speed_df = match_by_route_km(
+        sections, datasets.get('navigationspeed'), speed_cols, 'speed_'
+    )
     
-    # Join enrichment to sections
-    enriched = sections[['Id', '_geom_key']].merge(
-        maxdim_select, on='_geom_key', how='left'
-    ).merge(
-        nav_select, on='_geom_key', how='left'
-    ).drop(columns=['_geom_key'])
+    depth_cols = ['MinimalDepthLowerLimit', 'MinimalDepthUpperLimit', 'ReferenceLevel']
+    depth_df = match_by_route_km(
+        sections, datasets.get('fairwaydepth'), depth_cols, 'depth_'
+    )
     
-    # Report coverage
-    dim_matched = enriched[[c for c in enriched.columns if c.startswith('dim_')]].notna().any(axis=1).sum()
-    nav_matched = enriched['cemt_class'].notna().sum() if 'cemt_class' in enriched.columns else 0
-    logger.info("Matched %d sections with dimensions, %d with navigability", dim_matched, nav_matched)
+    type_cols = ['CharacterTypeCode']
+    type_df = match_by_route_km(
+        sections, datasets.get('fairwaytype'), type_cols, 'type_'
+    )
     
-    return enriched.set_index('Id')
+    # Tidal area - just mark as boolean
+    tidal_df = match_by_route_km(
+        sections, datasets.get('tidalarea'), ['Name'], 'tidal_'
+    )
+    if 'tidal_Name' in tidal_df.columns:
+        tidal_df['is_tidal'] = tidal_df['tidal_Name'].notna()
+        tidal_df = tidal_df.drop(columns=['tidal_Name'])
+    
+    # Combine all enrichment
+    enrichment = pd.concat([maxdim_df, nav_df, speed_df, depth_df, type_df, tidal_df], axis=1)
+    
+    # Summary stats
+    for prefix, desc in [('dim_', 'dimensions'), ('cemt_', 'CEMT'), ('speed_', 'speed'), 
+                         ('depth_', 'depth'), ('type_', 'type'), ('is_tidal', 'tidal')]:
+        cols = [c for c in enrichment.columns if c.startswith(prefix)]
+        if cols:
+            count = enrichment[cols].notna().any(axis=1).sum()
+            logger.info("Total sections with %s: %d", desc, count)
+    
+    return enrichment
 
 
 def enrich_fis_graph(
@@ -112,9 +250,6 @@ def enrich_fis_graph(
 ) -> nx.Graph:
     """Add enrichment attributes to FIS graph edges.
     
-    Matches graph edges (which use junction IDs) to sections (which have
-    StartJunctionId/EndJunctionId), then applies the enrichment attributes.
-    
     Args:
         graph: FIS networkx graph (nodes are junction IDs).
         sections: Sections GeoDataFrame with junction ID columns.
@@ -123,7 +258,7 @@ def enrich_fis_graph(
     Returns:
         Graph with enriched edge attributes.
     """
-    # Build edge → section mapping (using both directions for undirected)
+    # Build edge → section mapping
     section_lookup = (
         sections[['Id', 'StartJunctionId', 'EndJunctionId']]
         .dropna(subset=['StartJunctionId', 'EndJunctionId'])
@@ -140,14 +275,15 @@ def enrich_fis_graph(
     
     logger.info("Built edge-to-section mapping with %d entries", len(edge_to_section) // 2)
     
-    # Apply enrichment to edges
+    # Apply enrichment
     enriched_count = 0
     for u, v, data in graph.edges(data=True):
         section_id = edge_to_section.get((u, v))
         if section_id is not None and section_id in enrichment.index:
             attrs = enrichment.loc[section_id].dropna().to_dict()
             data.update(attrs)
-            enriched_count += 1
+            if attrs:
+                enriched_count += 1
     
     logger.info("Enriched %d / %d edges", enriched_count, graph.number_of_edges())
     return graph
@@ -158,14 +294,7 @@ def enrich_fis_graph(
 # =============================================================================
 
 def load_sailing_speed(euris_export_dir: pathlib.Path) -> gpd.GeoDataFrame:
-    """Load and combine all SailingSpeed files from EURIS export.
-    
-    Args:
-        euris_export_dir: Path to euris-export directory.
-        
-    Returns:
-        Combined GeoDataFrame with sailing speed data.
-    """
+    """Load and combine all SailingSpeed files from EURIS export."""
     pattern = str(euris_export_dir / "SailingSpeed_*.geojson")
     files = glob.glob(pattern)
     
@@ -189,20 +318,11 @@ def enrich_euris_with_speed(
     graph: nx.Graph,
     sailing_speed: gpd.GeoDataFrame,
 ) -> nx.Graph:
-    """Add sailing speed attributes to EURIS graph edges via sectionref.
-    
-    Args:
-        graph: EURIS networkx graph.
-        sailing_speed: SailingSpeed GeoDataFrame with sectionref column.
-        
-    Returns:
-        Enriched graph with maxspeed on edges.
-    """
+    """Add sailing speed attributes to EURIS graph edges via sectionref."""
     if sailing_speed.empty or 'sectionref' not in sailing_speed.columns:
         logger.warning("No sailing speed data or missing sectionref column")
         return graph
     
-    # Build lookup indexed by sectionref
     speed_cols = ['maxspeed', 'calspeed', 'direction', 'shipcategory']
     available_cols = [c for c in speed_cols if c in sailing_speed.columns]
     
@@ -216,7 +336,6 @@ def enrich_euris_with_speed(
     
     logger.info("Built speed lookup with %d sectionref entries", len(speed_lookup))
     
-    # Match edges by sectionref attribute
     enriched_count = 0
     for u, v, data in graph.edges(data=True):
         ref = data.get('sectionref')

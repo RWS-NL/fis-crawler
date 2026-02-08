@@ -89,9 +89,9 @@ def enrich_fis(fis_graph: pathlib.Path, fis_export: pathlib.Path, output_dir: pa
     logger.info("Loaded graph with %d nodes, %d edges", graph.number_of_nodes(), graph.number_of_edges())
     
     # Load enrichment data and apply
-    sections, maxdim, navigability = load_fis_enrichment_data(fis_export)
-    enrichment = build_section_enrichment(sections, maxdim, navigability)
-    graph = enrich_fis_graph(graph, sections, enrichment)
+    datasets = load_fis_enrichment_data(fis_export)
+    enrichment = build_section_enrichment(datasets)
+    graph = enrich_fis_graph(graph, datasets['section'], enrichment)
     
     # Export
     output_dir = pathlib.Path(output_dir)
