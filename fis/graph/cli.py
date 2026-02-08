@@ -69,17 +69,65 @@ def euris(euris_export: pathlib.Path, output_dir: pathlib.Path) -> None:
 
 
 @cli.command()
-@click.option("--fis-dir", type=click.Path(exists=True, path_type=pathlib.Path), default="output/fis-graph")
+@click.option("--fis-graph", type=click.Path(exists=True, path_type=pathlib.Path), default="output/fis-graph")
+@click.option("--fis-export", type=click.Path(exists=True, path_type=pathlib.Path), default="output/fis-export")
 @click.option("--output-dir", type=click.Path(path_type=pathlib.Path), default="output/fis-enriched")
-def enrich_fis(fis_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
-    """Enrich FIS graph with additional attributes (placeholder)."""
-    import shutil
-    logger.info("Enriching FIS graph (placeholder - copying as-is)")
+def enrich_fis(fis_graph: pathlib.Path, fis_export: pathlib.Path, output_dir: pathlib.Path) -> None:
+    """Enrich FIS graph with maximumdimensions and navigability (CEMT class)."""
+    import pickle
+    import json
+    import networkx as nx
+    import geopandas as gpd
+    from shapely import wkt
+    from .enrich import load_fis_enrichment_data, build_section_enrichment, enrich_fis_graph
+    
+    logger.info("Enriching FIS graph")
+    
+    # Load base graph
+    with open(fis_graph / "graph.pickle", "rb") as f:
+        graph = pickle.load(f)
+    logger.info("Loaded graph with %d nodes, %d edges", graph.number_of_nodes(), graph.number_of_edges())
+    
+    # Load enrichment data and apply
+    sections, maxdim, navigability = load_fis_enrichment_data(fis_export)
+    enrichment = build_section_enrichment(sections, maxdim, navigability)
+    graph = enrich_fis_graph(graph, sections, enrichment)
+    
+    # Export
     output_dir = pathlib.Path(output_dir)
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    shutil.copytree(fis_dir, output_dir)
-    logger.info("FIS enriched graph at %s (TODO: add attributes, split at structures)", output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_dir / "graph.pickle", "wb") as f:
+        pickle.dump(graph, f)
+    
+    # Export edges with enrichment as GeoJSON
+    edge_data = []
+    for u, v, attrs in graph.edges(data=True):
+        row = {"source": u, "target": v, **attrs}
+        if "geometry" in row and hasattr(row["geometry"], "wkt"):
+            pass  # Keep geometry
+        elif "geometry_wkt" in row:
+            row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
+        edge_data.append(row)
+    
+    if edge_data:
+        edges_gdf = gpd.GeoDataFrame(edge_data, crs="EPSG:4326")
+        edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
+        edges_gdf.to_parquet(output_dir / "edges.geoparquet")
+        logger.info("Exported %d enriched edges", len(edges_gdf))
+    
+    # Summary with enrichment stats
+    enriched_edges = sum(1 for _, _, d in graph.edges(data=True) if 'cemt_class' in d)
+    summary = {
+        "num_nodes": graph.number_of_nodes(),
+        "num_edges": graph.number_of_edges(),
+        "num_connected_components": nx.number_connected_components(graph),
+        "edges_with_cemt": enriched_edges,
+    }
+    with open(output_dir / "summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+    
+    logger.info("FIS enriched graph exported to %s", output_dir)
 
 
 @cli.command()
