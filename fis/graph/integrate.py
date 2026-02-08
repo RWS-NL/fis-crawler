@@ -124,20 +124,20 @@ def merge_graphs(
     # Add FIS nodes with prefix
     logger.info("Adding FIS nodes to combined graph")
     for node_id, attrs in fis_graph.nodes(data=True):
-        combined.add_node(f"FIS_{node_id}", source="FIS", **attrs)
+        combined.add_node(f"FIS_{node_id}", data_source="FIS", **attrs)
 
     # Add FIS edges
     for u, v, attrs in fis_graph.edges(data=True):
-        combined.add_edge(f"FIS_{u}", f"FIS_{v}", source="FIS", **attrs)
+        combined.add_edge(f"FIS_{u}", f"FIS_{v}", data_source="FIS", **attrs)
 
     # Add EURIS nodes (already have country prefix like NL_J3524)
     logger.info("Adding EURIS nodes to combined graph")
     for node_id, attrs in euris_graph.nodes(data=True):
-        combined.add_node(f"EURIS_{node_id}", source="EURIS", **attrs)
+        combined.add_node(f"EURIS_{node_id}", data_source="EURIS", **attrs)
 
     # Add EURIS edges
     for u, v, attrs in euris_graph.edges(data=True):
-        combined.add_edge(f"EURIS_{u}", f"EURIS_{v}", source="EURIS", **attrs)
+        combined.add_edge(f"EURIS_{u}", f"EURIS_{v}", data_source="EURIS", **attrs)
 
     # Add border connections
     logger.info("Adding %d border connections", len(connections))
@@ -145,7 +145,7 @@ def merge_graphs(
         combined.add_edge(
             f"FIS_{fis_node}",
             f"EURIS_{euris_node}",
-            source="BORDER",
+            data_source="BORDER",
             location_code=locode,
         )
 
