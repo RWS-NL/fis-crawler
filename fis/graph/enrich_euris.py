@@ -14,7 +14,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-def load_sailing_speed(euris_export_dir: pathlib.Path) -> gpd.GeoDataFrame:
+def load_euris_sailing_speed(euris_export_dir: pathlib.Path) -> gpd.GeoDataFrame:
     """Load and combine all SailingSpeed files from EURIS export.
     
     Args:

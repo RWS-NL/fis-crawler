@@ -9,7 +9,7 @@ from shapely.geometry import LineString, Point
 from fis.graph.enrich import (
     match_by_geometry,
     match_by_route_km,
-    build_section_enrichment,
+    build_fis_section_enrichment,
     enrich_fis_graph,
 )
 
@@ -180,7 +180,7 @@ class TestMatchByRouteKm:
 
 
 # =============================================================================
-# Tests for build_section_enrichment
+# Tests for build_fis_section_enrichment
 # =============================================================================
 
 class TestBuildSectionEnrichment:
@@ -196,7 +196,7 @@ class TestBuildSectionEnrichment:
             'navigationspeed': sample_speed,
         }
         
-        result = build_section_enrichment(datasets)
+        result = build_fis_section_enrichment(datasets)
         
         # Check dimensions
         assert 'dim_GeneralDepth' in result.columns

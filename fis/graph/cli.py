@@ -79,7 +79,7 @@ def enrich_fis(fis_graph: pathlib.Path, fis_export: pathlib.Path, output_dir: pa
     import networkx as nx
     import geopandas as gpd
     from shapely import wkt
-    from .enrich import load_fis_enrichment_data, build_section_enrichment, enrich_fis_graph
+    from .enrich import load_fis_enrichment_data, build_fis_section_enrichment, enrich_fis_graph
     
     logger.info("Enriching FIS graph")
     
@@ -90,7 +90,7 @@ def enrich_fis(fis_graph: pathlib.Path, fis_export: pathlib.Path, output_dir: pa
     
     # Load enrichment data and apply
     datasets = load_fis_enrichment_data(fis_export)
-    enrichment = build_section_enrichment(datasets)
+    enrichment = build_fis_section_enrichment(datasets)
     graph = enrich_fis_graph(graph, datasets['section'], enrichment)
     
     # Export
@@ -139,7 +139,7 @@ def enrich_euris(euris_dir: pathlib.Path, euris_export: pathlib.Path, output_dir
     import pickle
     import json
     import networkx as nx
-    from .enrich import load_sailing_speed, enrich_euris_with_speed
+    from .enrich import load_euris_sailing_speed, enrich_euris_with_speed
     
     logger.info("Enriching EURIS graph with sailing speed")
     
@@ -148,7 +148,7 @@ def enrich_euris(euris_dir: pathlib.Path, euris_export: pathlib.Path, output_dir
         graph = pickle.load(f)
     
     # Load and apply sailing speed
-    sailing_speed = load_sailing_speed(euris_export)
+    sailing_speed = load_euris_sailing_speed(euris_export)
     graph = enrich_euris_with_speed(graph, sailing_speed)
     
     # Export enriched graph

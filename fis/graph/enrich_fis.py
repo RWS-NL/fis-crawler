@@ -170,7 +170,7 @@ def match_by_route_km(
     return result_df
 
 
-def build_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.DataFrame:
+def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.DataFrame:
     """Build enrichment lookup by joining all datasets to sections.
     
     Args:
