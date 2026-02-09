@@ -1,0 +1,114 @@
+# FIS-EURIS Graph Schema Configuration
+# 
+# This file defines:
+# 1. Attribute mappings between FIS and EURIS schemas
+# 2. Manual border node corrections
+# 
+# EURIS naming conventions are used as the canonical schema.
+
+[meta]
+version = "1.0"
+description = "Schema mapping for FIS-EURIS merged waterway network"
+
+# =============================================================================
+# Attribute Mappings
+# =============================================================================
+# Format: source_column = "canonical_column"
+# EURIS names are canonical; FIS names are mapped to EURIS equivalents
+
+[attributes.edges]
+# Speed attributes (EURIS canonical)
+# FIS uses uppercase CamelCase, EURIS uses lowercase
+"speed_Speed" = "maxspeed"
+"speed_MaxSpeedUp" = "maxspeed_up"
+"speed_MaxSpeedDown" = "maxspeed_down"
+"speed_CalibratedSpeedUp" = "calspeed_up"
+"speed_CalibratedSpeedDown" = "calspeed_down"
+# EURIS already uses these names:
+# "speed_maxspeed", "speed_calspeed"
+
+# Depth attributes (FIS → EURIS style)
+"depth_MinimalDepthLowerLimit" = "mindepth_lower"
+"depth_MinimalDepthUpperLimit" = "mindepth_upper"
+"depth_ReferenceLevel" = "depth_reference"
+
+# Dimension attributes (FIS specific, keep with prefix)
+"dim_GeneralDepth" = "dim_depth"
+"dim_GeneralWidth" = "dim_width"
+"dim_GeneralLength" = "dim_length"
+"dim_GeneralHeight" = "dim_height"
+"dim_SeaFairingDepth" = "dim_seafaring_depth"
+"dim_SeaFairingWidth" = "dim_seafaring_width"
+"dim_SeaFairingLength" = "dim_seafaring_length"
+"dim_SeaFairingHeight" = "dim_seafaring_height"
+"dim_PushedDepth" = "dim_pushed_depth"
+"dim_PushedLength" = "dim_pushed_length"
+"dim_PushedWidth" = "dim_pushed_width"
+"dim_CoupledDepth" = "dim_coupled_depth"
+"dim_CoupledLength" = "dim_coupled_length"
+"dim_CoupledWidth" = "dim_coupled_width"
+
+# Navigability/classification
+"cemt_class" = "cemt_class"  # Already canonical
+"nav_Classification" = "nav_classification"
+"nav_Code" = "nav_code"
+"nav_Description" = "nav_description"
+
+# Fairway type
+"type_CharacterTypeCode" = "fairway_type"
+
+# Tidal
+"is_tidal" = "is_tidal"  # Already canonical
+
+[attributes.nodes]
+# Node attributes are mostly preserved as-is
+# FIS uses uppercase style, EURIS uses lowercase
+"Name" = "name"
+"VinCode" = "vincode"
+"VoyagePlanningPoint" = "vplnpoint"
+"BorderPoint" = "borderpoint"
+"ForeignCode" = "foreigncode"
+
+# =============================================================================
+# Border Node Corrections
+# =============================================================================
+# Use this section to manually fix/override border node connections
+# Format: [[border_nodes.fixes]]
+# 
+# Actions:
+#   - "add": Add a new border connection
+#   - "remove": Remove an incorrect connection
+#   - "replace": Replace FIS node with different EURIS node
+
+# Example fixes (uncomment and modify as needed):
+
+# [[border_nodes.fixes]]
+# action = "add"
+# fis_junction_id = 8864523
+# euris_node_id = "AT_J0001"
+# comment = "Missing connection at Austrian border"
+
+# [[border_nodes.fixes]]
+# action = "remove"  
+# fis_junction_id = 8866107
+# euris_node_id = "BE_J0005"
+# comment = "Incorrect match - different waterways"
+
+# [[border_nodes.fixes]]
+# action = "replace"
+# fis_junction_id = 8867890
+# euris_node_id_old = "DE_J0003"
+# euris_node_id_new = "DE_J0004"
+# comment = "Correct match is nearby node"
+
+# =============================================================================
+# Source Metadata
+# =============================================================================
+# Preserve source information for traceability
+
+[source_tracking]
+# Add source prefix to distinguish origin
+add_source_prefix = false  # If true, adds "fis_" or "euris_" prefix to all attrs
+
+# Columns to track source
+source_column = "data_source"  # Values: "fis", "euris", "merged"
