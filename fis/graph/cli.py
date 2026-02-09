@@ -378,7 +378,7 @@ def validate(merged_graph: pathlib.Path, schema: pathlib.Path, output_file: path
     report = validator.generate_markdown_report()
     
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding='utf-8') as f:
         f.write(report)
         
     logger.info("Validation report written to %s", output_file)
