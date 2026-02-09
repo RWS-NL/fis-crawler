@@ -58,7 +58,21 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "type_CharacterTypeCode" = "fairway_type"
 
 # Tidal
-"is_tidal" = "is_tidal"  # Already canonical
+# Routing attributes
+"Id" = "fis_id"
+"GeoType" = "geo_type"
+"GeoGeneration" = "geo_generation"
+"Name" = "name"
+"VinCode" = "vincode"
+"Direction" = "direction"
+"RouteKmEnd" = "route_km_end"
+"RouteKmBegin" = "route_km_begin"
+"Length" = "length"
+"TypeId" = "type_id"
+"FairwayId" = "fairway_id"
+"RouteId" = "route_id"
+"ForeignCode" = "foreign_code"
+"Geometry" = "geometry"
 
 [attributes.nodes]
 # Node attributes are mostly preserved as-is
@@ -68,6 +82,9 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "VoyagePlanningPoint" = "vplnpoint"
 "BorderPoint" = "borderpoint"
 "ForeignCode" = "foreigncode"
+"Id" = "fis_id"
+"GeoType" = "geo_type"
+"GeoGeneration" = "geo_generation"
 
 # =============================================================================
 # Border Node Corrections
