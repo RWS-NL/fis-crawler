@@ -157,13 +157,22 @@ def find_geometric_border_connections(
     for foreign, bridgehead, cc in border_edges:
         if bridgehead in matches:
             m = matches[bridgehead]
+            
+            # Extract original edge attributes from EURIS
+            edge_attrs = {}
+            if euris_graph.has_edge(foreign, bridgehead):
+                edge_attrs = euris_graph.edges[foreign, bridgehead].copy()
+            elif euris_graph.has_edge(bridgehead, foreign):
+                edge_attrs = euris_graph.edges[bridgehead, foreign].copy()
+            
             connections.append({
                 'foreign_node': foreign,
                 'foreign_cc': cc,
                 'bridgehead_node': bridgehead,
                 'fis_node': m['fis_node'],
                 'distance': m['distance'],
-                'type': 'geometric'
+                'type': 'geometric',
+                'edge_attrs': edge_attrs  # Pass original attributes
             })
             
     logger.info("Established %d geometric border connections", len(connections))
@@ -188,13 +197,32 @@ def merge_graphs(
     # Create combined graph with prefixed node IDs to avoid collisions
     combined = nx.Graph()
 
-    # Add FIS nodes with prefix
+    # Add FIS nodes
+    # Lobith correction: Remove foreign nodes extending into Germany
+    # These are better represented by EURIS
+    prune_node_ids = {22637860, 22638030} 
+    
     logger.info("Adding FIS nodes to combined graph")
     for node_id, attrs in fis_graph.nodes(data=True):
+        if node_id in prune_node_ids:
+             logger.info("Pruning FIS node %s - Lobith correction", node_id)
+             continue
         combined.add_node(f"FIS_{node_id}", data_source="FIS", **attrs)
 
     # Add FIS edges
+    # Lobith correction: Remove edge 22638449 (redundant border crossing)
+    # Also remove any edges connected to pruned nodes
+    prune_edge_ids = {22638449}
+    
     for u, v, attrs in fis_graph.edges(data=True):
+        if attrs.get('Id') in prune_edge_ids:
+            logger.info("Pruning FIS edge %s (Id: %s) - Lobith correction", (u, v), attrs.get('Id'))
+            continue
+        
+        # Skip edges connected to pruned nodes
+        if u in prune_node_ids or v in prune_node_ids:
+             continue
+             
         combined.add_edge(f"FIS_{u}", f"FIS_{v}", data_source="FIS", **attrs)
 
     # Add EURIS nodes (already have country prefix like NL_J3524)
@@ -225,13 +253,18 @@ def merge_graphs(
         u = f"FIS_{conn['fis_node']}"
         v = f"EURIS_{conn['foreign_node']}"
         
-        combined.add_edge(
-            u, v,
-            data_source="BORDER",
-            bridgehead=conn['bridgehead_node'],
-            distance_gap=conn['distance'],
-            connection_type=conn['type']
-        )
+        # Base attributes for border connection
+        edge_attrs = conn.get('edge_attrs', {}).copy()
+        
+        # Override/Set metadata
+        edge_attrs.update({
+            "data_source": "BORDER",
+            "bridgehead": conn['bridgehead_node'],
+            "distance_gap": conn['distance'],
+            "connection_type": conn['type']
+        })
+        
+        combined.add_edge(u, v, **edge_attrs)
 
     logger.info(
         "Combined graph: %d nodes, %d edges, %d components",

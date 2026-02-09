@@ -139,6 +139,7 @@ def enrich_euris(euris_dir: pathlib.Path, euris_export: pathlib.Path, output_dir
     import pickle
     import json
     import networkx as nx
+    import geopandas as gpd
     from .enrich import load_euris_sailing_speed, enrich_euris_with_speed
     
     logger.info("Enriching EURIS graph with sailing speed")
@@ -168,6 +169,48 @@ def enrich_euris(euris_dir: pathlib.Path, euris_export: pathlib.Path, output_dir
         json.dump(summary, f, indent=2)
     
     logger.info("EURIS enriched graph at %s", output_dir)
+    
+    # Export nodes as geoparquet and geojson
+    node_data = []
+    for node_id, attrs in graph.nodes(data=True):
+        row = {"node_id": node_id}
+        for k, v in attrs.items():
+            if isinstance(v, (list, dict)):
+                continue
+            if hasattr(v, 'wkt'):  # Geometry object
+                if k == 'geometry':
+                    row['geometry'] = v
+            elif k == 'geometry_wkt':
+                from shapely import wkt
+                row['geometry'] = wkt.loads(v)
+            else:
+                row[k] = v
+        node_data.append(row)
+    
+    if node_data:
+        nodes_gdf = gpd.GeoDataFrame(node_data, crs="EPSG:4326")
+        nodes_gdf.to_parquet(output_dir / "nodes.geoparquet")
+        nodes_gdf.to_file(output_dir / "nodes.geojson", driver="GeoJSON")
+        logger.info("Exported %d EURIS nodes", len(nodes_gdf))
+        
+    # Export edges as geoparquet and geojson
+    edge_data = []
+    for u, v, attrs in graph.edges(data=True):
+        row = {"source": u, "target": v, **attrs}
+        if "geometry_wkt" in row:
+             from shapely import wkt
+             row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
+        elif "geometry" in row and isinstance(row["geometry"], str):
+             from shapely import wkt
+             row["geometry"] = wkt.loads(row["geometry"])
+             
+        edge_data.append(row)
+        
+    if edge_data:
+        edges_gdf = gpd.GeoDataFrame(edge_data, crs="EPSG:4326")
+        edges_gdf.to_parquet(output_dir / "edges.geoparquet")
+        edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
+        logger.info("Exported %d EURIS edges", len(edges_gdf))
 
 
 @cli.command()
@@ -194,6 +237,13 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
     connections = find_geometric_border_connections(fis, euris)
     merged = merge_graphs(fis, euris, connections)
     
+    # Apply schema harmonization (rename attributes to canonical EURIS schema)
+    from .schema import load_schema, apply_schema_mapping
+    schema = load_schema(pathlib.Path("config/schema.toml"))
+    merged = apply_schema_mapping(merged, schema)
+    schema_version = schema.get("meta", {}).get("version", "unknown")
+    logger.info("Applied schema mapping version %s", schema_version)
+    
     output_dir = pathlib.Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -212,36 +262,50 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
                 if k == 'geometry':
                     row['geometry'] = v
             elif k == 'geometry_wkt':
+                from shapely import wkt
                 row['geometry'] = wkt.loads(v)
             else:
                 row[k] = v
+        
+        # Type cleanup for known columns
+        if 'vplnpoint' in row and row['vplnpoint'] is not None:
+             # Convert to string to handle mixed types (1.0, 2.0, True) consistently
+             row['vplnpoint'] = str(row['vplnpoint']).split('.')[0] # Remove .0 if float
+             if row['vplnpoint'].lower() in ['true', 'yes']:
+                 row['vplnpoint'] = '1'
+             elif row['vplnpoint'].lower() in ['false', 'no']:
+                 row['vplnpoint'] = '0'
+
         node_data.append(row)
     if node_data:
         nodes_gdf = gpd.GeoDataFrame(node_data, crs="EPSG:4326")
         nodes_gdf.to_parquet(output_dir / "nodes.geoparquet")
         nodes_gdf.to_file(output_dir / "nodes.geojson", driver="GeoJSON")
-        logger.info("Exported %d nodes", len(nodes_gdf))
+        logger.info("Exported %d harmonized nodes", len(nodes_gdf))
     
     # Export edges as geoparquet and geojson
     edge_data = []
     for u, v, attrs in merged.edges(data=True):
         row = {"source": u, "target": v, **attrs}
         if "geometry_wkt" in row:
-            row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
+             from shapely import wkt
+             row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
         elif "geometry" in row and isinstance(row["geometry"], str):
-            row["geometry"] = wkt.loads(row["geometry"])
+             from shapely import wkt
+             row["geometry"] = wkt.loads(row["geometry"])
         edge_data.append(row)
     if edge_data:
         edges_gdf = gpd.GeoDataFrame(edge_data, crs="EPSG:4326")
         edges_gdf.to_parquet(output_dir / "edges.geoparquet")
         edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
-        logger.info("Exported %d edges", len(edges_gdf))
+        logger.info("Exported %d harmonized edges", len(edges_gdf))
     
     summary = {
         "num_nodes": merged.number_of_nodes(),
         "num_edges": merged.number_of_edges(),
         "num_connected_components": nx.number_connected_components(merged),
         "border_connections": len(connections),
+        "schema_version": schema_version,
     }
     with open(output_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
