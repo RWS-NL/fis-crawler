@@ -8,6 +8,7 @@ import click
 from .build import build_graph
 from .io import export_graph, load_fis_data
 from .integrate import load_euris_graph, load_border_nodes, find_geometric_border_connections, merge_graphs
+from .validation import GraphValidator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -339,12 +340,57 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
 
 
 @cli.command()
+@click.option(
+    "--merged-graph", 
+    type=click.Path(exists=True, path_type=pathlib.Path), 
+    default="output/merged-graph/graph.pickle",
+    help="Path to merged graph pickle file."
+)
+@click.option(
+    "--schema", 
+    type=click.Path(exists=True, path_type=pathlib.Path), 
+    default="config/schema.toml",
+    help="Path to schema configuration."
+)
+@click.option(
+    "--output-file", 
+    type=click.Path(path_type=pathlib.Path), 
+    default="output/validation_report.md",
+    help="Output path for the Markdown report."
+)
+def validate(merged_graph: pathlib.Path, schema: pathlib.Path, output_file: pathlib.Path) -> None:
+    """Validate the merged graph and generate a report."""
+    import pickle
+    
+    logger.info("Loading merged graph from %s", merged_graph)
+    with open(merged_graph, "rb") as f:
+        graph = pickle.load(f)
+        
+    validator = GraphValidator(graph, schema)
+    
+    # Run checks
+    validator.check_statistics()
+    validator.check_border_integrity()
+    validator.check_schema_compliance()
+    validator.check_critical_connections()
+    
+    # Generate report
+    report = validator.generate_markdown_report()
+    
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_file, "w") as f:
+        f.write(report)
+        
+    logger.info("Validation report written to %s", output_file)
+
+
+@cli.command()
 def all() -> None:
     """Run full pipeline: fis -> euris -> enrich -> merge."""
     from click.testing import CliRunner
     runner = CliRunner()
     
-    for cmd in [fis, euris, enrich_fis, enrich_euris, merge]:
+    for cmd in [fis, euris, enrich_fis, enrich_euris, merge, validate]:
         logger.info("Running: %s", cmd.name)
         result = runner.invoke(cmd)
         if result.exit_code != 0:
