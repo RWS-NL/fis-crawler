@@ -203,21 +203,29 @@ def export_euris_graph(
     with open(output_dir / "graph.pickle", "wb") as f:
         pickle.dump(graph, f)
     
-    # GeoJSON edges
+    # GeoJSON and GeoParquet edges
     edge_df = pd.DataFrame(
         data=graph.edges.values(),
         index=graph.edges.keys()
     ).reset_index(names=['source', 'target'])
     edge_gdf = gpd.GeoDataFrame(edge_df, crs='EPSG:4326')
     edge_gdf.to_file(output_dir / "edges.geojson")
+    edge_gdf.to_parquet(output_dir / "edges.geoparquet")
     
-    # GeoJSON nodes (index is already node_id)
-    node_df = pd.DataFrame(
-        data=graph.nodes.values(),
-        index=graph.nodes.keys()
-    ).reset_index(names=['n'])
+    # GeoJSON and GeoParquet nodes
+    # For geoparquet, list/dict types are difficult, but we handle euris_nodes
+    node_df = []
+    for node_id, attrs in graph.nodes(data=True):
+        row = {"n": node_id}
+        for k, v in attrs.items():
+            if k == 'euris_nodes' or isinstance(v, (list, dict)):
+                continue
+            row[k] = v
+        node_df.append(row)
+        
     node_gdf = gpd.GeoDataFrame(node_df, crs='EPSG:4326')
     node_gdf.to_file(output_dir / "nodes.geojson")
+    node_gdf.to_parquet(output_dir / "nodes.geoparquet")
     
     # Summary
     import json
@@ -229,4 +237,13 @@ def export_euris_graph(
     with open(output_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
     
+    # Copy ris-index.gpkg
+    import shutil
+    ris_index_candidates = list(pathlib.Path("output/euris-export").glob("**/ris-index.gpkg"))
+    if ris_index_candidates:
+        shutil.copy2(ris_index_candidates[0], output_dir / "ris-index.gpkg")
+        logger.info("Copied ris-index.gpkg to %s", output_dir)
+    else:
+        logger.warning("Could not find ris-index.gpkg to copy.")
+        
     logger.info("Exported EURIS graph to %s", output_dir)

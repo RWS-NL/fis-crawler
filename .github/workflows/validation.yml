@@ -130,6 +130,7 @@ jobs:
             output/fis-graph/*.geoparquet
             output/euris-graph/*.pickle
             output/euris-graph/*.geoparquet
+            output/euris-graph/*.gpkg
             output/merged-graph/*.pickle
             output/merged-graph/*.geoparquet
             output/lock-schematization/*.geoparquet
