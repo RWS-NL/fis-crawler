@@ -378,14 +378,7 @@ def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_a
 
         # Determine relation (before/after)
         relation = "unknown"
-        
-        # 1. Try KM-based (if available and reliable)
-        if pd.notna(lock_km) and pd.notna(berth_km):
-             # We need to know the fairway direction/increasing KM?
-             # Assumption: If lock splits fairway into A (start-lock) and B (lock-end).
-             # If berth KM is "before" lock mean KM?
-             # Without explicit direction, we can use the fairway geometry relation if available.
-             pass
+
 
         # 2. Try Spatial Projection (Substrings)
         # We have fairway_geom_before and fairway_geom_after WKTs
