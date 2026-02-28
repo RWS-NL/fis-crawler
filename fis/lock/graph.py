@@ -65,6 +65,7 @@ def build_graph_features(complexes):
                             "section_id": section.get("id"),
                             "fairway_id": section.get("fairway_id"),
                             "length": section.get("length"),
+                            "length_m": geod.geometry_length(s_geom),
                             "relation": section.get("relation")
                         }
                     })
@@ -114,7 +115,7 @@ def _process_fairway_connections(c, seen_nodes, start_node, end_node, split_node
                     "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
                     "source_node": start_node,
                     "target_node": split_node_id,
-                    "length_m": round(geod.geometry_length(g_before_edges), 2)
+                    "length_m": geod.geometry_length(g_before_edges)
                 }
             })
         
@@ -165,7 +166,7 @@ def _process_fairway_connections(c, seen_nodes, start_node, end_node, split_node
                 "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
                 "source_node": merge_node_id,
                 "target_node": end_node,
-                "length_m": round(geod.geometry_length(g_after_edges), 2)
+                "length_m": geod.geometry_length(g_after_edges)
             }
         })
         
@@ -275,7 +276,7 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                              "source_node": split_node_id,
                              "target_node": merge_node_id, 
                              "intermediate_node": chamber_node_id,
-                             "length_m": round(geod.geometry_length(wkt.loads(chamber["route_geometry"])), 2)
+                             "length_m": geod.geometry_length(wkt.loads(chamber["route_geometry"]))
                          }
                      })
 
@@ -347,7 +348,7 @@ def _build_chamber_route_features(c, chamber_id, chamber_node_start_id, chamber_
             "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
             "source_node": split_node_id,
             "target_node": chamber_node_start_id,
-            "length_m": round(geod.geometry_length(approach_line), 2)
+            "length_m": geod.geometry_length(approach_line)
         }
     })
     
@@ -367,7 +368,7 @@ def _build_chamber_route_features(c, chamber_id, chamber_node_start_id, chamber_
             "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
             "source_node": chamber_node_start_id,
             "target_node": chamber_node_end_id,
-            "length_m": round(geod.geometry_length(chamber_line), 2)
+            "length_m": geod.geometry_length(chamber_line)
         }
     })
     
@@ -387,7 +388,7 @@ def _build_chamber_route_features(c, chamber_id, chamber_node_start_id, chamber_
             "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
             "source_node": chamber_node_end_id,
             "target_node": merge_node_id,
-            "length_m": round(geod.geometry_length(exit_line), 2)
+            "length_m": geod.geometry_length(exit_line)
         }
     })
 

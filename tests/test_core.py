@@ -69,6 +69,27 @@ def test_find_nearby_berths_category_filter():
     assert 300 in ids
     assert 200 not in ids
 
+def test_find_nearby_berths_cross_fairway():
+    lock_row = pd.Series({
+        "Id": 51064,
+        "Name": "Zuidersluis IJmuiden",
+        "RouteKmBegin": 10.0,
+        "FairwayId": 41686,
+        "geometry": Point(0, 0)
+    })
+
+    # Berth 100 sits exactly on the lock but on a different Fairway ID
+    berths_data = [
+        {"Id": 100, "Name": "Wachtplaats Zuidersluis", "RouteKmBegin": 10.0, "FairwayId": 17140, "Category": "WAITING_AREA", "geometry": Point(0.001, 0)},
+    ]
+    berths_gdf = gpd.GeoDataFrame(berths_data, geometry="geometry")
+
+    nearby = find_nearby_berths(lock_row, berths_gdf, None, None, max_dist_m=5000)
+
+    # We expect 1 nearby berth despite FairwayId not matching
+    assert len(nearby) == 1
+    assert nearby[0]["id"] == 100
+
 def test_find_nearby_berths_relation():
     # Construct lock at origin
     lock_row = pd.Series({

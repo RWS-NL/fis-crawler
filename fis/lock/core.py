@@ -1,9 +1,13 @@
 import pathlib
+import logging
 import pandas as pd
 import geopandas as gpd
 from shapely import wkt
+from tqdm import tqdm
 
 from shapely.geometry import Point, LineString
+
+logger = logging.getLogger(__name__)
 
 def load_data(export_dir: pathlib.Path):
     """Load necessary parquet files."""
@@ -56,7 +60,7 @@ def find_fairway_junctions(sections_gdf, fairway_id):
                  
     return start_junction, end_junction
 
-def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
+def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections, network_graph=None):
     """
     Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, and Section data.
     """
@@ -64,6 +68,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
     
     # Convert locks to GeoDataFrame for spatial ops if needed
     if "Geometry" in locks.columns and locks["Geometry"].dtype == "object":
+         locks = locks.copy()
          locks["geometry"] = locks["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
     locks_gdf = gpd.GeoDataFrame(locks, geometry="geometry")
 
@@ -71,6 +76,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
     berths_gdf = None
     if berths is not None:
         if "Geometry" in berths.columns and berths["Geometry"].dtype == "object":
+             berths = berths.copy()
              berths["geometry"] = berths["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
         berths_gdf = gpd.GeoDataFrame(berths, geometry="geometry") if "geometry" in berths.columns else berths
 
@@ -78,13 +84,19 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
     sections_gdf = None
     if sections is not None:
         if "Geometry" in sections.columns and sections["Geometry"].dtype == "object":
+             sections = sections.copy()
              sections["geometry"] = sections["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
         sections_gdf = gpd.GeoDataFrame(sections, geometry="geometry") if "geometry" in sections.columns else sections
 
-    for idx, lock in locks_gdf.iterrows():
+    # Create spatial index for sections if not already present
+    sindex = None
+    if sections_gdf is not None:
+        sindex = sections_gdf.sindex
+
+    for idx, lock in tqdm(locks_gdf.iterrows(), total=len(locks_gdf), desc="Processing locks"):
         # Get chambers for this lock (using confirmed ParentId key)
         lock_chambers = chambers[chambers["ParentId"] == lock["Id"]]
-        
+
         # Resolve ISRS
         lock_isrs_code = None
         if pd.notna(lock.get("IsrsId")) and isrs is not None:
@@ -119,13 +131,13 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                      max_length = lock_chambers["Length"].max()
                  if pd.isna(max_length):
                      max_length = 0
-                     
+
                  # Delegate complexity to helper function
                  # Buffer: half max length + 50m extra
                  buffer_dist = (max_length / 2) + 50
                  geom_data = process_fairway_geometry(fw_obj, lock, buffer_dist=buffer_dist)
                  fairway_data.update(geom_data)
-                 
+
                  # Find junctions
                  if sections_gdf is not None:
                      s_junc, e_junc = find_fairway_junctions(sections_gdf, int(fw_obj["Id"]))
@@ -142,55 +154,89 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                          # Load geometries
                          g_before = wkt.loads(bwkt)
                          g_after = wkt.loads(awkt)
-                         
+
                          # Identify connection points
                          # curve.coords is a list of tuples
                          split_point = Point(g_before.coords[-1])
                          merge_point = Point(g_after.coords[0])
-                         
+
                          # We will calculate routes when iterating chambers below
                          chamber_routes["split_point"] = split_point
                          chamber_routes["merge_point"] = merge_point
-        
-        # Berth Identification
-        berths_data = []
-        if berths_gdf is not None:
-             # We pass the WKTs from fairway_data if we want to parse them, 
-             # or we rely on KM/FairwayId in the helper function.
-             berths_data = find_nearby_berths(lock, berths_gdf, fairway_data.get("geometry_before_wkt"), fairway_data.get("geometry_after_wkt"))
+
+        # We will fetch berths after sections so we have connectivity context
 
         # Section Overlap Identification
+        logger.debug("  Checking connected fairways and sections...")
         sections_data = []
+        internal_sections = set()
+        connected_fairways = set()
+
+        # Add the primary lock fairway to connected fairways just in case it doesn't intersect properly
+        if fairway_data.get("fairway_id"):
+            connected_fairways.add(fairway_data["fairway_id"])
+
+        # Add fairways connected via graph junctions
+        if network_graph:
+            for j_id in [fairway_data.get("start_junction_id"), fairway_data.get("end_junction_id")]:
+                if j_id and network_graph.has_node(j_id):
+                    for nbr in network_graph.neighbors(j_id):
+                        edge_data = network_graph.get_edge_data(j_id, nbr)
+                        if edge_data and "FairwayId" in edge_data:
+                            connected_fairways.add(int(edge_data["FairwayId"]))
+
         if sections_gdf is not None:
             # Define complex geometry: Union of lock + chambers
             # Start with lock geometry
             complex_geoms = [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
-            
+
             # Add chamber geometries
             if "Geometry" in lock_chambers.columns:
                  for _, c_row in lock_chambers.iterrows():
                       if pd.notna(c_row["Geometry"]):
-                       if pd.notna(c_row["Geometry"]):
-                            c_geom = wkt.loads(c_row["Geometry"])
-                            complex_geoms.append(c_geom)
-            
+                           c_geom = wkt.loads(c_row["Geometry"])
+                           complex_geoms.append(c_geom)
+
             if complex_geoms:
                  from shapely.ops import unary_union
                  complex_union = unary_union([g for g in complex_geoms if g])
                  if complex_union:
-                      # Find intersecting sections
-                      intersecting = sections_gdf[sections_gdf.intersects(complex_union)]
-                      
+                      # Find intersecting sections using spatial index
+                      # Note: EPSG:4326 is in degrees. 0.0001 degrees is roughly 10 meters.
+                      buffered_union = complex_union.buffer(0.0001)
+                      intersecting = sections_gdf[sections_gdf.intersects(buffered_union)]
+
                       for _, s_row in intersecting.iterrows():
+                           sid = int(s_row["Id"])
+                           fid = int(s_row["FairwayId"]) if pd.notna(s_row.get("FairwayId")) else None
+
+                           internal_sections.add(sid)
+                           if fid:
+                               connected_fairways.add(fid)
+
                            sections_data.append({
-                               "id": int(s_row["Id"]),
+                               "id": sid,
                                "name": s_row["Name"],
-                               "fairway_id": int(s_row["FairwayId"]) if pd.notna(s_row.get("FairwayId")) else None,
+                               "fairway_id": fid,
                                "length": float(s_row["Length"]) if pd.notna(s_row.get("Length")) else None,
                                "geometry": s_row.geometry.wkt if hasattr(s_row, "geometry") and s_row.geometry else None,
                                "relation": "overlap"
                            })
 
+        # Berth Identification
+        logger.debug("  Finding nearby berths (allowed fairways: %s)...", connected_fairways)
+        berths_data = []
+        if berths_gdf is not None:
+             berths_data = find_nearby_berths(
+                 lock, 
+                 berths_gdf, 
+                 fairway_data.get("geometry_before_wkt"), 
+                 fairway_data.get("geometry_after_wkt"),
+                 allowed_fairways=list(connected_fairways),
+                 disallowed_sections=list(internal_sections),
+                 sections_gdf=sections_gdf
+             )
+        logger.debug("  Found %d berths.", len(berths_data))
         complex_obj = {
             "id": int(lock["Id"]),
             "name": lock["Name"],
@@ -329,7 +375,7 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0):
 
     return fairway_data
 
-def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_after, max_dist_m=2000, allowed_categories=None):
+def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_after, max_dist_m=2000, allowed_categories=None, allowed_fairways=None, disallowed_sections=None, sections_gdf=None):
     """
     Find berths associated with the lock's fairway and determine if they are before or after.
     Enforces a strict distance check (default 2km) and category filtering.
@@ -338,16 +384,10 @@ def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_a
         allowed_categories = ["WAITING_AREA"]
 
     nearby = []
-    if berths_gdf is None or "FairwayId" not in berths_gdf.columns:
+    if berths_gdf is None:
         return nearby
         
-    # Filter by FairwayId
-    fw_id = lock_row.get("FairwayId")
-    if pd.isna(fw_id):
-        return nearby
-        
-    # Filter candidates by Fairway
-    candidates = berths_gdf[berths_gdf["FairwayId"] == fw_id].copy()
+    candidates = berths_gdf.copy()
     
     # Filter by Category (if present)
     if "Category" in candidates.columns and allowed_categories:
@@ -356,28 +396,56 @@ def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_a
             candidates["Category"].isin(allowed_categories)
         ]
         
+    # Filter by allowed FairwayIDs (which we computed via geometric overlap of the lock)
+    if allowed_fairways and "FairwayId" in candidates.columns:
+        candidates = candidates[candidates["FairwayId"].isin(allowed_fairways)]
+        
     if candidates.empty:
         return nearby
         
     lock_geom = lock_row.geometry if hasattr(lock_row, "geometry") else None
     lock_km = lock_row.get("RouteKmBegin")
     
+    from pyproj import Geod
+    from shapely.geometry import Point
+    from shapely.ops import unary_union
+    
+    geod = Geod(ellps="WGS84")
+    
+    # Pre-select the disallowed sections geometries once to speed up testing
+    disallowed_geoms = []
+    if disallowed_sections and sections_gdf is not None:
+        invalid_mask = sections_gdf["Id"].isin(disallowed_sections)
+        disallowed_geoms = sections_gdf[invalid_mask].geometry.tolist()
+        
+    disallowed_union = unary_union(disallowed_geoms) if disallowed_geoms else None
+    # Pre-buffer for performance (EPSG:4326 is in degrees, 0.00005 is roughly 5 meters)
+    disallowed_mask = disallowed_union.buffer(0.00005) if disallowed_union else None
+    
+    # Pre-parse fairway geometries
+    g_before = wkt.loads(fairway_geom_before) if fairway_geom_before else None
+    g_after = wkt.loads(fairway_geom_after) if fairway_geom_after else None
+
     for _, berth in candidates.iterrows():
         is_nearby = False
         dist_m = None
         berth_km = berth.get("RouteKmBegin")
         
+        # Check if the berth sits directly INSIDE the lock chamber (on a disallowed section)
+        # Using a small buffer (5m) to ensure we overlap if the point is snapped to the section line
+        # The user requested: "the fairway should be connected, but it should not be the same fairway section"
+        if disallowed_mask and berth.geometry:
+            # We enforce that the berth geometry is NOT inside the disallowed internal section boundaries
+            if disallowed_mask.intersects(berth.geometry):
+                continue
+        
         # Calculate spatial distance if geometries exist
         if lock_geom and berth.geometry:
-            from pyproj import Geod
-            from shapely.geometry import Point
-            
             # Ensure we are comparing Points for Geod.inv
             lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
             bg = berth.geometry if isinstance(berth.geometry, Point) else berth.geometry.centroid
             
             if lg and bg:
-                geod = Geod(ellps="WGS84")
                 _, _, dist_m = geod.inv(lg.x, lg.y, bg.x, bg.y)
                 
                 if dist_m <= max_dist_m:
@@ -389,14 +457,9 @@ def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_a
         # Determine relation (before/after)
         relation = "unknown"
 
-
         # Spatial Projection (Substrings)
         # We have fairway_geom_before and fairway_geom_after WKTs
-        if fairway_geom_before and fairway_geom_after and berth.geometry:
-             from shapely import wkt
-             g_before = wkt.loads(fairway_geom_before)
-             g_after = wkt.loads(fairway_geom_after)
-             
+        if g_before and g_after and berth.geometry:
              # Buffer slightly for robustness
              if g_before.distance(berth.geometry) < g_after.distance(berth.geometry):
                  relation = "before"
