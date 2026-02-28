@@ -16,21 +16,21 @@ def test_find_nearby_berths_distance():
         "geometry": Point(4.4, 51.7)
     })
     
-    # Berth 1 is ~2.6km away (e.g. ID 48871)
+    # Berth 1 is ~550m away (e.g. ID 48871)
     # Berth 2 is ~6.0km away (should be excluded)
     berths_data = [
-        {"Id": 48871, "Name": "Wachtplaats 2 Volkeraksluizen - Zuid", "RouteKmBegin": 3.1, "FairwayId": 28354, "geometry": Point(4.4, 51.68)},
+        {"Id": 48871, "Name": "Wachtplaats 2 Volkeraksluizen - Zuid", "RouteKmBegin": 3.1, "FairwayId": 28354, "geometry": Point(4.4, 51.695)},
         {"Id": 99999, "Name": "Far away berth", "RouteKmBegin": 6.5, "FairwayId": 28354, "geometry": Point(4.4, 51.65)},
     ]
     berths_gdf = gpd.GeoDataFrame(berths_data, geometry="geometry")
     
     # We pass None for fairway geoms as we are checking the KM distance logic primarily
-    nearby = find_nearby_berths(lock_row, berths_gdf, None, None, max_dist_m=5000)
+    nearby = find_nearby_berths(lock_row, berths_gdf, None, None, max_dist_m=2000)
     
-    # Should include 48871 (dist ~2225m < 5000m) but exclude 99999 (dist ~5500m > 5000m)
+    # Should include 48871 (dist ~550m < 2000m) but exclude 99999 (dist > 2000m)
     assert len(nearby) == 1
     assert nearby[0]["id"] == 48871
-    assert nearby[0]["dist_m"] == pytest.approx(2225.1, rel=0.01)
+    assert nearby[0]["dist_m"] == pytest.approx(556.3, rel=0.01)
     
 def test_find_nearby_berths_wrong_fairway():
     lock_row = pd.Series({"Id": 42863, "RouteKmBegin": 0.5, "FairwayId": 28354})
