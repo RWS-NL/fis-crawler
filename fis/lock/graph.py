@@ -237,93 +237,11 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
             
             # Chamber Nodes
             if door_start and door_end:
-                 # Start Node
-                 features.append({
-                     "type": "Feature",
-                     "geometry": mapping(door_start),
-                     "properties": {
-                         "id": chamber_node_start_id,
-                         "feature_type": "node",
-                         "node_type": "chamber_start",
-                         "node_id": chamber_node_start_id,
-                         "lock_id": c["id"],
-                         "chamber_id": chamber_id
-                     }
-                 })
-                 # End Node
-                 features.append({
-                     "type": "Feature",
-                     "geometry": mapping(door_end),
-                     "properties": {
-                         "id": chamber_node_end_id,
-                         "feature_type": "node",
-                         "node_type": "chamber_end",
-                         "node_id": chamber_node_end_id,
-                         "lock_id": c["id"],
-                         "chamber_id": chamber_id
-                     }
-                 })
-                 
-                 # Edges
-                 # Approach (Split -> Start)
-                 approach_line = LineString([split_point, door_start])
-                 features.append({
-                     "type": "Feature",
-                     "geometry": mapping(approach_line),
-                     "properties": {
-                        "id": f"fairway_segment_{c['id']}_{chamber_id}_approach",
-                        "feature_type": "fairway_segment",
-                        "segment_type": "chamber_approach",
-                        "lock_id": c["id"],
-                        "chamber_id": chamber_id,
-                        "fairway_id": c.get("fairway_id"),
-                        "name": c.get("fairway_name"),
-                        "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
-                        "source_node": split_node_id,
-                        "target_node": chamber_node_start_id,
-                        "length_m": round(geod.geometry_length(approach_line), 2)
-                    }
-                })
-                 
-                 # Chamber (Start -> End)
-                 chamber_line = LineString([door_start, door_end])
-                 features.append({
-                     "type": "Feature",
-                     "geometry": mapping(chamber_line),
-                     "properties": {
-                        "id": f"fairway_segment_{c['id']}_{chamber_id}_route",
-                        "feature_type": "fairway_segment",
-                        "segment_type": "chamber_route",
-                        "lock_id": c["id"],
-                        "chamber_id": chamber_id,
-                        "fairway_id": c.get("fairway_id"),
-                        "name": c.get("fairway_name"),
-                        "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
-                        "source_node": chamber_node_start_id,
-                        "target_node": chamber_node_end_id,
-                        "length_m": round(geod.geometry_length(chamber_line), 2)
-                    }
-                })
-                 
-                 # Exit (End -> Merge)
-                 exit_line = LineString([door_end, merge_point])
-                 features.append({
-                     "type": "Feature",
-                     "geometry": mapping(exit_line),
-                     "properties": {
-                         "id": f"fairway_segment_{c['id']}_{chamber_id}_exit",
-                         "feature_type": "fairway_segment",
-                         "segment_type": "chamber_exit",
-                         "lock_id": c["id"],
-                         "chamber_id": chamber_id,
-                         "fairway_id": c.get("fairway_id"),
-                         "name": c.get("fairway_name"),
-                         "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
-                         "source_node": chamber_node_end_id,
-                         "target_node": merge_node_id,
-                         "length_m": round(geod.geometry_length(exit_line), 2)
-                     }
-                 })
+                 features.extend(_build_chamber_route_features(
+                     c, chamber_id, chamber_node_start_id, chamber_node_end_id,
+                     door_start, door_end, split_point, merge_point,
+                     split_node_id, merge_node_id
+                 ))
 
 
             else:
@@ -376,4 +294,101 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                     }
                 })
                 
+    return features
+
+def _build_chamber_route_features(c, chamber_id, chamber_node_start_id, chamber_node_end_id, door_start, door_end, split_point, merge_point, split_node_id, merge_node_id):
+    """
+    Helper to extract routing lines from split nodes to doors and through chambers.
+    """
+    from shapely.geometry import LineString
+    features = []
+    
+    # Start Node
+    features.append({
+        "type": "Feature",
+        "geometry": mapping(door_start),
+        "properties": {
+            "id": chamber_node_start_id,
+            "feature_type": "node",
+            "node_type": "chamber_start",
+            "node_id": chamber_node_start_id,
+            "lock_id": c["id"],
+            "chamber_id": chamber_id
+        }
+    })
+    # End Node
+    features.append({
+        "type": "Feature",
+        "geometry": mapping(door_end),
+        "properties": {
+            "id": chamber_node_end_id,
+            "feature_type": "node",
+            "node_type": "chamber_end",
+            "node_id": chamber_node_end_id,
+            "lock_id": c["id"],
+            "chamber_id": chamber_id
+        }
+    })
+    
+    # Edges
+    # Approach (Split -> Start)
+    approach_line = LineString([split_point, door_start])
+    features.append({
+        "type": "Feature",
+        "geometry": mapping(approach_line),
+        "properties": {
+            "id": f"fairway_segment_{c['id']}_{chamber_id}_approach",
+            "feature_type": "fairway_segment",
+            "segment_type": "chamber_approach",
+            "lock_id": c["id"],
+            "chamber_id": chamber_id,
+            "fairway_id": c.get("fairway_id"),
+            "name": c.get("fairway_name"),
+            "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
+            "source_node": split_node_id,
+            "target_node": chamber_node_start_id,
+            "length_m": round(geod.geometry_length(approach_line), 2)
+        }
+    })
+    
+    # Chamber (Start -> End)
+    chamber_line = LineString([door_start, door_end])
+    features.append({
+        "type": "Feature",
+        "geometry": mapping(chamber_line),
+        "properties": {
+            "id": f"fairway_segment_{c['id']}_{chamber_id}_route",
+            "feature_type": "fairway_segment",
+            "segment_type": "chamber_route",
+            "lock_id": c["id"],
+            "chamber_id": chamber_id,
+            "fairway_id": c.get("fairway_id"),
+            "name": c.get("fairway_name"),
+            "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
+            "source_node": chamber_node_start_id,
+            "target_node": chamber_node_end_id,
+            "length_m": round(geod.geometry_length(chamber_line), 2)
+        }
+    })
+    
+    # Exit (End -> Merge)
+    exit_line = LineString([door_end, merge_point])
+    features.append({
+        "type": "Feature",
+        "geometry": mapping(exit_line),
+        "properties": {
+            "id": f"fairway_segment_{c['id']}_{chamber_id}_exit",
+            "feature_type": "fairway_segment",
+            "segment_type": "chamber_exit",
+            "lock_id": c["id"],
+            "chamber_id": chamber_id,
+            "fairway_id": c.get("fairway_id"),
+            "name": c.get("fairway_name"),
+            "section_id": c.get("sections", [{}])[0].get("id") if c.get("sections") else None,
+            "source_node": chamber_node_end_id,
+            "target_node": merge_node_id,
+            "length_m": round(geod.geometry_length(exit_line), 2)
+        }
+    })
+
     return features
