@@ -10,7 +10,7 @@ import geopandas as gpd
 
 from fis.ris_index import load_ris_index
 from fis.lock.core import load_data, group_complexes
-from fis.lock.graph import build_graph_features
+from fis.lock.graph import build_nodes_gdf, build_edges_gdf, build_berths_gdf
 
 logger = logging.getLogger(__name__)
 
@@ -76,28 +76,27 @@ def schematize(export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pa
     # Group complexes
     result = group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections, network_graph)
 
-    # JSON output
-    output_json = output_dir / "lock_schematization.json"
+    # Summary JSON (per-lock metadata)
+    output_json = output_dir / "summary.json"
     with open(output_json, "w") as f:
         json.dump(result, f, indent=2)
-    logger.info("Saved JSON to %s", output_json)
+    logger.info("Saved summary to %s", output_json)
 
     if not result:
         return
 
-    # Generate GeoDataFrame
-    features = build_graph_features(result)
-    gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+    def save_gdf(gdf: gpd.GeoDataFrame, name: str) -> None:
+        """Save a GeoDataFrame as both GeoJSON and GeoParquet."""
+        if gdf.empty:
+            logger.warning("No features for %s, skipping.", name)
+            return
+        gdf.to_file(output_dir / f"{name}.geojson", driver="GeoJSON")
+        gdf.to_parquet(output_dir / f"{name}.geoparquet")
+        logger.info("Saved %d %s features to %s", len(gdf), name, output_dir)
 
-    # Enforce integer types
-    for col in ["fairway_id", "lock_id", "chamber_id", "berth_id"]:
-        if col in gdf.columns:
-            gdf[col] = gdf[col].astype("Int64")
-
-    # Save outputs
-    gdf.to_file(output_dir / "lock_schematization.geojson", driver="GeoJSON")
-    gdf.to_parquet(output_dir / "lock_schematization.geoparquet")
-    logger.info("Saved GeoJSON and GeoParquet to %s", output_dir)
+    save_gdf(build_nodes_gdf(result), "nodes")
+    save_gdf(build_edges_gdf(result), "edges")
+    save_gdf(build_berths_gdf(result), "berths")
 
 
 if __name__ == "__main__":
