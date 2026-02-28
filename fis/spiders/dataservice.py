@@ -46,7 +46,7 @@ class DataserviceSpider(scrapy.Spider):
         )
         return spider
 
-    def start_requests(self):
+    async def start(self):
         yield scrapy.Request(url=self.wadl_url, callback=self.parse_waml)
 
     def parse_waml(self, response):
