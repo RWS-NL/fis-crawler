@@ -74,7 +74,6 @@ def build_locks_gdf(complexes) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
 
 
-
 def build_chambers_gdf(complexes) -> gpd.GeoDataFrame:
     """Return a Polygon GeoDataFrame of chamber geometries with all scalar attributes."""
     _SKIP = {"geometry", "route_geometry", "subchambers"}
@@ -91,6 +90,7 @@ def build_chambers_gdf(complexes) -> gpd.GeoDataFrame:
     if not rows:
         return gpd.GeoDataFrame(columns=["id", "name", "lock_id", "lock_name", "geometry"], crs=CRS)
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
+
 
 
 def build_subchambers_gdf(complexes) -> gpd.GeoDataFrame:

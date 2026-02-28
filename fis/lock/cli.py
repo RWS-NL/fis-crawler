@@ -10,6 +10,7 @@ import geopandas as gpd
 
 from fis.ris_index import load_ris_index
 from fis.lock.core import load_data, group_complexes
+
 from fis.lock.graph import (
     build_nodes_gdf, 
     build_edges_gdf, 
