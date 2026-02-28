@@ -19,13 +19,8 @@ def build_nodes_gdf(complexes) -> gpd.GeoDataFrame:
         if f["properties"].get("feature_type") == "node"
     ]
     if not rows:
-        return gpd.GeoDataFrame(columns=["id", "node_type", "lock_id", "chamber_id", "geometry"], crs=CRS)
-    gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
-    # Ensure useful columns present even if missing in some features
-    for col in ["chamber_id"]:
-        if col not in gdf.columns:
-            gdf[col] = pd.NA
-    return gdf[["id", "node_type", "lock_id", "chamber_id", "geometry"]]
+        return gpd.GeoDataFrame(columns=["id", "node_type", "lock_id", "geometry"], crs=CRS)
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
 
 
 def build_edges_gdf(complexes) -> gpd.GeoDataFrame:
@@ -37,38 +32,64 @@ def build_edges_gdf(complexes) -> gpd.GeoDataFrame:
         if f["properties"].get("feature_type") == "fairway_segment"
     ]
     if not rows:
-        return gpd.GeoDataFrame(
-            columns=["id", "segment_type", "lock_id", "chamber_id", "fairway_id",
-                     "source_node", "target_node", "length_m", "geometry"],
-            crs=CRS,
-        )
-    gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
-    for col in ["chamber_id", "section_id"]:
-        if col not in gdf.columns:
-            gdf[col] = pd.NA
-    cols = ["id", "segment_type", "lock_id", "chamber_id", "fairway_id",
-            "source_node", "target_node", "length_m", "geometry"]
-    return gdf[[c for c in cols if c in gdf.columns]]
+        return gpd.GeoDataFrame(columns=["id", "segment_type", "lock_id", "geometry"], crs=CRS)
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
 
 
 def build_berths_gdf(complexes) -> gpd.GeoDataFrame:
-    """Return a Point GeoDataFrame of all berths associated with lock complexes."""
+    """Return a Point GeoDataFrame of all berths with all scalar attributes."""
+    _SKIP = {"geometry"}
     rows = []
     for c in complexes:
         for berth in c.get("berths", []):
             if not berth.get("geometry"):
                 continue
             geom = wkt.loads(berth["geometry"])
-            rows.append({
-                "id": berth.get("id"),
-                "name": berth.get("name"),
-                "lock_id": c["id"],
-                "dist_m": berth.get("dist_m"),
-                "relation": berth.get("relation"),
-                "geometry": geom,
-            })
+            attrs = {k: v for k, v in berth.items() if k not in _SKIP and not isinstance(v, (list, dict))}
+            rows.append({**attrs, "lock_id": c["id"], "geometry": geom})
     if not rows:
-        return gpd.GeoDataFrame(columns=["id", "name", "lock_id", "dist_m", "relation", "geometry"], crs=CRS)
+        return gpd.GeoDataFrame(columns=["id", "name", "lock_id", "geometry"], crs=CRS)
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
+
+
+def build_locks_gdf(complexes) -> gpd.GeoDataFrame:
+    """Return a Polygon GeoDataFrame of lock complex geometries with all metadata.
+
+    All scalar attributes from the complex dict are included automatically;
+    nested collections (locks, berths, sections) and geometry WKT strings
+    (geometry_before_wkt, geometry_after_wkt) are excluded.
+    """
+    # Keys that are nested lists or internal geometry WKTs — not useful as columns
+    _SKIP = {"geometry", "locks", "berths", "sections", "geometry_before_wkt", "geometry_after_wkt"}
+
+    rows = []
+    for c in complexes:
+        if not c.get("geometry"):
+            continue
+        geom = wkt.loads(c["geometry"])
+        attrs = {k: v for k, v in c.items() if k not in _SKIP and not isinstance(v, (list, dict))}
+        rows.append({**attrs, "geometry": geom})
+    if not rows:
+        return gpd.GeoDataFrame(columns=["id", "name", "geometry"], crs=CRS)
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
+
+
+
+def build_chambers_gdf(complexes) -> gpd.GeoDataFrame:
+    """Return a Polygon GeoDataFrame of chamber geometries with all scalar attributes."""
+    _SKIP = {"geometry", "route_geometry"}
+    rows = []
+    for c in complexes:
+        for l_obj in c.get("locks", []):
+            for chamber in l_obj.get("chambers", []):
+                geom_wkt = chamber.get("geometry")
+                if not geom_wkt or not isinstance(geom_wkt, str):
+                    continue
+                geom = wkt.loads(geom_wkt)
+                attrs = {k: v for k, v in chamber.items() if k not in _SKIP and not isinstance(v, (list, dict))}
+                rows.append({**attrs, "lock_id": c["id"], "lock_name": c.get("name"), "geometry": geom})
+    if not rows:
+        return gpd.GeoDataFrame(columns=["id", "name", "lock_id", "lock_name", "geometry"], crs=CRS)
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
 
 
@@ -76,6 +97,7 @@ def _geom_from_feature(feature):
     """Convert a GeoJSON feature geometry dict to a Shapely geometry."""
     from shapely.geometry import shape
     return shape(feature["geometry"])
+
 
 
 def build_graph_features(complexes):

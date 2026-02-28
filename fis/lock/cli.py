@@ -10,7 +10,7 @@ import geopandas as gpd
 
 from fis.ris_index import load_ris_index
 from fis.lock.core import load_data, group_complexes
-from fis.lock.graph import build_nodes_gdf, build_edges_gdf, build_berths_gdf
+from fis.lock.graph import build_nodes_gdf, build_edges_gdf, build_berths_gdf, build_locks_gdf, build_chambers_gdf
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,8 @@ def schematize(export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pa
         gdf.to_parquet(output_dir / f"{name}.geoparquet")
         logger.info("Saved %d %s features to %s", len(gdf), name, output_dir)
 
+    save_gdf(build_locks_gdf(result), "lock")
+    save_gdf(build_chambers_gdf(result), "chamber")
     save_gdf(build_nodes_gdf(result), "nodes")
     save_gdf(build_edges_gdf(result), "edges")
     save_gdf(build_berths_gdf(result), "berths")
