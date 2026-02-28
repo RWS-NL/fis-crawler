@@ -77,7 +77,7 @@ def build_locks_gdf(complexes) -> gpd.GeoDataFrame:
 
 def build_chambers_gdf(complexes) -> gpd.GeoDataFrame:
     """Return a Polygon GeoDataFrame of chamber geometries with all scalar attributes."""
-    _SKIP = {"geometry", "route_geometry"}
+    _SKIP = {"geometry", "route_geometry", "subchambers"}
     rows = []
     for c in complexes:
         for l_obj in c.get("locks", []):
@@ -91,6 +91,33 @@ def build_chambers_gdf(complexes) -> gpd.GeoDataFrame:
     if not rows:
         return gpd.GeoDataFrame(columns=["id", "name", "lock_id", "lock_name", "geometry"], crs=CRS)
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
+
+
+def build_subchambers_gdf(complexes) -> gpd.GeoDataFrame:
+    """Return a Polygon GeoDataFrame of subchamber geometries with all scalar attributes."""
+    _SKIP = {"geometry"}
+    rows = []
+    for c in complexes:
+        for l_obj in c.get("locks", []):
+            for chamber in l_obj.get("chambers", []):
+                for sc in chamber.get("subchambers", []):
+                    geom_wkt = sc.get("geometry")
+                    if not geom_wkt or not isinstance(geom_wkt, str):
+                        continue
+                    geom = wkt.loads(geom_wkt)
+                    attrs = {k: v for k, v in sc.items() if k not in _SKIP and not isinstance(v, (list, dict))}
+                    rows.append({
+                        **attrs,
+                        "lock_id": c["id"],
+                        "lock_name": c.get("name"),
+                        "chamber_id": chamber["id"],
+                        "chamber_name": chamber.get("name"),
+                        "geometry": geom
+                    })
+    if not rows:
+        return gpd.GeoDataFrame(columns=["id", "name", "lock_id", "chamber_id", "geometry"], crs=CRS)
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
+
 
 
 def _geom_from_feature(feature):
