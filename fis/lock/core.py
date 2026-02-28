@@ -26,6 +26,7 @@ def load_data(export_dir: pathlib.Path):
 
     locks = read_geo_or_parquet("lock")
     chambers = read_geo_or_parquet("chamber")
+    subchambers = read_geo_or_parquet("subchamber")
     isrs = read_geo_or_parquet("isrs")
     fairways = read_geo_or_parquet("fairway")
     berths = read_geo_or_parquet("berth")
@@ -34,7 +35,7 @@ def load_data(export_dir: pathlib.Path):
     if locks is None or chambers is None:
         raise FileNotFoundError("Missing essential lock/chamber data.")
 
-    return locks, chambers, isrs, fairways, berths, sections
+    return locks, chambers, subchambers, isrs, fairways, berths, sections
 
 def find_fairway_junctions(sections_gdf, fairway_id):
     """
@@ -60,7 +61,7 @@ def find_fairway_junctions(sections_gdf, fairway_id):
                  
     return start_junction, end_junction
 
-def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections, network_graph=None):
+def group_complexes(locks, chambers, subchambers, isrs, ris_df, fairways, berths, sections, network_graph=None):
     """
     Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, and Section data.
     """
@@ -237,7 +238,11 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections, n
                  sections_gdf=sections_gdf
              )
         logger.debug("  Found %d berths.", len(berths_data))
+        # Base attributes from lock row
+        lock_attrs = {k: v for k, v in lock.items() if k != "geometry" and not isinstance(v, (list, dict))}
+        
         complex_obj = {
+            **lock_attrs,
             "id": int(lock["Id"]),
             "name": lock["Name"],
             "isrs_code": lock_isrs_code,
@@ -250,6 +255,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections, n
                 {
                      "id": int(lock["Id"]),
                      "name": lock["Name"],
+                     **lock_attrs,
                      "chambers": []
                 }
             ]
@@ -266,7 +272,11 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections, n
                          route = LineString([chamber_routes["split_point"], centroid, chamber_routes["merge_point"]])
                          route_wkt = route.wkt
 
+             # Base attributes from chamber row
+             chamber_attrs = {k: v for k, v in chamber.items() if k != "geometry" and not isinstance(v, (list, dict))}
+
              c_obj = {
+                 **chamber_attrs,
                  "id": int(chamber["Id"]),
                  "name": chamber["Name"],
                  "length": float(chamber["Length"]) if pd.notna(chamber["Length"]) else None,
@@ -274,6 +284,16 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections, n
                  "geometry": chamber["Geometry"] if "Geometry" in chamber and pd.notna(chamber["Geometry"]) else None,
                  "route_geometry": route_wkt
              }
+             # Add subchambers
+             if subchambers is not None:
+                 chamber_subchambers = subchambers[subchambers["ParentId"] == chamber["Id"]]
+                 c_obj["subchambers"] = []
+                 for _, sc in chamber_subchambers.iterrows():
+                     sc_obj = {k: v for k, v in sc.items() if k != "geometry" and not isinstance(v, (list, dict))}
+                     if "geometry" in sc.index and pd.notna(sc["geometry"]):
+                         sc_obj["geometry"] = sc["geometry"].wkt
+                     c_obj["subchambers"].append(sc_obj)
+             
              complex_obj["locks"][0]["chambers"].append(c_obj)
              
         complexes.append(complex_obj)

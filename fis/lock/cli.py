@@ -10,7 +10,15 @@ import geopandas as gpd
 
 from fis.ris_index import load_ris_index
 from fis.lock.core import load_data, group_complexes
-from fis.lock.graph import build_nodes_gdf, build_edges_gdf, build_berths_gdf, build_locks_gdf, build_chambers_gdf
+
+from fis.lock.graph import (
+    build_nodes_gdf, 
+    build_edges_gdf, 
+    build_berths_gdf, 
+    build_locks_gdf, 
+    build_chambers_gdf, 
+    build_subchambers_gdf
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +51,7 @@ def cli():
 def schematize(export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pathlib.Path) -> None:
     """Process lock complexes into detailed graph features."""
     try:
-        locks, chambers, isrs, fairways, berths, sections = load_data(export_dir)
+        locks, chambers, subchambers, isrs, fairways, berths, sections = load_data(export_dir)
     except FileNotFoundError:
         logger.exception("Failed to load data from %s", export_dir)
         sys.exit(1)
@@ -74,7 +82,7 @@ def schematize(export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pa
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Group complexes
-    result = group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections, network_graph)
+    result = group_complexes(locks, chambers, subchambers, isrs, ris_df, fairways, berths, sections, network_graph)
 
     # Summary JSON (per-lock metadata)
     output_json = output_dir / "summary.json"
@@ -96,6 +104,7 @@ def schematize(export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pa
 
     save_gdf(build_locks_gdf(result), "lock")
     save_gdf(build_chambers_gdf(result), "chamber")
+    save_gdf(build_subchambers_gdf(result), "subchamber")
     save_gdf(build_nodes_gdf(result), "nodes")
     save_gdf(build_edges_gdf(result), "edges")
     save_gdf(build_berths_gdf(result), "berths")

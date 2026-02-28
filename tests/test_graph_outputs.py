@@ -1,7 +1,14 @@
 """Tests for the typed GeoDataFrame builder functions in fis.lock.graph."""
 import pytest
 from shapely.geometry import Point, LineString, Polygon
-from fis.lock.graph import build_nodes_gdf, build_edges_gdf, build_berths_gdf
+from fis.lock.graph import (
+    build_nodes_gdf, 
+    build_edges_gdf, 
+    build_berths_gdf,
+    build_locks_gdf,
+    build_chambers_gdf,
+    build_subchambers_gdf
+)
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +56,16 @@ def _make_complex():
                         "length": 200.0,
                         "width": 24.0,
                         "route_geometry": None,
+                        "subchambers": [
+                            {
+                                "id": 77,
+                                "name": "Subchamber 1",
+                                "geometry": Polygon(
+                                    [(4.495, 52.44), (4.505, 52.44), (4.505, 52.46), (4.495, 52.46)]
+                                ).wkt,
+                                "length": 100.0,
+                            }
+                        ]
                     }
                 ],
             }
@@ -139,6 +156,56 @@ def test_berths_gdf_values():
 
 
 # ---------------------------------------------------------------------------
+# build_locks_gdf
+# ---------------------------------------------------------------------------
+
+def test_locks_gdf_geometry_type():
+    gdf = build_locks_gdf(COMPLEXES)
+    assert not gdf.empty
+    assert all(g.geom_type == "Point" for g in gdf.geometry)  # Wait, lock geometry in fixture is Point
+
+def test_locks_gdf_columns():
+    gdf = build_locks_gdf(COMPLEXES)
+    assert "isrs_code" not in gdf.columns # Not in fixture
+    assert "fairway_name" in gdf.columns
+    assert "geometry" in gdf.columns
+
+# ---------------------------------------------------------------------------
+# build_chambers_gdf
+# ---------------------------------------------------------------------------
+
+def test_chambers_gdf_geometry_type():
+    gdf = build_chambers_gdf(COMPLEXES)
+    assert not gdf.empty
+    assert all(g.geom_type == "Polygon" for g in gdf.geometry)
+
+def test_chambers_gdf_columns():
+    gdf = build_chambers_gdf(COMPLEXES)
+    for col in ["id", "name", "lock_id", "length", "width", "geometry"]:
+        assert col in gdf.columns, f"Missing column: {col}"
+
+# ---------------------------------------------------------------------------
+# build_subchambers_gdf
+# ---------------------------------------------------------------------------
+
+def test_subchambers_gdf_geometry_type():
+    gdf = build_subchambers_gdf(COMPLEXES)
+    assert not gdf.empty
+    assert all(g.geom_type == "Polygon" for g in gdf.geometry)
+
+def test_subchambers_gdf_columns():
+    gdf = build_subchambers_gdf(COMPLEXES)
+    for col in ["id", "name", "lock_id", "chamber_id", "length", "geometry"]:
+        assert col in gdf.columns, f"Missing column: {col}"
+
+def test_subchambers_gdf_values():
+    gdf = build_subchambers_gdf(COMPLEXES)
+    assert gdf.iloc[0]["id"] == 77
+    assert gdf.iloc[0]["chamber_id"] == 55
+    assert gdf.iloc[0]["lock_id"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Empty input
 # ---------------------------------------------------------------------------
 
@@ -146,3 +213,6 @@ def test_empty_complexes():
     assert build_nodes_gdf([]).empty
     assert build_edges_gdf([]).empty
     assert build_berths_gdf([]).empty
+    assert build_locks_gdf([]).empty
+    assert build_chambers_gdf([]).empty
+    assert build_subchambers_gdf([]).empty

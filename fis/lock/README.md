@@ -36,13 +36,14 @@ All spatial outputs are produced in two formats: `.geojson` (GIS / interoperabil
 
 | File | Description |
 |------|-------------|
+| `lock.geojson` / `.geoparquet` | Lock complex polygon geometries with all FIS metadata |
+| `chamber.geojson` / `.geoparquet` | Individual lock chamber polygons with metadata |
+| `subchamber.geojson` / `.geoparquet` | Sub-chamber polygons (partitions within a chamber) |
 | `nodes.geojson` / `.geoparquet` | Routing nodes: junctions, split/merge points, chamber doors |
 | `edges.geojson` / `.geoparquet` | Routing edges: fairway segments and chamber routes |
 | `berths.geojson` / `.geoparquet` | Waiting berths associated with each lock |
-| `summary.json` | Per-lock metadata: name, ISRS code, fairway, chamber count, berth count |
+| `summary.json` | Detailed JSON export of the lock hierarchy (complex → lock → chamber → subchamber) |
 
-> **Note:** The current implementation outputs a single flat `lock_schematization.geoparquet` /
-> `.geojson` / `.json`. The split-file structure above is the intended target (tracked in issue #17).
 
 ## Node Types (`node_type`)
 
