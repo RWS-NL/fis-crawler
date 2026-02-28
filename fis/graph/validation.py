@@ -6,6 +6,7 @@ from typing import Dict, List, Any, Optional
 import networkx as nx
 from .schema import load_schema
 from datetime import datetime
+import jinja2
 
 logger = logging.getLogger(__name__)
 
@@ -185,72 +186,25 @@ class GraphValidator:
         return {"checks": checks}
 
     def generate_markdown_report(self) -> str:
-        """Generate a Markdown report from results."""
+        """Generate a Markdown report from results using Jinja2 template."""
         stats = self.results["statistics"]
         border = self.results["border_integrity"]
         schema = self.results["schema_compliance"]
         critical = self.results["critical_connections"]
         
-        md = f"# Validation Report: FIS-EURIS Merged Graph\n**Generated at**: {datetime.now().isoformat()}\n\n"
-        md += f"## 1. Graph Statistics\n"
-        md += f"- **Total Nodes**: {stats['total_nodes']}\n"
-        md += f"- **Total Edges**: {stats['total_edges']}\n"
-        md += f"- **Unique Fairway Sections (Edges)**: {stats['unique_fairway_sections']}\n"
-        md += f"- **Connected Components**: {stats['connected_components']}\n"
-        md += f"- **Largest Component**: {stats['largest_component_size']} nodes\n\n"
+        # Calculate sources for table
+        sources = set(list(stats['nodes_by_source'].keys()) + list(stats['edges_by_source'].keys()))
         
-        md += "### Composition\n| Source | Nodes | Edges |\n|--------|-------|-------|\n"
-        for src in set(list(stats['nodes_by_source'].keys()) + list(stats['edges_by_source'].keys())):
-            nodes = stats['nodes_by_source'].get(src, 0)
-            edges = stats['edges_by_source'].get(src, 0)
-            md += f"| {src} | {nodes} | {edges} |\n"
-            
-        md += "\n### Largest Subgraphs\n| Subgraph ID | Nodes | Edges |\n|-------------|-------|-------|\n"
-        for sg in stats["subgraphs"]:
-            md += f"| {sg['subgraph_id']} | {sg['nodes']} | {sg['edges']} |\n"
-
-        md += f"\n## 2. Border Integrity\n"
-        md += f"- **Status**: {border['status']}\n"
-        md += f"- **Connections Found**: {border['total_connections']} (Expected: {border['expected_connections']})\n"
-        md += f"- **Max Gap**: {border['max_gap_meters']:.2f} m\n"
-        md += f"- **Avg Gap**: {border['avg_gap_meters']:.2f} m\n\n"
+        template_dir = pathlib.Path(__file__).parent / "templates"
+        env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir))
+        template = env.get_template("validation_report.md.j2")
         
-        md += "### Connection List\n| FIS Node | EURIS Node | Gap (m) |\n|----------|------------|---------|\n"
-        for c in border.get("connections", []):
-            md += f"| {c['u']} | {c['v']} | {c['gap']:.2f} |\n"
+        return template.render(
+            timestamp=datetime.now().isoformat(),
+            stats=stats,
+            border=border,
+            schema=schema,
+            critical=critical,
+            sources=list(sources)
+        )
 
-        md += "\n## 3. Schema Compliance & Attribute Completeness\n"
-        
-        for elem_type in ["nodes", "edges"]:
-            md += f"\n### {elem_type.capitalize()}\n"
-            data = schema[elem_type]
-            
-            if data['non_standard_attributes_detected']:
-                md += "**WARNING**: Found potential non-standard attributes:\n"
-                for k, v in data['attribute_counts'].items():
-                    md += f"- `{k}`: {v} occurrences\n"
-            else:
-                md += "✅ No obvious legacy non-standard attributes found.\n"
-                
-            md += f"\n#### Expected Attributes List & Completeness\n"
-            md += f"| Attribute | Missing/Null Count | Total Graph {elem_type.capitalize()} | Documentation |\n"
-            md += f"|-----------|--------------------|-----------------------|---------------|\n"
-            total = stats['total_nodes'] if elem_type == "nodes" else stats['total_edges']
-            
-            # Sort attributes alphabetically
-            for k in sorted(data['expected_attributes']):
-                missing = data['missing_counts'].get(k, 0)
-                doc = data['attribute_docs'].get(k, k)
-                md += f"| `{k}` | {missing} ({(missing/total*100):.1f}%) | {total} | {doc} |\n"
-
-        md += "\n## 4. Critical Connections\n| Location | Status | Details |\n|----------|--------|---------|\n"
-        for check in critical.get("checks", []):
-            icon = "✅" if check['status'] == "PASS" else "⚠️"
-            md += f"| {check['name']} | {icon} {check['status']} | {check['details']} |\n"
-
-        md += "\n## 5. Suggested Improvements\n"
-        md += "- **Attribute Cleanup**: Investigate attributes with high missing/null counts (>50%) and determine if they are required or can be dropped.\n"
-        md += "- **Graph Connectivity**: There and multiple disjoint subgraphs. Investigate whether the top 2-10 subgraphs are legitimately disconnected waterways or missing logical connections.\n"
-        md += "- **Legacy Attributes**: If non-standard legacy attributes are flagged, ensure they are added to `schema.toml` `attributes.edges` or `attributes.nodes` to map to canonical names.\n"
-
-        return md
