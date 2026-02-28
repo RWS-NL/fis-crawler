@@ -238,7 +238,11 @@ def group_complexes(locks, chambers, subchambers, isrs, ris_df, fairways, berths
                  sections_gdf=sections_gdf
              )
         logger.debug("  Found %d berths.", len(berths_data))
+        # Base attributes from lock row
+        lock_attrs = {k: v for k, v in lock.items() if k != "geometry" and not isinstance(v, (list, dict))}
+        
         complex_obj = {
+            **lock_attrs,
             "id": int(lock["Id"]),
             "name": lock["Name"],
             "isrs_code": lock_isrs_code,
@@ -251,6 +255,7 @@ def group_complexes(locks, chambers, subchambers, isrs, ris_df, fairways, berths
                 {
                      "id": int(lock["Id"]),
                      "name": lock["Name"],
+                     **lock_attrs,
                      "chambers": []
                 }
             ]
@@ -267,7 +272,11 @@ def group_complexes(locks, chambers, subchambers, isrs, ris_df, fairways, berths
                          route = LineString([chamber_routes["split_point"], centroid, chamber_routes["merge_point"]])
                          route_wkt = route.wkt
 
+             # Base attributes from chamber row
+             chamber_attrs = {k: v for k, v in chamber.items() if k != "geometry" and not isinstance(v, (list, dict))}
+
              c_obj = {
+                 **chamber_attrs,
                  "id": int(chamber["Id"]),
                  "name": chamber["Name"],
                  "length": float(chamber["Length"]) if pd.notna(chamber["Length"]) else None,
