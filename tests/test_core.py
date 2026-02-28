@@ -40,3 +40,41 @@ def test_find_nearby_berths_wrong_fairway():
     
     nearby = find_nearby_berths(lock_row, berths_gdf, None, None)
     assert len(nearby) == 0
+
+def test_find_nearby_berths_relation():
+    # Construct lock at origin
+    lock_row = pd.Series({
+        "Id": 1,
+        "Name": "Lock X",
+        "RouteKmBegin": 5.0,
+        "FairwayId": 100,
+        "geometry": Point(0, 0)
+    })
+
+    # Berth A is to the West (-X), Berth B is to the East (+X)
+    berths_data = [
+        {"Id": 10, "Name": "West Berth", "RouteKmBegin": 4.5, "FairwayId": 100, "geometry": Point(-0.01, 0)},
+        {"Id": 20, "Name": "East Berth", "RouteKmBegin": 5.5, "FairwayId": 100, "geometry": Point(0.01, 0)},
+    ]
+    berths_gdf = gpd.GeoDataFrame(berths_data, geometry="geometry")
+
+    # Mock the fairway geometries (before is West, after is East)
+    # Give them WKT representations to mimic database strings
+    from shapely.geometry import LineString
+    geom_before_wkt = LineString([(-0.05, 0), (0, 0)]).wkt
+    geom_after_wkt = LineString([(0, 0), (0.05, 0)]).wkt
+
+    # Calculate nearby berths with relation checked
+    nearby = find_nearby_berths(lock_row, berths_gdf, geom_before_wkt, geom_after_wkt, max_dist_m=5000)
+
+    # We expect 2 nearby berths
+    assert len(nearby) == 2
+
+    # Map output by ID to easily assert relation
+    results = {b["id"]: b for b in nearby}
+
+    # West Berth (ID 10) should be closer to geom_before ("before")
+    assert results[10]["relation"] == "before"
+
+    # East Berth (ID 20) should be closer to geom_after ("after")
+    assert results[20]["relation"] == "after"

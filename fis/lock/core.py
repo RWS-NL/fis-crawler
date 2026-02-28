@@ -380,7 +380,7 @@ def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_a
         relation = "unknown"
 
 
-        # 2. Try Spatial Projection (Substrings)
+        # Spatial Projection (Substrings)
         # We have fairway_geom_before and fairway_geom_after WKTs
         if fairway_geom_before and fairway_geom_after and berth.geometry:
              from shapely import wkt
