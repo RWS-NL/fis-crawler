@@ -329,10 +329,10 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0):
 
     return fairway_data
 
-def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_after, max_dist_m=2000):
+def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_after, max_dist_m=5000):
     """
     Find berths associated with the lock's fairway and determine if they are before or after.
-    Enforces a strict distance check (default 2km).
+    Enforces a strict distance check (default 5km).
     """
     nearby = []
     if berths_gdf is None or "FairwayId" not in berths_gdf.columns:
@@ -355,24 +355,20 @@ def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_a
     for _, berth in candidates.iterrows():
         is_nearby = False
         dist_m = None
-        
-        # KM Check (Fast and robust for fairways)
         berth_km = berth.get("RouteKmBegin")
-        if pd.notna(lock_km) and pd.notna(berth_km):
-            # Calculate absolute KM distance
-            km_diff = abs(lock_km - berth_km)
-            # Convert to meters (approx)
-            dist_m = km_diff * 1000
-            if dist_m <= max_dist_m:
-                is_nearby = True
-                
-        # Spatial Check (Fallback if KM missing or verification needed)
-        elif lock_geom and berth.geometry:
-            # Project to EPSG:28992 for metric distance
+        
+        # Calculate spatial distance if geometries exist
+        if lock_geom and berth.geometry:
             gs = gpd.GeoSeries([lock_geom, berth.geometry], crs="EPSG:4326")
             gs_rd = gs.to_crs("EPSG:28992")
             dist_m = gs_rd.iloc[0].distance(gs_rd.iloc[1])
-            
+            if dist_m <= max_dist_m:
+                is_nearby = True
+        
+        # Fallback to KM Check if spatial distance is missing
+        elif pd.notna(lock_km) and pd.notna(berth_km):
+            km_diff = abs(lock_km - berth_km)
+            dist_m = km_diff * 1000
             if dist_m <= max_dist_m:
                 is_nearby = True
 
