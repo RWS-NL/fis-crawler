@@ -37,6 +37,10 @@ jobs:
       - name: Build and enrich graphs
         run: uv run python -m fis.cli graph all
 
+      - name: Run Lock Schematization
+        run: uv run python -m fis.cli lock schematize
+        continue-on-error: true
+
       - name: Generate FIS Validation Report
         run: >
           uv run python -m fis.cli graph validate
@@ -51,11 +55,19 @@ jobs:
           --schema config/schema.toml
           --output-file output/merged_validation_report.md
 
-      - name: Upload Validation Reports
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: validation-reports
+          name: fis-pipeline-artifacts
           path: |
             output/fis_validation_report.md
             output/merged_validation_report.md
+            output/fis-graph/*.pickle
+            output/fis-graph/*.geoparquet
+            output/euris-graph/*.pickle
+            output/euris-graph/*.geoparquet
+            output/merged-graph/*.pickle
+            output/merged-graph/*.geoparquet
+            output/lock-schematization/*.geoparquet
+            output/lock-schematization/*.json
           retention-days: 30
