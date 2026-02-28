@@ -1,0 +1,73 @@
+# Validation Report: FIS-EURIS Merged Graph
+**Generated at**: {{ timestamp }}
+
+## 1. Graph Statistics
+- **Total Nodes**: {{ stats.total_nodes }}
+- **Total Edges**: {{ stats.total_edges }}
+- **Unique Fairway Sections (Edges)**: {{ stats.unique_fairway_sections }}
+- **Connected Components**: {{ stats.connected_components }}
+- **Largest Component**: {{ stats.largest_component_size }} nodes
+
+### Composition
+| Source | Nodes | Edges |
+|--------|-------|-------|
+{% for src in sources %}
+| {{ src }} | {{ stats.nodes_by_source.get(src, 0) }} | {{ stats.edges_by_source.get(src, 0) }} |
+{% endfor %}
+
+### Largest Subgraphs
+| Subgraph ID | Nodes | Edges |
+|-------------|-------|-------|
+{% for sg in stats.subgraphs %}
+| {{ sg.subgraph_id }} | {{ sg.nodes }} | {{ sg.edges }} |
+{% endfor %}
+
+## 2. Border Integrity
+- **Status**: {{ border.status }}
+- **Connections Found**: {{ border.total_connections }} (Expected: {{ border.expected_connections }})
+- **Max Gap**: {{ "%.2f"|format(border.max_gap_meters) }} m
+- **Avg Gap**: {{ "%.2f"|format(border.avg_gap_meters) }} m
+
+### Connection List
+| FIS Node | EURIS Node | Gap (m) |
+|----------|------------|---------|
+{% for c in border.connections %}
+| {{ c.u }} | {{ c.v }} | {{ "%.2f"|format(c.gap) }} |
+{% endfor %}
+
+## 3. Schema Compliance & Attribute Completeness
+
+{% for elem_type in ["nodes", "edges"] %}
+### {{ elem_type.capitalize() }}
+{% set data = schema[elem_type] %}
+
+{% if data.non_standard_attributes_detected %}
+**WARNING**: Found potential non-standard attributes:
+{% for k, v in data.attribute_counts.items() %}
+- `{{ k }}`: {{ v }} occurrences
+{% endfor %}
+{% else %}
+✅ No obvious legacy non-standard attributes found.
+{% endif %}
+
+#### Expected Attributes List & Completeness
+| Attribute | Missing/Null Count | Total Graph {{ elem_type.capitalize() }} | Documentation |
+|-----------|--------------------|-----------------------|---------------|
+{% set total = stats.total_nodes if elem_type == "nodes" else stats.total_edges %}
+{% for k in data.expected_attributes|sort %}
+{% set missing = data.missing_counts.get(k, 0) %}
+| `{{ k }}` | {{ missing }} ({{ "%.1f"|format(missing / total * 100) }}%) | {{ total }} | {{ data.attribute_docs.get(k, k) }} |
+{% endfor %}
+{% endfor %}
+
+## 4. Critical Connections
+| Location | Status | Details |
+|----------|--------|---------|
+{% for check in critical.checks %}
+| {{ check.name }} | {% if check.status == "PASS" %}✅{% else %}⚠️{% endif %} {{ check.status }} | {{ check.details }} |
+{% endfor %}
+
+## 5. Suggested Improvements
+- **Attribute Cleanup**: Investigate attributes with high missing/null counts (>50%) and determine if they are required or can be dropped.
+- **Graph Connectivity**: There are multiple disjoint subgraphs. Investigate whether the top 2-10 subgraphs are legitimately disconnected waterways or missing logical connections.
+- **Legacy Attributes**: If non-standard legacy attributes are flagged, ensure they are added to `schema.toml` `attributes.edges` or `attributes.nodes` to map to canonical names.

@@ -341,10 +341,10 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
 
 @cli.command()
 @click.option(
-    "--merged-graph", 
+    "--graph", 
     type=click.Path(exists=True, path_type=pathlib.Path), 
     default="output/merged-graph/graph.pickle",
-    help="Path to merged graph pickle file."
+    help="Path to graph pickle file to validate."
 )
 @click.option(
     "--schema", 
@@ -358,15 +358,15 @@ def merge(fis_enriched: pathlib.Path, euris_enriched: pathlib.Path, export_dir: 
     default="output/validation_report.md",
     help="Output path for the Markdown report."
 )
-def validate(merged_graph: pathlib.Path, schema: pathlib.Path, output_file: pathlib.Path) -> None:
-    """Validate the merged graph and generate a report."""
+def validate(graph: pathlib.Path, schema: pathlib.Path, output_file: pathlib.Path) -> None:
+    """Validate the graph and generate a report."""
     import pickle
     
-    logger.info("Loading merged graph from %s", merged_graph)
-    with open(merged_graph, "rb") as f:
-        graph = pickle.load(f)
+    logger.info("Loading graph from %s", graph)
+    with open(graph, "rb") as f:
+        g = pickle.load(f)
         
-    validator = GraphValidator(graph, schema)
+    validator = GraphValidator(g, schema)
     
     # Run checks
     validator.check_statistics()
