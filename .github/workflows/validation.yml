@@ -1,0 +1,61 @@
+name: Graph Validation Report
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: '0 0 * * 0' # Weekly run on Sunday midnight
+  workflow_dispatch:
+
+jobs:
+  validate-graph:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Run FIS crawler
+        run: uv run scrapy crawl dataservice -L INFO
+
+      - name: Run EURIS crawler
+        run: uv run scrapy crawl euris -L INFO
+
+      - name: Build and enrich graphs
+        run: uv run python -m fis.cli graph all
+
+      - name: Generate FIS Validation Report
+        run: >
+          uv run python -m fis.cli graph validate
+          --graph output/fis-enriched/graph.pickle
+          --schema config/schema.toml
+          --output-file output/fis_validation_report.md
+
+      - name: Generate Merged Validation Report
+        run: >
+          uv run python -m fis.cli graph validate
+          --graph output/merged-graph/graph.pickle
+          --schema config/schema.toml
+          --output-file output/merged_validation_report.md
+
+      - name: Upload Validation Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-reports
+          path: |
+            output/fis_validation_report.md
+            output/merged_validation_report.md
+          retention-days: 30
