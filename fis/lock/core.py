@@ -329,10 +329,10 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0):
 
     return fairway_data
 
-def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_after, max_dist_m=5000):
+def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_after, max_dist_m=2000):
     """
     Find berths associated with the lock's fairway and determine if they are before or after.
-    Enforces a strict distance check (default 5km).
+    Enforces a strict distance check (default 2km).
     """
     nearby = []
     if berths_gdf is None or "FairwayId" not in berths_gdf.columns:
@@ -359,51 +359,54 @@ def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_a
         
         # Calculate spatial distance if geometries exist
         if lock_geom and berth.geometry:
-            gs = gpd.GeoSeries([lock_geom, berth.geometry], crs="EPSG:4326")
-            gs_rd = gs.to_crs("EPSG:28992")
-            dist_m = gs_rd.iloc[0].distance(gs_rd.iloc[1])
-            if dist_m <= max_dist_m:
-                is_nearby = True
-        
-        # Fallback to KM Check if spatial distance is missing
-        elif pd.notna(lock_km) and pd.notna(berth_km):
-            km_diff = abs(lock_km - berth_km)
-            dist_m = km_diff * 1000
-            if dist_m <= max_dist_m:
-                is_nearby = True
-
-        if is_nearby:
-            # Determine relation (before/after)
-            relation = "unknown"
+            from pyproj import Geod
+            from shapely.geometry import Point
             
-            # 1. Try KM-based (if available and reliable)
-            if pd.notna(lock_km) and pd.notna(berth_km):
-                 # We need to know the fairway direction/increasing KM?
-                 # Assumption: If lock splits fairway into A (start-lock) and B (lock-end).
-                 # If berth KM is "before" lock mean KM?
-                 # Without explicit direction, we can use the fairway geometry relation if available.
-                 pass
+            # Ensure we are comparing Points for Geod.inv
+            lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
+            bg = berth.geometry if isinstance(berth.geometry, Point) else berth.geometry.centroid
+            
+            if lg and bg:
+                geod = Geod(ellps="WGS84")
+                _, _, dist_m = geod.inv(lg.x, lg.y, bg.x, bg.y)
+                
+                if dist_m <= max_dist_m:
+                    is_nearby = True
 
-            # 2. Try Spatial Projection (Substrings)
-            # We have fairway_geom_before and fairway_geom_after WKTs
-            if fairway_geom_before and fairway_geom_after and berth.geometry:
-                 from shapely import wkt
-                 g_before = wkt.loads(fairway_geom_before)
-                 g_after = wkt.loads(fairway_geom_after)
-                 
-                 # Buffer slightly for robustness
-                 if g_before.distance(berth.geometry) < g_after.distance(berth.geometry):
-                     relation = "before"
-                 else:
-                     relation = "after"
+        if not is_nearby:
+            continue
 
-            nearby.append({
-                "id": int(berth["Id"]),
-                "name": berth.get("Name"),
-                "km": float(berth_km) if pd.notna(berth_km) else None,
-                "dist_m": round(dist_m, 1) if dist_m is not None else None,
-                "geometry": berth.geometry.wkt if hasattr(berth, "geometry") and berth.geometry else None,
-                "relation": relation 
-            })
+        # Determine relation (before/after)
+        relation = "unknown"
+        
+        # 1. Try KM-based (if available and reliable)
+        if pd.notna(lock_km) and pd.notna(berth_km):
+             # We need to know the fairway direction/increasing KM?
+             # Assumption: If lock splits fairway into A (start-lock) and B (lock-end).
+             # If berth KM is "before" lock mean KM?
+             # Without explicit direction, we can use the fairway geometry relation if available.
+             pass
+
+        # 2. Try Spatial Projection (Substrings)
+        # We have fairway_geom_before and fairway_geom_after WKTs
+        if fairway_geom_before and fairway_geom_after and berth.geometry:
+             from shapely import wkt
+             g_before = wkt.loads(fairway_geom_before)
+             g_after = wkt.loads(fairway_geom_after)
+             
+             # Buffer slightly for robustness
+             if g_before.distance(berth.geometry) < g_after.distance(berth.geometry):
+                 relation = "before"
+             else:
+                 relation = "after"
+
+        nearby.append({
+            "id": int(berth["Id"]),
+            "name": berth.get("Name"),
+            "km": float(berth_km) if pd.notna(berth_km) else None,
+            "dist_m": round(dist_m, 1) if dist_m is not None else None,
+            "geometry": berth.geometry.wkt if hasattr(berth, "geometry") and berth.geometry else None,
+            "relation": relation 
+        })
 
     return nearby
