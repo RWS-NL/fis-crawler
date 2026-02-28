@@ -1,10 +1,81 @@
 import pandas as pd
+import geopandas as gpd
 from shapely import wkt
 from shapely.geometry import Point, mapping
 from pyproj import Geod
 from fis.lock.utils import find_chamber_doors
 
 geod = Geod(ellps="WGS84")
+
+CRS = "EPSG:4326"
+
+
+def build_nodes_gdf(complexes) -> gpd.GeoDataFrame:
+    """Return a Point GeoDataFrame of all routing nodes across all lock complexes."""
+    features = build_graph_features(complexes)
+    rows = [
+        f["properties"] | {"geometry": _geom_from_feature(f)}
+        for f in features
+        if f["properties"].get("feature_type") == "node"
+    ]
+    if not rows:
+        return gpd.GeoDataFrame(columns=["id", "node_type", "lock_id", "chamber_id", "geometry"], crs=CRS)
+    gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
+    # Ensure useful columns present even if missing in some features
+    for col in ["chamber_id"]:
+        if col not in gdf.columns:
+            gdf[col] = pd.NA
+    return gdf[["id", "node_type", "lock_id", "chamber_id", "geometry"]]
+
+
+def build_edges_gdf(complexes) -> gpd.GeoDataFrame:
+    """Return a LineString GeoDataFrame of all routing edges across all lock complexes."""
+    features = build_graph_features(complexes)
+    rows = [
+        f["properties"] | {"geometry": _geom_from_feature(f)}
+        for f in features
+        if f["properties"].get("feature_type") == "fairway_segment"
+    ]
+    if not rows:
+        return gpd.GeoDataFrame(
+            columns=["id", "segment_type", "lock_id", "chamber_id", "fairway_id",
+                     "source_node", "target_node", "length_m", "geometry"],
+            crs=CRS,
+        )
+    gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
+    for col in ["chamber_id", "section_id"]:
+        if col not in gdf.columns:
+            gdf[col] = pd.NA
+    cols = ["id", "segment_type", "lock_id", "chamber_id", "fairway_id",
+            "source_node", "target_node", "length_m", "geometry"]
+    return gdf[[c for c in cols if c in gdf.columns]]
+
+
+def build_berths_gdf(complexes) -> gpd.GeoDataFrame:
+    """Return a Point GeoDataFrame of all berths associated with lock complexes."""
+    rows = []
+    for c in complexes:
+        for berth in c.get("berths", []):
+            if not berth.get("geometry"):
+                continue
+            geom = wkt.loads(berth["geometry"])
+            rows.append({
+                "id": berth.get("id"),
+                "name": berth.get("name"),
+                "lock_id": c["id"],
+                "dist_m": berth.get("dist_m"),
+                "relation": berth.get("relation"),
+                "geometry": geom,
+            })
+    if not rows:
+        return gpd.GeoDataFrame(columns=["id", "name", "lock_id", "dist_m", "relation", "geometry"], crs=CRS)
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
+
+
+def _geom_from_feature(feature):
+    """Convert a GeoJSON feature geometry dict to a Shapely geometry."""
+    from shapely.geometry import shape
+    return shape(feature["geometry"])
 
 
 def build_graph_features(complexes):
