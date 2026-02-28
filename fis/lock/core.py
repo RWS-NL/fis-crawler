@@ -329,11 +329,14 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0):
 
     return fairway_data
 
-def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_after, max_dist_m=2000):
+def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_after, max_dist_m=2000, allowed_categories=None):
     """
     Find berths associated with the lock's fairway and determine if they are before or after.
-    Enforces a strict distance check (default 2km).
+    Enforces a strict distance check (default 2km) and category filtering.
     """
+    if allowed_categories is None:
+        allowed_categories = ["WAITING_AREA"]
+
     nearby = []
     if berths_gdf is None or "FairwayId" not in berths_gdf.columns:
         return nearby
@@ -343,9 +346,16 @@ def find_nearby_berths(lock_row, berths_gdf, fairway_geom_before, fairway_geom_a
     if pd.isna(fw_id):
         return nearby
         
-    # Filter candidates
+    # Filter candidates by Fairway
     candidates = berths_gdf[berths_gdf["FairwayId"] == fw_id].copy()
     
+    # Filter by Category (if present)
+    if "Category" in candidates.columns and allowed_categories:
+        candidates = candidates[
+            candidates["Category"].isna() | 
+            candidates["Category"].isin(allowed_categories)
+        ]
+        
     if candidates.empty:
         return nearby
         

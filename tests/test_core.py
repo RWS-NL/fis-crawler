@@ -41,6 +41,34 @@ def test_find_nearby_berths_wrong_fairway():
     nearby = find_nearby_berths(lock_row, berths_gdf, None, None)
     assert len(nearby) == 0
 
+def test_find_nearby_berths_category_filter():
+    lock_row = pd.Series({
+        "Id": 15185,
+        "Name": "Sluis Hengelo",
+        "RouteKmBegin": 45.1,
+        "FairwayId": 51569,
+        "geometry": Point(6.804, 52.246)
+    })
+
+    # Berth 100 is WAITING_AREA (Should be included)
+    # Berth 200 is LOADING_AND_UNLOADING (Should be excluded)
+    berths_data = [
+        {"Id": 100, "Name": "Good Berth", "RouteKmBegin": 44.5, "FairwayId": 51569, "Category": "WAITING_AREA", "geometry": Point(6.805, 52.247)},
+        {"Id": 200, "Name": "Ligplaats CTT Hengelo", "RouteKmBegin": 43.7, "FairwayId": 51569, "Category": "LOADING_AND_UNLOADING", "geometry": Point(6.786, 52.248)},
+        {"Id": 300, "Name": "Unknown Berth", "RouteKmBegin": 44.0, "FairwayId": 51569, "Category": None, "geometry": Point(6.801, 52.246)}
+    ]
+    berths_gdf = gpd.GeoDataFrame(berths_data, geometry="geometry")
+
+    # Default call should implicitly use allowed_categories=["WAITING_AREA"] and include NaNs
+    nearby = find_nearby_berths(lock_row, berths_gdf, None, None, max_dist_m=5000)
+
+    # We expect 2 nearby berths (ID 100, ID 300)
+    assert len(nearby) == 2
+    ids = [b["id"] for b in nearby]
+    assert 100 in ids
+    assert 300 in ids
+    assert 200 not in ids
+
 def test_find_nearby_berths_relation():
     # Construct lock at origin
     lock_row = pd.Series({
