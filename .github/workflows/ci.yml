@@ -31,7 +31,7 @@ jobs:
         run: uvx ruff check fis/ tests/
         
       - name: Run Ruff Formatter Check
-        run: uvx ruff format --check fis/ tests/
+        run: uvx ruff format --diff fis/ tests/
         
       - name: Run Pytest
         run: uv run pytest tests/
