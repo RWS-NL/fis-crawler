@@ -12,12 +12,12 @@ from fis.ris_index import load_ris_index
 from fis.lock.core import load_data, group_complexes
 
 from fis.lock.graph import (
-    build_nodes_gdf, 
-    build_edges_gdf, 
-    build_berths_gdf, 
-    build_locks_gdf, 
-    build_chambers_gdf, 
-    build_subchambers_gdf
+    build_nodes_gdf,
+    build_edges_gdf,
+    build_berths_gdf,
+    build_locks_gdf,
+    build_chambers_gdf,
+    build_subchambers_gdf,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,10 +48,14 @@ def cli():
     default="output/lock-schematization",
     help="Output directory.",
 )
-def schematize(export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pathlib.Path) -> None:
+def schematize(
+    export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pathlib.Path
+) -> None:
     """Process lock complexes into detailed graph features."""
     try:
-        locks, chambers, subchambers, isrs, fairways, berths, sections = load_data(export_dir)
+        locks, chambers, subchambers, isrs, fairways, berths, sections = load_data(
+            export_dir
+        )
     except FileNotFoundError:
         logger.exception("Failed to load data from %s", export_dir)
         sys.exit(1)
@@ -65,16 +69,18 @@ def schematize(export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pa
             logger.info("Loaded %d RIS Index entries", len(ris_df))
         except Exception as e:
             logger.warning("Could not load RIS Index: %s", e)
-            
+
     # Load Network Graph for fairway connectivity
     import pickle
-    import networkx as nx
+
     network_graph = None
     if fis_graph and fis_graph.exists():
         try:
             with open(fis_graph, "rb") as f:
                 network_graph = pickle.load(f)
-            logger.info("Loaded network graph with %d nodes", network_graph.number_of_nodes())
+            logger.info(
+                "Loaded network graph with %d nodes", network_graph.number_of_nodes()
+            )
         except Exception as e:
             logger.warning("Could not load fis-graph: %s", e)
 
@@ -82,7 +88,17 @@ def schematize(export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pa
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Group complexes
-    result = group_complexes(locks, chambers, subchambers, isrs, ris_df, fairways, berths, sections, network_graph)
+    result = group_complexes(
+        locks,
+        chambers,
+        subchambers,
+        isrs,
+        ris_df,
+        fairways,
+        berths,
+        sections,
+        network_graph,
+    )
 
     # Summary JSON (per-lock metadata)
     output_json = output_dir / "summary.json"

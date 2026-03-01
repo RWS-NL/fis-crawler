@@ -4,7 +4,6 @@ import scrapy
 
 import geopandas as gpd
 import pandas as pd
-from tqdm.auto import tqdm
 
 
 class DataserviceSpider(scrapy.Spider):
@@ -51,7 +50,7 @@ class DataserviceSpider(scrapy.Spider):
 
     def parse_waml(self, response):
         versions = response.xpath(
-            f".//wadl:resources/wadl:resource", namespaces=self.namespaces
+            ".//wadl:resources/wadl:resource", namespaces=self.namespaces
         )
         last_version = versions[-1]
         # we're looking from the last version
