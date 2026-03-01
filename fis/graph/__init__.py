@@ -12,6 +12,6 @@ __all__ = [
     "load_fis_data",
     "export_graph",
     "load_euris_graph",
-    "find_border_connections",
+    "find_geometric_border_connections",
     "merge_graphs",
 ]

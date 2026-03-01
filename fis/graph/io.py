@@ -8,7 +8,6 @@ from typing import Tuple
 
 import geopandas as gpd
 import networkx as nx
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
