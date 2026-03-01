@@ -39,3 +39,7 @@ write_to = "fis/_version.py"
 [tool.setuptools]
 packages = ["fis"]
 
+[tool.ruff]
+exclude = [
+    "fis/_version.py",
+]
