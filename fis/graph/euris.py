@@ -48,9 +48,11 @@ def concat_nodes(data_dir: pathlib.Path) -> gpd.GeoDataFrame:
     node_path_re = re.compile(r"Node_(?P<countrycode>[A-Z]+)_\d+.geojson")
     node_gdf["countrycode_locode"] = node_gdf["locode"].apply(lambda x: x[:2])
     node_gdf["countrycode_path"] = node_gdf["path"].apply(
-        lambda x: node_path_re.match(x).group("countrycode")
-        if node_path_re.match(x)
-        else None
+        lambda x: (
+            node_path_re.match(x).group("countrycode")
+            if node_path_re.match(x)
+            else None
+        )
     )
     node_gdf["countrycode"] = node_gdf["countrycode_locode"]
     node_gdf["node_id"] = node_gdf.apply(

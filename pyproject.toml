@@ -42,5 +42,7 @@ packages = ["fis"]
 [tool.ruff]
 exclude = [
     "fis/_version.py",
-    "fis/graph/euris.py",
 ]
+
+[tool.ruff.format]
+line-ending = "lf"
