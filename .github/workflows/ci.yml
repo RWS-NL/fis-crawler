@@ -30,9 +30,6 @@ jobs:
       - name: Run Ruff Linter
         run: uvx ruff check fis/ tests/
         
-      - name: Auto-format using Ruff
-        run: uvx ruff format fis/ tests/
-
       - name: Run Ruff Formatter Check
         run: uvx ruff format --check fis/ tests/
         
