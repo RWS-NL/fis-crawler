@@ -1,5 +1,6 @@
 import pandas as pd
 import geopandas as gpd
+import json
 from shapely import wkt
 from shapely.geometry import Point, mapping
 from pyproj import Geod
@@ -82,11 +83,14 @@ def build_locks_gdf(complexes) -> gpd.GeoDataFrame:
         if not c.get("geometry"):
             continue
         geom = wkt.loads(c["geometry"])
-        attrs = {
-            k: v
-            for k, v in c.items()
-            if k not in _SKIP and not isinstance(v, (list, dict))
-        }
+        attrs = {}
+        for k, v in c.items():
+            if k in _SKIP:
+                continue
+            if isinstance(v, (list, dict)):
+                attrs[k] = json.dumps(v)
+            else:
+                attrs[k] = v
         rows.append({**attrs, "geometry": geom})
     if not rows:
         return gpd.GeoDataFrame(columns=["id", "name", "geometry"], crs=CRS)
@@ -177,18 +181,20 @@ def build_graph_features(complexes):
         geom = wkt.loads(c["geometry"]) if c.get("geometry") else None
         if geom:
             # Basic properties
-            props = {
-                k: v
-                for k, v in c.items()
-                if k
-                not in [
+            props = {}
+            for k, v in c.items():
+                if k in [
                     "geometry",
                     "locks",
                     "berths",
                     "geometry_before_wkt",
                     "geometry_after_wkt",
-                ]
-            }
+                ]:
+                    continue
+                if isinstance(v, (list, dict)):
+                    props[k] = json.dumps(v)
+                else:
+                    props[k] = v
             props["feature_type"] = "lock"
             features.append(
                 {
