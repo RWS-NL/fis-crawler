@@ -406,6 +406,15 @@ def group_complexes(
 
         # Base attributes from lock row
         lock_attrs = sanitize_attrs(lock)
+        
+        # Extract DISK complex details if a lock was successfully matched
+        disk_complex_id = None
+        disk_complex_name = None
+        for dl in matched_disk_locks:
+            if dl.get("complexid"):
+                disk_complex_id = dl.get("complexid")
+                disk_complex_name = dl.get("complex_naam")
+                break
 
         complex_obj = {
             **lock_attrs,
@@ -418,6 +427,8 @@ def group_complexes(
             "sections": sections_data,
             "disk_locks": matched_disk_locks,
             "disk_bridges": matched_disk_bridges,
+            "disk_complex_id": disk_complex_id,
+            "disk_complex_name": disk_complex_name,
             "locks": [
                 {
                     "id": int(lock["Id"]),
