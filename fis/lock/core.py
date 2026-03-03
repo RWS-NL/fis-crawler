@@ -10,12 +10,12 @@ from shapely.geometry import Point, LineString
 logger = logging.getLogger(__name__)
 
 
-def load_data(export_dir: pathlib.Path):
+def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     """Load necessary parquet files."""
 
-    def read_geo_or_parquet(stem):
-        gpq = export_dir / f"{stem}.geoparquet"
-        pq = export_dir / f"{stem}.parquet"
+    def read_geo_or_parquet(dir_path, stem):
+        gpq = dir_path / f"{stem}.geoparquet"
+        pq = dir_path / f"{stem}.parquet"
         if gpq.exists():
             return gpd.read_parquet(gpq)
         if pq.exists():
@@ -28,18 +28,108 @@ def load_data(export_dir: pathlib.Path):
             return df
         return None
 
-    locks = read_geo_or_parquet("lock")
-    chambers = read_geo_or_parquet("chamber")
-    subchambers = read_geo_or_parquet("subchamber")
-    isrs = read_geo_or_parquet("isrs")
-    fairways = read_geo_or_parquet("fairway")
-    berths = read_geo_or_parquet("berth")
-    sections = read_geo_or_parquet("section")
+    locks = read_geo_or_parquet(export_dir, "lock")
+    chambers = read_geo_or_parquet(export_dir, "chamber")
+    subchambers = read_geo_or_parquet(export_dir, "subchamber")
+    isrs = read_geo_or_parquet(export_dir, "isrs")
+    fairways = read_geo_or_parquet(export_dir, "fairway")
+    berths = read_geo_or_parquet(export_dir, "berth")
+    sections = read_geo_or_parquet(export_dir, "section")
 
     if locks is None or chambers is None:
         raise FileNotFoundError("Missing essential lock/chamber data.")
 
-    return locks, chambers, subchambers, isrs, fairways, berths, sections
+    disk_locks = read_geo_or_parquet(disk_dir, "schutsluis")
+    brug_vast = read_geo_or_parquet(disk_dir, "brug_vast")
+    brug_beweegbaar = read_geo_or_parquet(disk_dir, "brug_beweegbaar")
+    
+    # Combine bridges
+    bridges = []
+    if brug_vast is not None: bridges.append(brug_vast)
+    if brug_beweegbaar is not None: bridges.append(brug_beweegbaar)
+    disk_bridges = None
+    if bridges:
+        disk_bridges = pd.concat(bridges, ignore_index=True)
+        if isinstance(bridges[0], gpd.GeoDataFrame):
+            disk_bridges = gpd.GeoDataFrame(disk_bridges, geometry='geometry', crs=bridges[0].crs)
+
+    if disk_locks is None or disk_bridges is None:
+        raise FileNotFoundError("Missing essential DISK data (schutsluis or bridges).")
+
+    return locks, chambers, subchambers, isrs, fairways, berths, sections, disk_locks, disk_bridges
+
+
+from shapely.geometry.base import BaseGeometry
+import numpy as np
+
+def sanitize_attrs(row_obj):
+    """Clean row values into pure Python JSON-serializable types."""
+    attrs = {}
+    for k, v in row_obj.items():
+        if k == "geometry": continue
+        if isinstance(v, (list, dict)): continue
+        if pd.isna(v): attrs[k] = None
+        elif isinstance(v, BaseGeometry): attrs[k] = v.wkt
+        elif hasattr(v, 'isoformat'): attrs[k] = v.isoformat()
+        elif isinstance(v, (np.integer, np.int64, np.int32)): attrs[k] = int(v)
+        elif isinstance(v, (np.floating, np.float64, np.float32)): attrs[k] = float(v)
+        elif isinstance(v, np.bool_): attrs[k] = bool(v)
+        else: attrs[k] = v
+    geom = row_obj.get("geometry")
+    if geom is not None:
+         attrs["geometry"] = geom.wkt if hasattr(geom, "wkt") else str(geom)
+    return attrs
+
+
+def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
+    """Spatially match DISK locks and bridges to a given FIS lock complex."""
+    matched_disk_locks = []
+    matched_disk_bridges = []
+    
+    complex_geoms_rd = []
+    lock_geom_rd = None
+    if hasattr(lock, "geometry") and lock.geometry:
+        lock_geom_rd = gpd.GeoSeries([lock.geometry], crs="EPSG:4326").to_crs("EPSG:28992").iloc[0]
+        complex_geoms_rd.append(lock_geom_rd)
+
+    chamber_geoms_rd = []
+    if "geometry" in lock_chambers.columns:
+        for _, c_row in lock_chambers.iterrows():
+            if pd.notna(c_row["geometry"]):
+                c_geom = wkt.loads(c_row["geometry"]) if isinstance(c_row["geometry"], str) else c_row["geometry"]
+                c_geom_rd = gpd.GeoSeries([c_geom], crs="EPSG:4326").to_crs("EPSG:28992").iloc[0]
+                chamber_geoms_rd.append(c_geom_rd)
+                complex_geoms_rd.append(c_geom_rd)
+
+    if complex_geoms_rd:
+        from shapely.ops import unary_union
+        # For bridges, we use the complex buffered bounds
+        complex_union_rd = unary_union(complex_geoms_rd)
+        complex_buffered_rd = complex_union_rd.buffer(500)
+        
+        # Match DISK Bridges
+        if disk_bridges_rd is not None:
+            bridge_mask = disk_bridges_rd.intersects(complex_buffered_rd)
+            for _, b in disk_bridges_rd[bridge_mask].iterrows():
+                matched_disk_bridges.append(sanitize_attrs(b))
+
+        # Match DISK Locks
+        if disk_locks_rd is not None:
+            # 1. Try strict chamber intersection first
+            chamber_union_rd = unary_union(chamber_geoms_rd) if chamber_geoms_rd else None
+            if chamber_union_rd:
+                lock_mask_strict = disk_locks_rd.intersects(chamber_union_rd)
+                for _, l in disk_locks_rd[lock_mask_strict].iterrows():
+                    matched_disk_locks.append(sanitize_attrs(l))
+            
+            # 2. If NO locks matched via chambers, fallback to 500m lock complex buffer
+            if not matched_disk_locks and lock_geom_rd:
+                lock_buffer_rd = lock_geom_rd.buffer(500)
+                lock_mask_loose = disk_locks_rd.intersects(lock_buffer_rd)
+                for _, l in disk_locks_rd[lock_mask_loose].iterrows():
+                    matched_disk_locks.append(sanitize_attrs(l))
+                    
+    return matched_disk_locks, matched_disk_bridges
 
 
 def find_fairway_junctions(sections_gdf, fairway_id):
@@ -77,9 +167,11 @@ def group_complexes(
     berths,
     sections,
     network_graph=None,
+    disk_locks=None,
+    disk_bridges=None,
 ):
     """
-    Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, and Section data.
+    Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, Section, and DISK data.
     """
     complexes = []
 
@@ -122,6 +214,15 @@ def group_complexes(
     # Create spatial index for sections if not already present
     if sections_gdf is not None:
         pass
+
+    # Pre-project DISK datasets for spatial joining
+    disk_locks_rd = None
+    if disk_locks is not None and not disk_locks.empty and "geometry" in disk_locks.columns:
+        disk_locks_rd = disk_locks.to_crs("EPSG:28992")
+
+    disk_bridges_rd = None
+    if disk_bridges is not None and not disk_bridges.empty and "geometry" in disk_bridges.columns:
+        disk_bridges_rd = disk_bridges.to_crs("EPSG:28992")
 
     for idx, lock in tqdm(
         locks_gdf.iterrows(), total=len(locks_gdf), desc="Processing locks"
@@ -298,25 +399,25 @@ def group_complexes(
                 sections_gdf=sections_gdf,
             )
         logger.debug("  Found %d berths.", len(berths_data))
+        
+        # DISK Matching
+        matched_disk_locks, matched_disk_bridges = match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd)
+
+
         # Base attributes from lock row
-        lock_attrs = {
-            k: v
-            for k, v in lock.items()
-            if k != "geometry" and not isinstance(v, (list, dict))
-        }
+        lock_attrs = sanitize_attrs(lock)
 
         complex_obj = {
             **lock_attrs,
             "id": int(lock["Id"]),
             "name": lock["Name"],
             "isrs_code": lock_isrs_code,
-            "geometry": lock.geometry.wkt
-            if hasattr(lock, "geometry") and lock.geometry
-            else None,
             **ris_info,
             **fairway_data,
             "berths": berths_data,
             "sections": sections_data,
+            "disk_locks": matched_disk_locks,
+            "disk_bridges": matched_disk_bridges,
             "locks": [
                 {
                     "id": int(lock["Id"]),
@@ -349,11 +450,7 @@ def group_complexes(
                     route_wkt = route.wkt
 
             # Base attributes from chamber row
-            chamber_attrs = {
-                k: v
-                for k, v in chamber.items()
-                if k != "geometry" and not isinstance(v, (list, dict))
-            }
+            chamber_attrs = sanitize_attrs(chamber)
 
             c_obj = {
                 **chamber_attrs,
@@ -365,9 +462,6 @@ def group_complexes(
                 "width": float(chamber["Width"])
                 if pd.notna(chamber["Width"])
                 else None,
-                "geometry": chamber["geometry"]
-                if "geometry" in chamber and pd.notna(chamber["geometry"])
-                else None,
                 "route_geometry": route_wkt,
             }
             # Add subchambers
@@ -377,13 +471,7 @@ def group_complexes(
                 ]
                 c_obj["subchambers"] = []
                 for _, sc in chamber_subchambers.iterrows():
-                    sc_obj = {
-                        k: v
-                        for k, v in sc.items()
-                        if k != "geometry" and not isinstance(v, (list, dict))
-                    }
-                    if "geometry" in sc.index and pd.notna(sc["geometry"]):
-                        sc_obj["geometry"] = sc["geometry"].wkt
+                    sc_obj = sanitize_attrs(sc)
                     c_obj["subchambers"].append(sc_obj)
 
             complex_obj["locks"][0]["chambers"].append(c_obj)

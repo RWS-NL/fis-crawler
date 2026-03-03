@@ -15,6 +15,7 @@ Locks are modelled in full detail: individual chambers, approach segments, waiti
 | Network | Crawler | Description |
 |---------|---------|-------------|
 | FIS | `scrapy crawl dataservice` | Dutch inland waterways (Rijkswaterstaat) |
+| DISK | `scrapy crawl disk` | Dutch lock & bridge details (Rijkswaterstaat) |
 | EURIS | `scrapy crawl euris` | European inland waterways |
 | Merged | `fis.cli graph merge` | Combined FIS + EURIS cross-border network |
 
@@ -29,6 +30,7 @@ CRAWL → NETWORKS → ENRICH → SCHEMATIZE → MERGE
 | Stage | Command | Output |
 |-------|---------|--------|
 | Crawl FIS | `scrapy crawl dataservice` | `output/fis-export/` |
+| Crawl DISK | `scrapy crawl disk` | `output/disk-export/` |
 | Crawl EURIS | `scrapy crawl euris` | `output/euris-export/` |
 | Build Networks | `fis.cli graph {fis,euris}` | `output/{fis,euris}-graph/` |
 | Enrich | `fis.cli graph enrich-{fis,euris}` | `output/{fis,euris}-enriched/` |
@@ -73,6 +75,9 @@ uv run python -m fis.cli lock schematize    # Process lock complexes
 # FIS (Dutch fairways) → output/fis-export/
 uv run scrapy crawl dataservice -L INFO
 
+# DISK (Dutch Lock Details) → output/disk-export/
+uv run scrapy crawl disk -L INFO
+
 # EURIS (European fairways) → output/euris-export/
 uv run scrapy crawl euris -L INFO
 ```
@@ -86,10 +91,11 @@ CRAWL → NETWORKS → ENRICH → SCHEMATIZE → MERGE
 | Stage | Command | Output |
 |-------|---------|--------|
 | Crawl FIS | `scrapy crawl dataservice` | `output/fis-export/` |
+| Crawl DISK | `scrapy crawl disk` | `output/disk-export/` |
 | Crawl EURIS | `scrapy crawl euris` | `output/euris-export/` |
 | Build Networks | `fis.cli graph {fis,euris}` | `output/{fis,euris}-graph/` |
 | Enrich | `fis.cli graph enrich-{fis,euris}` | `output/{fis,euris}-enriched/` |
-| Schematize Locks | `fis.cli lock schematize` | `output/lock-schematization/` |
+| Schematize Locks | `fis.cli lock schematize --disk-dir output/disk-export` | `output/lock-schematization/` |
 | Merge | `fis.cli graph merge` | `output/merged-graph/` |
 
 ## Module Documentation

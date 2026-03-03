@@ -37,6 +37,12 @@ def cli():
     help="Directory containing input parquet files.",
 )
 @click.option(
+    "--disk-dir",
+    type=click.Path(path_type=pathlib.Path),
+    default="output/disk-export",
+    help="Directory containing exported DISK parquet files.",
+)
+@click.option(
     "--fis-graph",
     type=click.Path(path_type=pathlib.Path),
     default="output/fis-graph/graph.pickle",
@@ -49,12 +55,12 @@ def cli():
     help="Output directory.",
 )
 def schematize(
-    export_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pathlib.Path
+    export_dir: pathlib.Path, disk_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pathlib.Path
 ) -> None:
     """Process lock complexes into detailed graph features."""
     try:
-        locks, chambers, subchambers, isrs, fairways, berths, sections = load_data(
-            export_dir
+        locks, chambers, subchambers, isrs, fairways, berths, sections, disk_locks, disk_bridges = load_data(
+            export_dir, disk_dir
         )
     except FileNotFoundError:
         logger.exception("Failed to load data from %s", export_dir)
@@ -98,6 +104,8 @@ def schematize(
         berths,
         sections,
         network_graph,
+        disk_locks,
+        disk_bridges,
     )
 
     # Summary JSON (per-lock metadata)
