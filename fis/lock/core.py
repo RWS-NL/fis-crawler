@@ -61,6 +61,8 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
         raise FileNotFoundError("Missing essential DISK data (schutsluis or bridges).")
 
     operatingtimes = read_geo_or_parquet(export_dir, "operatingtimes")
+    bridges = read_geo_or_parquet(export_dir, "bridge")
+    openings = read_geo_or_parquet(export_dir, "opening")
 
     return (
         locks,
@@ -73,6 +75,8 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
         disk_locks,
         disk_bridges,
         operatingtimes,
+        bridges,
+        openings,
     )
 
 
@@ -340,6 +344,57 @@ def _find_connected_sections(
     return sections_data, internal_sections, connected_fairways
 
 
+def _resolve_openings(lock, lock_chambers, bridges, openings, op_times_map):
+    """
+    Find openings associated with a lock. This checks:
+    1. Openings directly parented to the Lock (ParentId = lock "Id").
+    2. Openings directly parented to any of the Lock's chambers.
+    3. Openings parented to a Bridge that shares the lock's RelatedBuildingComplexName.
+    """
+    openings_data = []
+    if openings is None or openings.empty:
+        return openings_data
+
+    # Find relevant Parent Ids
+    parent_ids = {int(lock["Id"])}
+    if "Id" in lock_chambers.columns:
+        for cid in lock_chambers["Id"].dropna():
+            parent_ids.add(int(cid))
+
+    if bridges is not None and not bridges.empty:
+        lock_complex_name = lock.get("RelatedBuildingComplexName")
+        if pd.notna(lock_complex_name):
+            # Find bridges belonging to the same complex
+            matching_bridges = bridges[
+                bridges["RelatedBuildingComplexName"] == lock_complex_name
+            ]
+            for bid in matching_bridges["Id"].dropna():
+                parent_ids.add(int(bid))
+
+    # Filter openings mapped to any of these parents
+    matched_openings = openings[openings["ParentId"].isin(parent_ids)]
+    for _, opening_row in matched_openings.iterrows():
+        op_attrs = sanitize_attrs(opening_row)
+        op_id = int(opening_row["Id"])
+
+        # Attach operating times to the opening
+        operating_times = None
+        if pd.notna(opening_row.get("OperatingTimesId")):
+            ot_id = int(opening_row["OperatingTimesId"])
+            operating_times = op_times_map.get(ot_id)
+
+        op_attrs.update(
+            {
+                "id": op_id,
+                "name": opening_row.get("Name"),
+                "operating_times": operating_times,
+            }
+        )
+        openings_data.append(op_attrs)
+
+    return openings_data
+
+
 def _build_chamber_objects(lock_chambers, chamber_routes, subchambers, op_times_map):
     chambers_list = []
     for _, chamber in lock_chambers.iterrows():
@@ -403,6 +458,8 @@ def group_complexes(
     disk_locks=None,
     disk_bridges=None,
     operatingtimes=None,
+    bridges=None,
+    openings=None,
 ):
     """
     Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, Section, and DISK data.
@@ -524,6 +581,11 @@ def group_complexes(
                 disk_complex_name = dl.get("complex_naam")
                 break
 
+        # Resolve associated bridge openings
+        openings_data = _resolve_openings(
+            lock, lock_chambers, bridges, openings, op_times_map
+        )
+
         lock_id = int(lock["Id"])
         lock_op_times = None
         if pd.notna(lock.get("OperatingTimesId")):
@@ -544,6 +606,7 @@ def group_complexes(
             "disk_complex_id": disk_complex_id,
             "disk_complex_name": disk_complex_name,
             "operating_times": lock_op_times,
+            "openings": openings_data,
             "locks": [
                 {
                     "id": lock_id,

@@ -55,13 +55,27 @@ def cli():
     help="Output directory.",
 )
 def schematize(
-    export_dir: pathlib.Path, disk_dir: pathlib.Path, fis_graph: pathlib.Path, output_dir: pathlib.Path
+    export_dir: pathlib.Path,
+    disk_dir: pathlib.Path,
+    fis_graph: pathlib.Path,
+    output_dir: pathlib.Path,
 ) -> None:
     """Process lock complexes into detailed graph features."""
     try:
-        locks, chambers, subchambers, isrs, fairways, berths, sections, disk_locks, disk_bridges, operatingtimes = load_data(
-            export_dir, disk_dir
-        )
+        (
+            locks,
+            chambers,
+            subchambers,
+            isrs,
+            fairways,
+            berths,
+            sections,
+            disk_locks,
+            disk_bridges,
+            operatingtimes,
+            bridges,
+            openings,
+        ) = load_data(export_dir, disk_dir)
     except FileNotFoundError:
         logger.exception("Failed to load data from %s", export_dir)
         sys.exit(1)
@@ -107,6 +121,8 @@ def schematize(
         disk_locks,
         disk_bridges,
         operatingtimes,
+        bridges,
+        openings,
     )
 
     # Summary JSON (per-lock metadata)
