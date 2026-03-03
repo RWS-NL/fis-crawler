@@ -4,6 +4,8 @@ import pandas as pd
 import geopandas as gpd
 from shapely import wkt
 from tqdm import tqdm
+from shapely.geometry.base import BaseGeometry
+import numpy as np
 
 from shapely.geometry import Point, LineString
 
@@ -78,10 +80,6 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
         bridges,
         openings,
     )
-
-
-from shapely.geometry.base import BaseGeometry
-import numpy as np
 
 
 def to_python(obj):
@@ -174,15 +172,15 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
             )
             if chamber_union_rd:
                 lock_mask_strict = disk_locks_rd.intersects(chamber_union_rd)
-                for _, l in disk_locks_rd[lock_mask_strict].iterrows():
-                    matched_disk_locks.append(sanitize_attrs(l))
+                for _, lock_row in disk_locks_rd[lock_mask_strict].iterrows():
+                    matched_disk_locks.append(sanitize_attrs(lock_row))
 
             # 2. If NO locks matched via chambers, fallback to 500m lock complex buffer
             if not matched_disk_locks and lock_geom_rd:
                 lock_buffer_rd = lock_geom_rd.buffer(500)
                 lock_mask_loose = disk_locks_rd.intersects(lock_buffer_rd)
-                for _, l in disk_locks_rd[lock_mask_loose].iterrows():
-                    matched_disk_locks.append(sanitize_attrs(l))
+                for _, lock_row in disk_locks_rd[lock_mask_loose].iterrows():
+                    matched_disk_locks.append(sanitize_attrs(lock_row))
 
     return matched_disk_locks, matched_disk_bridges
 

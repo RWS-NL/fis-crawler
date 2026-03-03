@@ -24,18 +24,20 @@ class DiskSpider(scrapy.Spider):
     allowed_domains = ["geo.rijkswaterstaat.nl"]
 
     base_url = "https://geo.rijkswaterstaat.nl/services/ogc/gdr/disk_beheerobjecten/ows?service=WFS&version=2.0.0&request=GetFeature&outputFormat=application/json"
-    
+
     layers = [
         "disk_beheerobjecten:schutsluis",
         "disk_beheerobjecten:keersluis",
         "disk_beheerobjecten:spuisluis",
         "disk_beheerobjecten:brug_beweegbaar",
-        "disk_beheerobjecten:brug_vast"
+        "disk_beheerobjecten:brug_vast",
     ]
 
     @property
     def data_dir(self):
-        data_dir = pathlib.Path(self.settings.get("DISK_EXPORT_DIR", "output/disk-export"))
+        data_dir = pathlib.Path(
+            self.settings.get("DISK_EXPORT_DIR", "output/disk-export")
+        )
         data_dir = data_dir.expanduser()
         data_dir.mkdir(exist_ok=True, parents=True)
         return data_dir
@@ -53,13 +55,14 @@ class DiskSpider(scrapy.Spider):
         # We don't actually need Scrapy to make async HTTP requests if we use owslib
         # but to keep it within the Scrapy lifecycle, we can just yield a dummy request
         # and do the work in the callback, or just do the work here and yield items.
-        
+
         from owslib.wfs import WebFeatureService
-        import io
-        
-        wfs_url = "https://geo.rijkswaterstaat.nl/services/ogc/gdr/disk_beheerobjecten/ows"
+
+        wfs_url = (
+            "https://geo.rijkswaterstaat.nl/services/ogc/gdr/disk_beheerobjecten/ows"
+        )
         try:
-            wfs = WebFeatureService(url=wfs_url, version='2.0.0')
+            wfs = WebFeatureService(url=wfs_url, version="2.0.0")
         except Exception as e:
             self.logger.error("Failed to connect to WFS: %s", e)
             return
@@ -68,27 +71,30 @@ class DiskSpider(scrapy.Spider):
             geo_type = layer.split(":")[1]
             try:
                 self.logger.info("Fetching WFS layer: %s", layer)
-                response = wfs.getfeature(typename=layer, outputFormat='application/json')
-                
+                response = wfs.getfeature(
+                    typename=layer, outputFormat="application/json"
+                )
+
                 # The response is a file-like object containing GeoJSON bytes
                 geojson_data = response.read()
                 resp_json = json.loads(geojson_data)
                 features = resp_json.get("features", [])
-                
+
                 for feature in features:
                     props = feature.get("properties", {})
                     geom = feature.get("geometry")
-                    
+
                     row = {**props}
-                    
+
                     from shapely.geometry import shape
+
                     if geom:
                         try:
                             s = shape(geom)
                             row["Geometry"] = s.wkt
                         except Exception:
                             row["Geometry"] = None
-                            
+
                     row["GeoType"] = geo_type
                     yield row
             except Exception as e:
@@ -116,7 +122,7 @@ class DiskSpider(scrapy.Spider):
                 gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:28992")
                 # Convert to standard WGS84 (EPSG:4326)
                 gdf = gdf.to_crs("EPSG:4326")
-                
+
                 # Re-assign back to WKT string for standard json/parquet serializers
                 df["Geometry"] = gdf.geometry.to_wkt()
 
