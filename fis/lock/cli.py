@@ -59,7 +59,7 @@ def schematize(
 ) -> None:
     """Process lock complexes into detailed graph features."""
     try:
-        locks, chambers, subchambers, isrs, fairways, berths, sections, disk_locks, disk_bridges = load_data(
+        locks, chambers, subchambers, isrs, fairways, berths, sections, disk_locks, disk_bridges, operatingtimes = load_data(
             export_dir, disk_dir
         )
     except FileNotFoundError:
@@ -106,6 +106,7 @@ def schematize(
         network_graph,
         disk_locks,
         disk_bridges,
+        operatingtimes,
     )
 
     # Summary JSON (per-lock metadata)
