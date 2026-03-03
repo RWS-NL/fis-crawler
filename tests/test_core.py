@@ -200,7 +200,7 @@ def test_find_nearby_berths_relation():
 def test_sanitize_attrs():
     import numpy as np
     from shapely.geometry import Point
-    
+
     raw = {
         "A": np.int64(42),
         "B": np.float64(3.14),
@@ -208,7 +208,7 @@ def test_sanitize_attrs():
         "geometry": Point(0, 0),
         "D": pd.NaT,
         "E": pd.Timestamp("2020-01-01"),
-        "F": np.bool_(True)
+        "F": np.bool_(True),
     }
     sanitized = sanitize_attrs(raw)
     assert sanitized["A"] == 42
@@ -225,54 +225,60 @@ def test_sanitize_attrs():
 def test_match_disk_objects():
     # Construct lock and chambers in EPSG:4326 (Roughly central NL)
     lock_geom = Point(5.0, 52.0)
-    
-    lock_row = pd.Series({
-        "Id": 1,
-        "Name": "Test Complex",
-        "geometry": lock_geom
-    })
+
+    lock_row = pd.Series({"Id": 1, "Name": "Test Complex", "geometry": lock_geom})
 
     # A square chamber roughly 100x100m (0.001 deg is ~110m)
-    chamber_geom = Polygon([
-        (4.999, 51.999),
-        (5.001, 51.999),
-        (5.001, 52.001),
-        (4.999, 52.001),
-        (4.999, 51.999)
-    ])
-    
-    chambers_df = pd.DataFrame([{
-        "Id": 10,
-        "ParentId": 1,
-        "geometry": chamber_geom.wkt
-    }])
+    chamber_geom = Polygon(
+        [
+            (4.999, 51.999),
+            (5.001, 51.999),
+            (5.001, 52.001),
+            (4.999, 52.001),
+            (4.999, 51.999),
+        ]
+    )
+
+    chambers_df = pd.DataFrame(
+        [{"Id": 10, "ParentId": 1, "geometry": chamber_geom.wkt}]
+    )
 
     # Project the chamber to RD to figure out where to place the DISK points
-    chamber_rd = gpd.GeoSeries([chamber_geom], crs="EPSG:4326").to_crs("EPSG:28992").iloc[0]
-    
+    chamber_rd = (
+        gpd.GeoSeries([chamber_geom], crs="EPSG:4326").to_crs("EPSG:28992").iloc[0]
+    )
+
     # 1. DISK Lock exactly inside chamber (strict match)
     disk_lock_in = chamber_rd.centroid
-    
+
     # 2. DISK Lock outside chamber, but within 500m of lock centroid (e.g. +200m)
     disk_lock_near = Point(disk_lock_in.x + 200, disk_lock_in.y)
-    
+
     # 3. DISK Bridge within 500m buffer (e.g. +300m)
     disk_bridge_near = Point(disk_lock_in.x + 300, disk_lock_in.y)
 
     # 4. DISK Lock outside 500m buffer (e.g. +1000m)
     disk_lock_far = Point(disk_lock_in.x + 1000, disk_lock_in.y)
 
-    disk_locks_rd = gpd.GeoDataFrame([
-        {"id": 100, "name": "Inside Chamber", "geometry": disk_lock_in},
-        {"id": 200, "name": "Near Lock Buffer", "geometry": disk_lock_near},
-        {"id": 300, "name": "Far Lock", "geometry": disk_lock_far},
-    ], geometry="geometry", crs="EPSG:28992")
+    disk_locks_rd = gpd.GeoDataFrame(
+        [
+            {"id": 100, "name": "Inside Chamber", "geometry": disk_lock_in},
+            {"id": 200, "name": "Near Lock Buffer", "geometry": disk_lock_near},
+            {"id": 300, "name": "Far Lock", "geometry": disk_lock_far},
+        ],
+        geometry="geometry",
+        crs="EPSG:28992",
+    )
 
-    disk_bridges_rd = gpd.GeoDataFrame([
-        {"id": 400, "name": "Near Bridge", "geometry": disk_bridge_near}
-    ], geometry="geometry", crs="EPSG:28992")
+    disk_bridges_rd = gpd.GeoDataFrame(
+        [{"id": 400, "name": "Near Bridge", "geometry": disk_bridge_near}],
+        geometry="geometry",
+        crs="EPSG:28992",
+    )
 
-    matched_locks, matched_bridges = match_disk_objects(lock_row, chambers_df, disk_locks_rd, disk_bridges_rd)
+    matched_locks, matched_bridges = match_disk_objects(
+        lock_row, chambers_df, disk_locks_rd, disk_bridges_rd
+    )
 
     # Strict matching prioritizes the lock inside the chamber!
     # Because there's a strict match, fallback is skipped.
@@ -285,8 +291,10 @@ def test_match_disk_objects():
 
     # Test fallback: Remove the strict match
     disk_locks_rd_fallback = disk_locks_rd.iloc[1:3]  # Only Near and Far
-    matched_locks_fallback, _ = match_disk_objects(lock_row, chambers_df, disk_locks_rd_fallback, disk_bridges_rd)
-    
+    matched_locks_fallback, _ = match_disk_objects(
+        lock_row, chambers_df, disk_locks_rd_fallback, disk_bridges_rd
+    )
+
     # Now the Near lock should match via 500m buffer, and Far should be excluded
     assert len(matched_locks_fallback) == 1
     assert matched_locks_fallback[0]["id"] == 200
