@@ -26,6 +26,7 @@ uv run python -m fis.cli lock schematize
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--export-dir` | `output/fis-export` | Input directory with parquet/geoparquet files |
+| `--disk-dir` | `output/disk-export` | Input directory with DISK lock and bridge parquet files |
 | `--fis-graph` | `output/fis-graph/graph.pickle` | FIS network graph for topology matching |
 | `--output-dir` | `output/lock-schematization` | Output directory |
 
