@@ -2,6 +2,8 @@
 
 Build network graphs from FIS (Dutch) and EURIS (European) fairway data.
 
+> **Note:** Ensure you have installed prerequisites (`uv`) and run `uv sync` from the repository root before running these commands. See the [main README](../../README.md) for details.
+
 ## Data Flow
 
 ```
@@ -54,8 +56,7 @@ output/                      # All generated data
 ├── euris-export/            # Raw EURIS data (scrapy: euris)
 │   ├── SailingSpeed_*.geojson
 │   ├── FairwaySection_*.geojson
-│   └── v0.1.0/
-│       └── export-graph-v0.1.0.pickle
+│   └── Node_*.geojson
 ├── fis-graph/               # Basic FIS graph
 ├── euris-graph/             # Basic EURIS graph
 ├── fis-enriched/            # Enriched FIS

@@ -2,6 +2,8 @@
 
 This dataset contains a graph representation of the European River Information Services (EURIS) network, designed for inland waterway transport modeling.
 
+> **Note:** For instructions on how to set up the environment and run the pipeline to generate this data, please see the [main README](../../README.md).
+
 ## Disclaimer
 
 This dataset is an extract of the original data hosted on the EURIS platform and is intended for **research purposes only**. It should **not** be used for navigational purposes. For official and up-to-date information, please refer to the [EuRIS Portal](https://eurisportal.eu).
@@ -52,7 +54,7 @@ Edges represent the fairway sections connecting the nodes. Key attributes includ
 
 This dataset includes the following files:
 
-*   `export-nodes-v0.1.0.geojson`: A GeoJSON file containing the geographic points for all nodes in the network.
-*   `export-edges-v0.1.0.geojson`: A GeoJSON file containing the geographic lines for all edges (fairway sections) in the network.
-*   `export-graph-v0.1.0.pickle`: A Python pickle file containing a `networkx` graph object, which includes all nodes, edges, and their attributes, representing the complete waterway network.
-*   `ris_index_v0.1.0.gpkg`: A GeoPackage file related to the River Information Services (RIS) index. For more information on this data, see the [RIS Index API documentation](https://eurisportal.eu/ris-index-api-documentation).
+*   `nodes.geojson` / `nodes.geoparquet`: Files containing the geographic points for all nodes in the network.
+*   `edges.geojson` / `edges.geoparquet`: Files containing the geographic lines for all edges (fairway sections) in the network.
+*   `graph.pickle`: A Python pickle file containing a `networkx` graph object, which includes all nodes, edges, and their attributes, representing the complete waterway network.
+*   `ris-index.gpkg`: A GeoPackage file related to the River Information Services (RIS) index. For more information on this data, see the [RIS Index API documentation](https://eurisportal.eu/ris-index-api-documentation).
