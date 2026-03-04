@@ -4,6 +4,8 @@ This module processes FIS lock data into detailed subgraph features for navigati
 Lock schematization outputs are **drop-in replacement subgraphs**: the generated nodes and edges replace
 the corresponding fairway stretch in the routing network (FIS, EURIS, or merged) wherever a lock is present.
 
+> **Note:** Ensure you have installed prerequisites (`uv`) and run `uv sync` from the repository root before running these commands. See the [main README](../../README.md) for details.
+
 ## Use Cases
 
 ### Route Assignment (Traffic Modelling)

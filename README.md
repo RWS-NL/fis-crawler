@@ -2,6 +2,25 @@
 
 This repository crawls, processes, and exports inland waterway network data for transport modelling of Dutch and European inland waterways. It produces consistent, ready-to-use network graphs and lock schematizations for use in navigation and traffic simulation tools.
 
+## Prerequisites & Installation
+
+This project uses [`uv`](https://docs.astral.sh/uv/) for fast Python package and environment management.
+
+1. **Install `uv`**: Follow the [official installation guide](https://docs.astral.sh/uv/getting-started/installation/) or run:
+   ```bash
+   # On macOS and Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   
+   # On Windows
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+2. **Sync the environment**: From the repository root, install dependencies and set up the virtual environment:
+   ```bash
+   uv sync
+   ```
+   This ensures all required packages are installed. You can now use `uv run` to execute commands automatically within this environment.
+
 ## Use Cases
 
 ### Route Assignment (Traffic Modelling)
@@ -34,7 +53,7 @@ CRAWL → NETWORKS → ENRICH → SCHEMATIZE → MERGE
 | Crawl EURIS | `scrapy crawl euris` | `output/euris-export/` |
 | Build Networks | `fis.cli graph {fis,euris}` | `output/{fis,euris}-graph/` |
 | Enrich | `fis.cli graph enrich-{fis,euris}` | `output/{fis,euris}-enriched/` |
-| Schematize Locks | `fis.cli lock schematize` | `output/lock-schematization/` |
+| Schematize Locks | `fis.cli lock schematize --disk-dir output/disk-export` | `output/lock-schematization/` |
 | Merge | `fis.cli graph merge` | `output/merged-graph/` |
 
 ### Lock Schematization
@@ -82,21 +101,6 @@ uv run scrapy crawl disk -L INFO
 uv run scrapy crawl euris -L INFO
 ```
 
-## Pipeline Architecture
-
-```
-CRAWL → NETWORKS → ENRICH → SCHEMATIZE → MERGE
-```
-
-| Stage | Command | Output |
-|-------|---------|--------|
-| Crawl FIS | `scrapy crawl dataservice` | `output/fis-export/` |
-| Crawl DISK | `scrapy crawl disk` | `output/disk-export/` |
-| Crawl EURIS | `scrapy crawl euris` | `output/euris-export/` |
-| Build Networks | `fis.cli graph {fis,euris}` | `output/{fis,euris}-graph/` |
-| Enrich | `fis.cli graph enrich-{fis,euris}` | `output/{fis,euris}-enriched/` |
-| Schematize Locks | `fis.cli lock schematize --disk-dir output/disk-export` | `output/lock-schematization/` |
-| Merge | `fis.cli graph merge` | `output/merged-graph/` |
 
 ## Module Documentation
 
