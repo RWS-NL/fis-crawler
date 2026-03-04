@@ -25,7 +25,7 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
     """
     datasets = {}
     required = ["section", "maximumdimensions", "navigability"]
-    optional = ["navigationspeed", "fairwaydepth", "fairwaytype", "tidalarea"]
+    optional = ["navigationspeed", "fairwaydepth", "fairwaytype", "tidalarea", "fairwayclassification"]
 
     for name in required + optional:
         path = export_dir / f"{name}.geoparquet"
@@ -241,9 +241,15 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         tidal_df["is_tidal"] = tidal_df["tidal_Name"].notna()
         tidal_df = tidal_df.drop(columns=["tidal_Name"])
 
+    # Fairway classification (HTA/HVW)
+    fwc_cols = ["TypeDescription", "Type"]
+    fwc_df = match_by_route_km(
+        sections, datasets.get("fairwayclassification"), fwc_cols, "fwc_"
+    )
+
     # Combine all enrichment
     enrichment = pd.concat(
-        [maxdim_df, nav_df, speed_df, depth_df, type_df, tidal_df], axis=1
+        [maxdim_df, nav_df, speed_df, depth_df, type_df, tidal_df, fwc_df], axis=1
     )
 
     # Summary stats
@@ -254,6 +260,7 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         ("depth_", "depth"),
         ("type_", "type"),
         ("is_tidal", "tidal"),
+        ("fwc_", "fairway_classification"),
     ]:
         cols = [c for c in enrichment.columns if c.startswith(prefix)]
         if cols:
