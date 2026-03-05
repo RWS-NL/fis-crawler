@@ -8,6 +8,9 @@ from shapely.geometry.base import BaseGeometry
 import numpy as np
 
 from shapely.geometry import Point, LineString
+from pyproj import Geod
+from shapely.ops import substring
+from shapely.ops import unary_union
 
 logger = logging.getLogger(__name__)
 
@@ -152,8 +155,6 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
                 complex_geoms_rd.append(c_geom_rd)
 
     if complex_geoms_rd:
-        from shapely.ops import unary_union
-
         # For bridges, we use the complex buffered bounds
         complex_union_rd = unary_union(complex_geoms_rd)
         complex_buffered_rd = complex_union_rd.buffer(500)
@@ -306,8 +307,6 @@ def _find_connected_sections(
                     complex_geoms.append(c_geom)
 
         if complex_geoms:
-            from shapely.ops import unary_union
-
             complex_union = unary_union([g for g in complex_geoms if g])
             if complex_union:
                 buffered_union = complex_union.buffer(0.0001)
@@ -627,8 +626,6 @@ def split_fairway(fairway_geom, lock_km, fairway_start_km, fairway_end_km):
     """
     Split the fairway geometry at the lock's location based on KM mark.
     """
-    from shapely.ops import substring
-    from shapely.geometry import LineString
 
     if not fairway_geom or not isinstance(fairway_geom, LineString):
         return None, None
@@ -659,8 +656,6 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0):
     """
     Calculate fairway segments and distance using metric projection (EPSG:28992).
     """
-    from shapely.ops import substring
-    import logging
 
     logging.getLogger(__name__)
 
@@ -771,10 +766,6 @@ def find_nearby_berths(
 
     lock_geom = lock_row.geometry if hasattr(lock_row, "geometry") else None
     lock_row.get("RouteKmBegin")
-
-    from pyproj import Geod
-    from shapely.geometry import Point
-    from shapely.ops import unary_union
 
     geod = Geod(ellps="WGS84")
 

@@ -3,7 +3,6 @@
 import json
 import logging
 import pathlib
-import sys
 
 import click
 import geopandas as gpd
@@ -11,6 +10,7 @@ import geopandas as gpd
 from fis.ris_index import load_ris_index
 from fis.lock.core import load_data, group_complexes
 
+import pickle
 from fis.lock.graph import (
     build_nodes_gdf,
     build_edges_gdf,
@@ -61,48 +61,37 @@ def schematize(
     output_dir: pathlib.Path,
 ) -> None:
     """Process lock complexes into detailed graph features."""
-    try:
-        (
-            locks,
-            chambers,
-            subchambers,
-            isrs,
-            fairways,
-            berths,
-            sections,
-            disk_locks,
-            disk_bridges,
-            operatingtimes,
-            bridges,
-            openings,
-        ) = load_data(export_dir, disk_dir)
-    except FileNotFoundError:
-        logger.exception("Failed to load data from %s", export_dir)
-        sys.exit(1)
+    (
+        locks,
+        chambers,
+        subchambers,
+        isrs,
+        fairways,
+        berths,
+        sections,
+        disk_locks,
+        disk_bridges,
+        operatingtimes,
+        bridges,
+        openings,
+    ) = load_data(export_dir, disk_dir)
 
     # Load RIS Index
     ris_df = None
     ris_path = export_dir / "RisIndexNL.xlsx"
     if ris_path.exists():
-        try:
-            ris_df = load_ris_index(ris_path)
-            logger.info("Loaded %d RIS Index entries", len(ris_df))
-        except Exception as e:
-            logger.warning("Could not load RIS Index: %s", e)
+        ris_df = load_ris_index(ris_path)
+        logger.info("Loaded %d RIS Index entries", len(ris_df))
 
     # Load Network Graph for fairway connectivity
-    import pickle
 
     network_graph = None
     if fis_graph and fis_graph.exists():
-        try:
-            with open(fis_graph, "rb") as f:
-                network_graph = pickle.load(f)
-            logger.info(
-                "Loaded network graph with %d nodes", network_graph.number_of_nodes()
-            )
-        except Exception as e:
-            logger.warning("Could not load fis-graph: %s", e)
+        with open(fis_graph, "rb") as f:
+            network_graph = pickle.load(f)
+        logger.info(
+            "Loaded network graph with %d nodes", network_graph.number_of_nodes()
+        )
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)

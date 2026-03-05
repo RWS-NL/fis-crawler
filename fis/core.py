@@ -128,27 +128,15 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
 
         # Chamber Route Generation (Virtual Fairways)
         chamber_routes = {}
-        if (
-            "geometry_before_wkt" in fairway_data
-            and "geometry_after_wkt" in fairway_data
-        ):
-            try:
-                bwkt = fairway_data["geometry_before_wkt"]
-                awkt = fairway_data["geometry_after_wkt"]
-                if bwkt and awkt:
-                    # Load geometries
-                    g_before = wkt.loads(bwkt)
-                    g_after = wkt.loads(awkt)
+        bwkt = fairway_data.get("geometry_before_wkt")
+        awkt = fairway_data.get("geometry_after_wkt")
+        if bwkt and awkt:
+            # Load geometries
+            g_before = wkt.loads(bwkt)
+            g_after = wkt.loads(awkt)
 
-                    split_point = Point(g_before.coords[-1])
-                    merge_point = Point(g_after.coords[0])
-
-                    chamber_routes["split_point"] = split_point
-                    chamber_routes["merge_point"] = merge_point
-            except Exception as e:
-                logger.warning(
-                    f"Failed to generate chamber route endpoints for lock {lock['Id']}: {e}"
-                )
+            chamber_routes["split_point"] = Point(g_before.coords[-1])
+            chamber_routes["merge_point"] = Point(g_after.coords[0])
 
         # Berth Identification
         berths_data = []
@@ -172,12 +160,10 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
             # Add chamber geometries
             if "Geometry" in lock_chambers.columns:
                 for _, c_row in lock_chambers.iterrows():
-                    if pd.notna(c_row["Geometry"]):
-                        try:
-                            c_geom = wkt.loads(c_row["Geometry"])
-                            complex_geoms.append(c_geom)
-                        except Exception:
-                            pass
+                    if pd.isna(c_row["Geometry"]):
+                        continue
+                    c_geom = wkt.loads(c_row["Geometry"])
+                    complex_geoms.append(c_geom)
 
             if complex_geoms:
                 complex_union = unary_union([g for g in complex_geoms if g])
@@ -220,21 +206,22 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
         for _, chamber in lock_chambers.iterrows():
             # Add Chamber Route (Virtual Fairway)
             route_wkt = None
-            if "split_point" in chamber_routes and "merge_point" in chamber_routes:
-                try:
-                    if "Geometry" in chamber and pd.notna(chamber["Geometry"]):
-                        ch_geom = wkt.loads(chamber["Geometry"])
-                        centroid = ch_geom.centroid
-                        route = LineString(
-                            [
-                                chamber_routes["split_point"],
-                                centroid,
-                                chamber_routes["merge_point"],
-                            ]
-                        )
-                        route_wkt = route.wkt
-                except Exception:
-                    pass
+            if (
+                "split_point" in chamber_routes
+                and "merge_point" in chamber_routes
+                and "Geometry" in chamber
+                and pd.notna(chamber["Geometry"])
+            ):
+                ch_geom = wkt.loads(chamber["Geometry"])
+                centroid = ch_geom.centroid
+                route = LineString(
+                    [
+                        chamber_routes["split_point"],
+                        centroid,
+                        chamber_routes["merge_point"],
+                    ]
+                )
+                route_wkt = route.wkt
 
             c_obj = {
                 "id": int(chamber["Id"]),

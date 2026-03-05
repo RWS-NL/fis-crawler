@@ -25,7 +25,13 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
     """
     datasets = {}
     required = ["section", "maximumdimensions", "navigability"]
-    optional = ["navigationspeed", "fairwaydepth", "fairwaytype", "tidalarea", "fairwayclassification"]
+    optional = [
+        "navigationspeed",
+        "fairwaydepth",
+        "fairwaytype",
+        "tidalarea",
+        "fairwayclassification",
+    ]
 
     for name in required + optional:
         path = export_dir / f"{name}.geoparquet"

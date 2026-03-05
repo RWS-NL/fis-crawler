@@ -1,7 +1,5 @@
 import pickle
-import networkx as nx
 import pathlib
-import json
 
 from fis.graph.validation import GraphValidator
 

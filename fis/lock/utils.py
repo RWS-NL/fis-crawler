@@ -1,6 +1,8 @@
 from shapely.ops import transform
 from shapely.geometry import Point
 import pyproj
+from shapely.geometry import LineString
+from shapely.ops import nearest_points
 
 
 def project_geometry(geometry, crs_from="EPSG:4326", crs_to="EPSG:28992"):
@@ -39,7 +41,6 @@ def find_chamber_doors(chamber_geom, split_point, merge_point):
     vy = merge_rd.y - split_rd.y
 
     # Get Centerline Axis from MRR
-    from shapely.geometry import LineString
 
     # MRR is a Polygon (rectangle)
     mrr = c_geom_rd.minimum_rotated_rectangle
@@ -102,7 +103,6 @@ def find_chamber_doors(chamber_geom, split_point, merge_point):
         # Fallback: project the MRR midpoints onto the boundary
         p1 = Point(best_axis[0])
         p2 = Point(best_axis[1])
-        from shapely.ops import nearest_points
 
         candidates = [nearest_points(boundary, p1)[0], nearest_points(boundary, p2)[0]]
 

@@ -5,6 +5,8 @@ from shapely import wkt
 from shapely.geometry import Point, mapping
 from pyproj import Geod
 from fis.lock.utils import find_chamber_doors
+from shapely.geometry import LineString
+from shapely.geometry import shape
 
 geod = Geod(ellps="WGS84")
 
@@ -164,7 +166,6 @@ def build_subchambers_gdf(complexes) -> gpd.GeoDataFrame:
 
 def _geom_from_feature(feature):
     """Convert a GeoJSON feature geometry dict to a Shapely geometry."""
-    from shapely.geometry import shape
 
     return shape(feature["geometry"])
 
@@ -558,7 +559,6 @@ def _build_chamber_route_features(
     """
     Helper to extract routing lines from split nodes to doors and through chambers.
     """
-    from shapely.geometry import LineString
 
     features = []
 
