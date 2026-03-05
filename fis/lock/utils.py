@@ -83,8 +83,21 @@ def find_chamber_doors(chamber_geom, split_point, merge_point):
 
     best_axis = axis_a if score_a > score_b else axis_b
 
+    # Extend the best_axis slightly to ensure it intersects the boundary
+    # Floating point precision can cause the exact MRR midpoints to fall just short
+    p1, p2 = best_axis
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    cx = (p1[0] + p2[0]) / 2
+    cy = (p1[1] + p2[1]) / 2
+
+    # Extend by 10% (factor = 1.1) to guarantee boundary intersection
+    factor = 1.1
+    ext_p1 = (cx - dx * factor / 2, cy - dy * factor / 2)
+    ext_p2 = (cx + dx * factor / 2, cy + dy * factor / 2)
+
     # Create LineString centerline and intersect with chamber boundary
-    centerline = LineString(best_axis)
+    centerline = LineString([ext_p1, ext_p2])
 
     # Intersection with boundary
     boundary = c_geom_rd.boundary
@@ -100,11 +113,15 @@ def find_chamber_doors(chamber_geom, split_point, merge_point):
         candidates = [Point(intersection.coords[0]), Point(intersection.coords[-1])]
 
     if not candidates:
-        # Fallback: project the MRR midpoints onto the boundary
-        p1 = Point(best_axis[0])
-        p2 = Point(best_axis[1])
+        # Fallback: project the original MRR midpoints onto the boundary
+        # This occurs if the extended centerline somehow fails to intersect
+        orig_p1 = Point(p1)
+        orig_p2 = Point(p2)
 
-        candidates = [nearest_points(boundary, p1)[0], nearest_points(boundary, p2)[0]]
+        candidates = [
+            nearest_points(boundary, orig_p1)[0],
+            nearest_points(boundary, orig_p2)[0],
+        ]
 
     # Sort candidates by distance along flow
     # Projected position on flow vector: t = (P - Split) . V
