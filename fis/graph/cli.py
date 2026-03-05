@@ -7,8 +7,29 @@ import click
 
 from .build import build_graph
 from .io import export_graph, load_fis_data
+
+import json
+import pickle
+import networkx as nx
+import geopandas as gpd
+from shapely import wkt
+from click.testing import CliRunner
 from .integrate import find_geometric_border_connections, merge_graphs
 from .validation import GraphValidator
+from .schema import load_schema, apply_schema_mapping
+from .enrich import (
+    load_fis_enrichment_data,
+    build_fis_section_enrichment,
+    enrich_fis_graph,
+    load_euris_sailing_speed,
+    enrich_euris_with_speed,
+)
+from .euris import (
+    concat_nodes,
+    concat_sections,
+    build_euris_graph,
+    export_euris_graph,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -57,12 +78,6 @@ def fis(export_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
 )
 def euris(euris_export: pathlib.Path, output_dir: pathlib.Path) -> None:
     """Build EURIS graph from crawled GeoJSON files."""
-    from .euris import (
-        concat_nodes,
-        concat_sections,
-        build_euris_graph,
-        export_euris_graph,
-    )
 
     logger.info("Building EURIS graph from %s", euris_export)
 
@@ -94,16 +109,6 @@ def enrich_fis(
     fis_graph: pathlib.Path, fis_export: pathlib.Path, output_dir: pathlib.Path
 ) -> None:
     """Enrich FIS graph with maximumdimensions and navigability (CEMT class)."""
-    import pickle
-    import json
-    import networkx as nx
-    import geopandas as gpd
-    from shapely import wkt
-    from .enrich import (
-        load_fis_enrichment_data,
-        build_fis_section_enrichment,
-        enrich_fis_graph,
-    )
 
     logger.info("Enriching FIS graph")
 
@@ -178,11 +183,6 @@ def enrich_euris(
     euris_dir: pathlib.Path, euris_export: pathlib.Path, output_dir: pathlib.Path
 ) -> None:
     """Enrich EURIS graph with SailingSpeed attributes."""
-    import pickle
-    import json
-    import networkx as nx
-    import geopandas as gpd
-    from .enrich import load_euris_sailing_speed, enrich_euris_with_speed
 
     logger.info("Enriching EURIS graph with sailing speed")
 
@@ -223,8 +223,6 @@ def enrich_euris(
                 if k == "geometry":
                     row["geometry"] = v
             elif k == "geometry_wkt":
-                from shapely import wkt
-
                 row["geometry"] = wkt.loads(v)
             else:
                 row[k] = v
@@ -241,12 +239,8 @@ def enrich_euris(
     for u, v, attrs in graph.edges(data=True):
         row = {"source": u, "target": v, **attrs}
         if "geometry_wkt" in row:
-            from shapely import wkt
-
             row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
         elif "geometry" in row and isinstance(row["geometry"], str):
-            from shapely import wkt
-
             row["geometry"] = wkt.loads(row["geometry"])
 
         edge_data.append(row)
@@ -286,11 +280,6 @@ def merge(
     output_dir: pathlib.Path,
 ) -> None:
     """Merge FIS and EURIS graphs via border nodes."""
-    import pickle
-    import json
-    import networkx as nx
-    import geopandas as gpd
-    from shapely import wkt
 
     logger.info("Merging FIS and EURIS graphs")
 
@@ -303,7 +292,6 @@ def merge(
     merged = merge_graphs(fis, euris, connections)
 
     # Apply schema harmonization (rename attributes to canonical EURIS schema)
-    from .schema import load_schema, apply_schema_mapping
 
     schema = load_schema(pathlib.Path("config/schema.toml"))
     merged = apply_schema_mapping(merged, schema)
@@ -328,8 +316,6 @@ def merge(
                 if k == "geometry":
                     row["geometry"] = v
             elif k == "geometry_wkt":
-                from shapely import wkt
-
                 row["geometry"] = wkt.loads(v)
             else:
                 row[k] = v
@@ -355,12 +341,8 @@ def merge(
     for u, v, attrs in merged.edges(data=True):
         row = {"source": u, "target": v, **attrs}
         if "geometry_wkt" in row:
-            from shapely import wkt
-
             row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
         elif "geometry" in row and isinstance(row["geometry"], str):
-            from shapely import wkt
-
             row["geometry"] = wkt.loads(row["geometry"])
         edge_data.append(row)
     if edge_data:
@@ -432,7 +414,6 @@ def validate(
     graph: pathlib.Path, schema: pathlib.Path, output_file: pathlib.Path
 ) -> None:
     """Validate the graph and generate a report."""
-    import pickle
 
     logger.info("Loading graph from %s", graph)
     with open(graph, "rb") as f:
@@ -459,8 +440,6 @@ def validate(
 @cli.command()
 def all() -> None:
     """Run full pipeline: fis -> euris -> enrich -> merge."""
-    from click.testing import CliRunner
-
     runner = CliRunner()
 
     for cmd in [fis, euris, enrich_fis, enrich_euris, merge, validate]:

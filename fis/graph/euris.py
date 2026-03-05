@@ -11,6 +11,8 @@ import pandas as pd
 import pyproj
 import shapely
 from tqdm.auto import tqdm
+import json
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +246,6 @@ def export_euris_graph(
     node_gdf.to_parquet(output_dir / "nodes.geoparquet")
 
     # Summary
-    import json
 
     summary = {
         "num_nodes": graph.number_of_nodes(),
@@ -255,7 +256,6 @@ def export_euris_graph(
         json.dump(summary, f, indent=2)
 
     # Copy ris-index.gpkg
-    import shutil
 
     ris_index_candidates = list(
         pathlib.Path("output/euris-export").glob("**/ris-index.gpkg")

@@ -1,6 +1,7 @@
 import logging
 import pandas as pd
 from shapely.ops import nearest_points
+from shapely.ops import substring
 
 logger = logging.getLogger(__name__)
 
@@ -12,55 +13,51 @@ def process_fairway_geometry(fw_obj, lock):
     """
     fairway_data = {}
 
-    if hasattr(fw_obj, "geometry") and fw_obj.geometry:
-        # Project lock to fairway
-        # Note: Lock geometry is usually a Point (Complex Centroid)
-        if hasattr(lock, "geometry") and lock.geometry:
-            try:
-                # Snap lock to fairway
-                fairway_geom = fw_obj.geometry
-                lock_geom = lock.geometry
+    if not hasattr(fw_obj, "geometry") or not fw_obj.geometry:
+        return fairway_data
 
-                # Projection distance check
-                dist = fairway_geom.distance(lock_geom)
-                fairway_data["lock_to_fairway_distance"] = dist
+    # Project lock to fairway
+    # Note: Lock geometry is usually a Point (Complex Centroid)
+    if not hasattr(lock, "geometry") or not lock.geometry:
+        return fairway_data
 
-                # Project
-                projected_dist = fairway_geom.project(lock_geom)
-                fairway_geom.interpolate(projected_dist)
+    # Snap lock to fairway
+    fairway_geom = fw_obj.geometry
+    lock_geom = lock.geometry
 
-                # Split geometry
-                # Simple approach: substring
-                # But shapely substring handles distance along line
+    # Projection distance check
+    dist = fairway_geom.distance(lock_geom)
+    fairway_data["lock_to_fairway_distance"] = dist
 
-                # Determine Km range
-                float(fw_obj["RouteKmBegin"])
-                float(fw_obj["RouteKmEnd"])
-                fw_obj["Direction"]  # N/A or similar?
+    # Project
+    projected_dist = fairway_geom.project(lock_geom)
+    fairway_geom.interpolate(projected_dist)
 
-                # Using shapely substring for geometry
-                # projected_dist is from the start of the LINESTRING, not necessarily KM
+    # Split geometry
+    # Simple approach: substring
+    # But shapely substring handles distance along line
 
-                geom_before = None
-                geom_after = None
+    # Determine Km range
+    float(fw_obj["RouteKmBegin"])
+    float(fw_obj["RouteKmEnd"])
+    fw_obj["Direction"]  # N/A or similar?
 
-                total_length = fairway_geom.length
+    # Using shapely substring for geometry
+    # projected_dist is from the start of the LINESTRING, not necessarily KM
 
-                if 0 < projected_dist < total_length:
-                    from shapely.ops import substring
+    geom_before = None
+    geom_after = None
 
-                    geom_before = substring(fairway_geom, 0, projected_dist)
-                    geom_after = substring(fairway_geom, projected_dist, total_length)
+    total_length = fairway_geom.length
 
-                if geom_before:
-                    fairway_data["geometry_before_wkt"] = geom_before.wkt
-                if geom_after:
-                    fairway_data["geometry_after_wkt"] = geom_after.wkt
+    if 0 < projected_dist < total_length:
+        geom_before = substring(fairway_geom, 0, projected_dist)
+        geom_after = substring(fairway_geom, projected_dist, total_length)
 
-            except Exception as e:
-                logger.warning(
-                    f"Error processing fairway geometry for lock {lock['Id']}: {e}"
-                )
+    if geom_before:
+        fairway_data["geometry_before_wkt"] = geom_before.wkt
+    if geom_after:
+        fairway_data["geometry_after_wkt"] = geom_after.wkt
 
     return fairway_data
 

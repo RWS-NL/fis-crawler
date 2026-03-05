@@ -3,6 +3,8 @@ import json
 import scrapy
 import geopandas as gpd
 import pandas as pd
+from owslib.wfs import WebFeatureService
+from shapely.geometry import shape
 
 
 class DiskSpider(scrapy.Spider):
@@ -56,49 +58,33 @@ class DiskSpider(scrapy.Spider):
         # but to keep it within the Scrapy lifecycle, we can just yield a dummy request
         # and do the work in the callback, or just do the work here and yield items.
 
-        from owslib.wfs import WebFeatureService
-
         wfs_url = (
             "https://geo.rijkswaterstaat.nl/services/ogc/gdr/disk_beheerobjecten/ows"
         )
-        try:
-            wfs = WebFeatureService(url=wfs_url, version="2.0.0")
-        except Exception as e:
-            self.logger.error("Failed to connect to WFS: %s", e)
-            return
+        wfs = WebFeatureService(url=wfs_url, version="2.0.0")
 
         for layer in self.layers:
             geo_type = layer.split(":")[1]
-            try:
-                self.logger.info("Fetching WFS layer: %s", layer)
-                response = wfs.getfeature(
-                    typename=layer, outputFormat="application/json"
-                )
+            self.logger.info("Fetching WFS layer: %s", layer)
+            response = wfs.getfeature(typename=layer, outputFormat="application/json")
 
-                # The response is a file-like object containing GeoJSON bytes
-                geojson_data = response.read()
-                resp_json = json.loads(geojson_data)
-                features = resp_json.get("features", [])
+            # The response is a file-like object containing GeoJSON bytes
+            geojson_data = response.read()
+            resp_json = json.loads(geojson_data)
+            features = resp_json.get("features", [])
 
-                for feature in features:
-                    props = feature.get("properties", {})
-                    geom = feature.get("geometry")
+            for feature in features:
+                props = feature.get("properties", {})
+                geom = feature.get("geometry")
 
-                    row = {**props}
+                row = {**props}
 
-                    from shapely.geometry import shape
+                if geom:
+                    s = shape(geom)
+                    row["Geometry"] = s.wkt
 
-                    if geom:
-                        try:
-                            s = shape(geom)
-                            row["Geometry"] = s.wkt
-                        except Exception:
-                            row["Geometry"] = None
-
-                    row["GeoType"] = geo_type
-                    yield row
-            except Exception as e:
-                self.logger.error("Failed to fetch layer %s: %s", layer, e)
+                row["GeoType"] = geo_type
+                yield row
 
     def spider_closed(self, spider):
         # Log the closure of the spider with its name

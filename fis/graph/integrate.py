@@ -7,6 +7,7 @@ from typing import Dict, List
 
 import geopandas as gpd
 import networkx as nx
+from shapely.geometry import Point
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,6 @@ def find_geometric_border_connections(
             'type': 'geometric'
         }
     """
-    from shapely.geometry import Point
 
     # 1. Prepare FIS nodes spatial index
     fis_points = []

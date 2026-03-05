@@ -18,6 +18,7 @@ from scrapy.pipelines.files import FilesPipeline
 from tqdm.auto import tqdm
 
 from scrapy.utils.project import get_project_settings
+import zipfile
 
 settings = get_project_settings()
 version = settings.get("VERSION", "v0.1.0")
@@ -80,7 +81,6 @@ class EurisFilesPipeline(FilesPipeline):
                 if path and path.endswith(".zip"):
                     abs_path = os.path.join(self.store.basedir, path)
                     extract_dir = self.store.basedir  # or customize
-                    import zipfile
 
                     with zipfile.ZipFile(abs_path, "r") as zip_ref:
                         zip_ref.extractall(extract_dir)
