@@ -6,6 +6,8 @@ import click
 
 from fis.graph.cli import cli as graph_cli
 from fis.lock.cli import cli as lock_cli
+from fis.bridge.cli import cli as bridge_cli
+from fis.dropins.cli import dropins_cli
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +24,8 @@ def cli():
 # Add subcommand groups
 cli.add_command(graph_cli, name="graph")
 cli.add_command(lock_cli, name="lock")
+cli.add_command(bridge_cli, name="bridge")
+cli.add_command(dropins_cli, name="dropins")
 
 
 if __name__ == "__main__":

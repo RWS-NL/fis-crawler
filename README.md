@@ -53,12 +53,13 @@ CRAWL → NETWORKS → ENRICH → SCHEMATIZE → MERGE
 | Crawl EURIS | `scrapy crawl euris` | `output/euris-export/` |
 | Build Networks | `fis.cli graph {fis,euris}` | `output/{fis,euris}-graph/` |
 | Enrich | `fis.cli graph enrich-{fis,euris}` | `output/{fis,euris}-enriched/` |
-| Schematize Locks | `fis.cli lock schematize --disk-dir output/disk-export` | `output/lock-schematization/` |
+| Schematize Dropins | `fis.cli dropins schematize --disk-dir output/disk-export` | `output/dropins-schematization/` |
 | Merge | `fis.cli graph merge` | `output/merged-graph/` |
 
-### Lock Schematization
+### Drop-in Schematization (Locks and Bridges)
 
-The lock schematization step produces **drop-in replacement subgraphs** for the sections of the network that contain locks. The nodes and edges it generates replace the corresponding fairway stretch in the routing network, adding chamber-level detail for discrete event simulation use cases.
+The drop-in schematization step produces **drop-in replacement subgraphs** for the sections of the network that contain locks or bridges. It processes all obstacles simultaneously using a `FairwaySplicer` to guarantee that overlapping structures (e.g. a bridge physically sitting on top of a lock complex) are properly topologically connected.
+The nodes and edges it generates replace the corresponding fairway stretch in the routing network, adding chamber-level routing and bridge passage constraints for discrete event simulation use cases.
 
 ## Output File Formats
 
@@ -83,9 +84,9 @@ uv run python -m fis.cli --help
 uv run python -m fis.cli graph --help
 uv run python -m fis.cli graph all          # Run full pipeline
 
-# Lock schematization
-uv run python -m fis.cli lock --help
-uv run python -m fis.cli lock schematize    # Process lock complexes
+# Integrated Lock & Bridge schematization
+uv run python -m fis.cli dropins --help
+uv run python -m fis.cli dropins schematize    # Process lock and bridge complexes
 ```
 
 ## Data Crawling
