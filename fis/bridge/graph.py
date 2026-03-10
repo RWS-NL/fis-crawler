@@ -151,13 +151,8 @@ def build_graph_features(complexes):
                 }
             )
 
-        if not (split_point and merge_point):
-            continue
-
-        # Parallel Openings
-        LineString([split_point, merge_point]) if not split_point.equals(
-            merge_point
-        ) else None
+        if split_point and merge_point and not split_point.equals(merge_point):
+            LineString([split_point, merge_point])
 
         openings = c.get("openings", [])
         if not openings:
@@ -217,29 +212,30 @@ def build_graph_features(complexes):
                 }
             )
 
-            approach_geom = (
-                LineString([split_point, op_geom])
-                if not split_point.equals(op_geom)
-                else None
-            )
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(approach_geom) if approach_geom else None,
-                    "properties": {
-                        "id": f"bridge_approach_{bridge_id}_{op_id}",
-                        "feature_type": "fairway_segment",
-                        "segment_type": "bridge_approach",
-                        "bridge_id": bridge_id,
-                        "opening_id": op_id,
-                        "source_node": split_node_id,
-                        "target_node": op_start_node,
-                        "length_m": geod.geometry_length(approach_geom)
-                        if approach_geom
-                        else 0.0,
-                    },
-                }
-            )
+            if split_point:
+                approach_geom = (
+                    LineString([split_point, op_geom])
+                    if not split_point.equals(op_geom)
+                    else None
+                )
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(approach_geom) if approach_geom else None,
+                        "properties": {
+                            "id": f"bridge_approach_{bridge_id}_{op_id}",
+                            "feature_type": "fairway_segment",
+                            "segment_type": "bridge_approach",
+                            "bridge_id": bridge_id,
+                            "opening_id": op_id,
+                            "source_node": split_node_id,
+                            "target_node": op_start_node,
+                            "length_m": geod.geometry_length(approach_geom)
+                            if approach_geom
+                            else 0.0,
+                        },
+                    }
+                )
 
             passage_geom = LineString([op_geom, op_geom])
             op_attrs = {k: v for k, v in opening.items() if k not in ["id", "geometry"]}
@@ -261,28 +257,29 @@ def build_graph_features(complexes):
                 }
             )
 
-            exit_geom = (
-                LineString([op_geom, merge_point])
-                if not op_geom.equals(merge_point)
-                else None
-            )
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(exit_geom) if exit_geom else None,
-                    "properties": {
-                        "id": f"bridge_exit_{bridge_id}_{op_id}",
-                        "feature_type": "fairway_segment",
-                        "segment_type": "bridge_exit",
-                        "bridge_id": bridge_id,
-                        "opening_id": op_id,
-                        "source_node": op_end_node,
-                        "target_node": merge_node_id,
-                        "length_m": geod.geometry_length(exit_geom)
-                        if exit_geom
-                        else 0.0,
-                    },
-                }
-            )
+            if merge_point:
+                exit_geom = (
+                    LineString([op_geom, merge_point])
+                    if not op_geom.equals(merge_point)
+                    else None
+                )
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(exit_geom) if exit_geom else None,
+                        "properties": {
+                            "id": f"bridge_exit_{bridge_id}_{op_id}",
+                            "feature_type": "fairway_segment",
+                            "segment_type": "bridge_exit",
+                            "bridge_id": bridge_id,
+                            "opening_id": op_id,
+                            "source_node": op_end_node,
+                            "target_node": merge_node_id,
+                            "length_m": geod.geometry_length(exit_geom)
+                            if exit_geom
+                            else 0.0,
+                        },
+                    }
+                )
 
     return features

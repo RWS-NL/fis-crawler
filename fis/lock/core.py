@@ -534,7 +534,10 @@ def group_complexes(
                 }
 
     for idx, lock in tqdm(
-        locks_gdf.iterrows(), total=len(locks_gdf), desc="Processing locks"
+        locks_gdf.iterrows(),
+        total=len(locks_gdf),
+        desc="Processing locks",
+        mininterval=2.0,
     ):
         lock_chambers = chambers[chambers["ParentId"] == lock["Id"]]
         lock_isrs_code = _resolve_isrs_code(lock, isrs)

@@ -7,7 +7,8 @@ def load_graph():
     edges = gpd.read_parquet("output/dropins-schematization/edges.geoparquet")
     G = nx.DiGraph()
     for _, edge in edges.iterrows():
-        G.add_edge(edge.source_node, edge.target_node, **edge.to_dict())
+        if edge.source_node is not None and edge.target_node is not None:
+            G.add_edge(edge.source_node, edge.target_node, **edge.to_dict())
     return G
 
 
@@ -32,21 +33,20 @@ def test_scenario_1_embedded_bridge():
     assert op_start in G, f"{op_start} not found in graph"
     assert op_end in G, f"{op_end} not found in graph"
 
-    # Verify path exists from chamber start to opening start
-    assert nx.has_path(G, start_node, op_start), (
-        f"No path from {start_node} to {op_start}"
-    )
-    # Verify path exists from opening end to chamber end
-    assert nx.has_path(G, op_end, end_node), f"No path from {op_end} to {end_node}"
+    merge_node = "lock_52078_merge"
+    assert merge_node in G, f"{merge_node} not found in graph"
 
-    # Check that opening 9689 is indeed between them
-    path = nx.shortest_path(G, start_node, end_node)
+    # Verify path exists from chamber end to opening start (bridge is on exit route)
+    assert nx.has_path(G, end_node, op_start), f"No path from {end_node} to {op_start}"
+    # Verify path exists from opening end to lock merge
+    assert nx.has_path(G, op_end, merge_node), f"No path from {op_end} to {merge_node}"
+
+    # Check that opening 9689 is indeed between chamber end and lock merge
+    path = nx.shortest_path(G, end_node, merge_node)
     assert op_start in path, (
-        "opening_9689_start should be in the path through chamber 18373"
+        "opening_9689_start should be in the path through chamber exit"
     )
-    assert op_end in path, (
-        "opening_9689_end should be in the path through chamber 18373"
-    )
+    assert op_end in path, "opening_9689_end should be in the path through chamber exit"
 
 
 def test_scenario_2_volkerak_sluizen():

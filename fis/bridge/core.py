@@ -64,7 +64,10 @@ def group_bridge_complexes(
     bridges_gdf = gpd.GeoDataFrame(bridges_df, geometry="geometry")
 
     for _, bridge in tqdm(
-        bridges_gdf.iterrows(), total=len(bridges_gdf), desc="Processing bridges"
+        bridges_gdf.iterrows(),
+        total=len(bridges_gdf),
+        desc="Processing bridges",
+        mininterval=2.0,
     ):
         bridge_id = bridge["Id"]
         bridge_data = sanitize_attrs(bridge)
