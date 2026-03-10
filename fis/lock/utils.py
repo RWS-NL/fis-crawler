@@ -21,6 +21,9 @@ def find_chamber_doors(chamber_geom, split_point, merge_point):
     """
     Find the entrance and exit points (doors) of a chamber.
 
+    The "start" door is the one closest to the complex split point (following the
+    fairway geometry direction), and the "end" door is closest to the merge point.
+
     Uses the Minimum Rotated Rectangle (MRR) of the chamber to find its centerline
     axis that aligns with the flow direction. The intersection of this centerline
     with the chamber boundary defines the door locations.

@@ -365,7 +365,7 @@ def _rewire_bridge_lock_topology(
     """Spatially and semantically matches bridge openings to lock chambers and rewires the graph topology."""
     from fis.lock.graph import build_chambers_gdf
     from fis.bridge.graph import build_openings_gdf
-    from shapely.geometry import LineString, Point
+    from shapely.geometry import LineString, Point, mapping
 
     chambers_gdf = build_chambers_gdf(lock_complexes)
     openings_gdf = build_openings_gdf(bridge_complexes)
@@ -379,6 +379,7 @@ def _rewire_bridge_lock_topology(
     openings_buf = openings_rd.copy()
     openings_buf.geometry = openings_buf.geometry.buffer(500)
 
+    # First use line distance scanning to find nearby matches
     possible_matches = gpd.sjoin(
         openings_buf, chambers_rd, how="inner", predicate="intersects"
     )
@@ -431,12 +432,16 @@ def _rewire_bridge_lock_topology(
 
             dist_score = max(0, 5 - (dist / 100))
             score += dist_score
-            candidates.append((score, dist, ch_id))
+            candidates.append((score, dist, ch_id, ch_row))
 
         if candidates:
             candidates.sort(key=lambda x: (-x[0], x[1]))
             if candidates[0][0] > 1.0:
-                matches[str(op_id)] = str(candidates[0][2])
+                matches[str(op_id)] = {
+                    "ch_id": str(candidates[0][2]),
+                    # Load the physical subchambers to check if bridge is exactly INSIDE or OUTSIDE
+                    "ch_row": candidates[0][3],
+                }
 
     if not matches:
         return all_features
@@ -447,6 +452,7 @@ def _rewire_bridge_lock_topology(
 
     items_to_remove = set()
     chamber_edges = {}
+    chamber_nodes = {}
 
     for f in all_features:
         p = f["properties"]
@@ -469,6 +475,9 @@ def _rewire_bridge_lock_topology(
             if ch_id not in chamber_edges:
                 chamber_edges[ch_id] = []
             chamber_edges[ch_id].append(f)
+
+        if p.get("feature_type") == "node" and "chamber_" in str(p.get("id")):
+            chamber_nodes[str(p.get("id"))] = f
 
     bridge_openings_geoms = {}
     for f in all_features:
@@ -515,114 +524,252 @@ def _rewire_bridge_lock_topology(
                 ]
         return [LineString(line), None]
 
-    for op_id, ch_id in matches.items():
+    # Read chambers and subchambers for precise interior/exterior intersection
+    lock_polys = []
+
+    subchambers_path = pathlib.Path("output/lock-schematization/subchamber.geojson")
+    if subchambers_path.exists():
+        sc = gpd.read_file(subchambers_path)
+        if not sc.empty and "chamber_id" in sc.columns:
+            sc["match_id"] = sc["chamber_id"].astype(str)
+            lock_polys.append(sc)
+
+    chambers_path = pathlib.Path("output/lock-schematization/chamber.geojson")
+    if chambers_path.exists():
+        ch = gpd.read_file(chambers_path)
+        if not ch.empty and "Id" in ch.columns:
+            ch["match_id"] = ch["Id"].astype(str)
+            lock_polys.append(ch)
+
+    poly_gdf = None
+    if lock_polys:
+        poly_gdf = pd.concat(lock_polys, ignore_index=True)
+        poly_gdf = gpd.GeoDataFrame(
+            poly_gdf, geometry="geometry", crs="EPSG:4326"
+        ).to_crs("EPSG:28992")
+
+    for op_id, match_data in matches.items():
+        ch_id = match_data["ch_id"]
+
         if op_id not in bridge_openings_geoms or ch_id not in chamber_edges:
             continue
 
         op_geom = bridge_openings_geoms[op_id]
 
-        best_edge = None
-        min_dist = float("inf")
+        # Determine if bridge is INSIDE or OUTSIDE the physical chamber bounds
+        is_inside = False
+        if poly_gdf is not None:
+            ch_polys = poly_gdf[poly_gdf["match_id"] == ch_id]
+            for _, cp in ch_polys.iterrows():
+                # Within 10m of physical chamber polygon -> treat as internal
+                if cp.geometry.distance(op_geom) < 10.0:
+                    is_inside = True
+                    break
 
-        for ce in chamber_edges[ch_id]:
-            if not ce.get("geometry"):
-                continue
-            geom = (
-                wkt.loads(ce["geometry"])
-                if isinstance(ce["geometry"], str)
-                else LineString(ce["geometry"]["coordinates"])
+        op_start_node = f"opening_{op_id}_start"
+        op_end_node = f"opening_{op_id}_end"
+
+        if is_inside:
+            # Spliced directly into the middle of the chamber route
+            best_edge = None
+            for ce in chamber_edges[ch_id]:
+                if ce["properties"]["segment_type"] == "chamber_route":
+                    best_edge = ce
+                    break
+
+            if best_edge:
+                orig_p = best_edge["properties"]
+                items_to_remove.add(orig_p["id"])
+
+                geom = (
+                    wkt.loads(best_edge["geometry"])
+                    if isinstance(best_edge["geometry"], str)
+                    else LineString(best_edge["geometry"]["coordinates"])
+                )
+                proj_dist = geom.project(op_geom)
+                split_point = geom.interpolate(proj_dist)
+
+                parts = cut(geom, proj_dist)
+
+                if parts[0] and parts[0].length > 0:
+                    p1 = orig_p.copy()
+                    p1["id"] = f"{orig_p['id']}_part1"
+                    p1["target_node"] = op_start_node
+                    p1["length_m"] = geod.geometry_length(parts[0])
+                    new_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(parts[0]),
+                            "properties": p1,
+                        }
+                    )
+                else:
+                    p1 = orig_p.copy()
+                    p1["id"] = f"{orig_p['id']}_part1"
+                    p1["target_node"] = op_start_node
+                    p1["length_m"] = 0.0
+                    new_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(
+                                LineString([Point(geom.coords[0]), split_point])
+                            ),
+                            "properties": p1,
+                        }
+                    )
+
+                if parts[1] and parts[1].length > 0:
+                    p2 = orig_p.copy()
+                    p2["id"] = f"{orig_p['id']}_part2"
+                    p2["source_node"] = op_end_node
+                    p2["length_m"] = geod.geometry_length(parts[1])
+                    new_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(parts[1]),
+                            "properties": p2,
+                        }
+                    )
+                else:
+                    p2 = orig_p.copy()
+                    p2["id"] = f"{orig_p['id']}_part2"
+                    p2["source_node"] = op_end_node
+                    p2["length_m"] = 0.0
+                    new_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(
+                                LineString([split_point, Point(geom.coords[-1])])
+                            ),
+                            "properties": p2,
+                        }
+                    )
+        else:
+            # Over or Outside. Determine whether to snap to Chamber Exit or Approach based on distance.
+            # Usually exit structures for bridges out of locks.
+            # Find closest junction (chamber_start or chamber_end) to the bridge
+
+            c_start_id = f"chamber_{ch_id}_start"
+            c_end_id = f"chamber_{ch_id}_end"
+
+            c_start_f = chamber_nodes.get(c_start_id)
+            c_end_f = chamber_nodes.get(c_end_id)
+
+            p_start = (
+                (
+                    wkt.loads(c_start_f["geometry"])
+                    if isinstance(c_start_f["geometry"], str)
+                    else Point(c_start_f["geometry"]["coordinates"])
+                )
+                if c_start_f
+                else None
             )
-            dist = geom.distance(op_geom)
-            if dist < min_dist:
-                min_dist = dist
-                best_edge = ce
-
-        if best_edge:
-            orig_p = best_edge["properties"]
-            items_to_remove.add(orig_p["id"])
-
-            geom = (
-                wkt.loads(best_edge["geometry"])
-                if isinstance(best_edge["geometry"], str)
-                else LineString(best_edge["geometry"]["coordinates"])
+            p_end = (
+                (
+                    wkt.loads(c_end_f["geometry"])
+                    if isinstance(c_end_f["geometry"], str)
+                    else Point(c_end_f["geometry"]["coordinates"])
+                )
+                if c_end_f
+                else None
             )
-            proj_dist = geom.project(op_geom)
-            split_point = geom.interpolate(proj_dist)
 
-            parts = cut(geom, proj_dist)
-
-            op_start_node = f"opening_{op_id}_start"
-            op_end_node = f"opening_{op_id}_end"
-
-            if parts[0] and parts[0].length > 0:
-                p1 = orig_p.copy()
-                p1["id"] = f"{orig_p['id']}_part1"
-                p1["target_node"] = op_start_node
-                p1["length_m"] = geod.geometry_length(parts[0])
-                new_features.append(
-                    {"type": "Feature", "geometry": mapping(parts[0]), "properties": p1}
+            # Nodes may be in EPSG:4326 while op_geom is in RD. Reproject nodes to RD to measure correct distance.
+            if p_start and -180 <= p_start.x <= 180:
+                p_start = (
+                    gpd.GeoSeries([p_start], crs="EPSG:4326")
+                    .to_crs("EPSG:28992")
+                    .iloc[0]
                 )
-            else:
-                p1 = orig_p.copy()
-                p1["id"] = f"{orig_p['id']}_part1"
-                p1["target_node"] = op_start_node
-                p1["length_m"] = 0.0
-                new_features.append(
-                    {
-                        "type": "Feature",
-                        "geometry": mapping(
-                            LineString([Point(geom.coords[0]), split_point])
-                        ),
-                        "properties": p1,
-                    }
+            if p_end and -180 <= p_end.x <= 180:
+                p_end = (
+                    gpd.GeoSeries([p_end], crs="EPSG:4326").to_crs("EPSG:28992").iloc[0]
                 )
 
-            if parts[1] and parts[1].length > 0:
-                p2 = orig_p.copy()
-                p2["id"] = f"{orig_p['id']}_part2"
-                p2["source_node"] = op_end_node
-                p2["length_m"] = geod.geometry_length(parts[1])
-                new_features.append(
-                    {"type": "Feature", "geometry": mapping(parts[1]), "properties": p2}
-                )
-            else:
-                p2 = orig_p.copy()
-                p2["id"] = f"{orig_p['id']}_part2"
-                p2["source_node"] = op_end_node
-                p2["length_m"] = 0.0
-                new_features.append(
-                    {
-                        "type": "Feature",
-                        "geometry": mapping(
-                            LineString([split_point, Point(geom.coords[-1])])
-                        ),
-                        "properties": p2,
-                    }
-                )
+            dist_to_start = p_start.distance(op_geom) if p_start else float("inf")
+            dist_to_end = p_end.distance(op_geom) if p_end else float("inf")
 
-    final_features = [
+            target_segment_type = (
+                "chamber_approach" if dist_to_start < dist_to_end else "chamber_exit"
+            )
+
+            best_edge = None
+            for ce in chamber_edges[ch_id]:
+                if ce["properties"]["segment_type"] == target_segment_type:
+                    best_edge = ce
+                    break
+
+            if best_edge:
+                orig_p = best_edge["properties"]
+                items_to_remove.add(orig_p["id"])
+
+                geom = (
+                    wkt.loads(best_edge["geometry"])
+                    if isinstance(best_edge["geometry"], str)
+                    else LineString(best_edge["geometry"]["coordinates"])
+                )
+                proj_dist = geom.project(op_geom)
+                split_point = geom.interpolate(proj_dist)
+
+                parts = cut(geom, proj_dist)
+
+                if parts[0] and parts[0].length > 0:
+                    p1 = orig_p.copy()
+                    p1["id"] = f"{orig_p['id']}_part1"
+                    p1["target_node"] = op_start_node
+                    p1["length_m"] = geod.geometry_length(parts[0])
+                    new_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(parts[0]),
+                            "properties": p1,
+                        }
+                    )
+                else:
+                    p1 = orig_p.copy()
+                    p1["id"] = f"{orig_p['id']}_part1"
+                    p1["target_node"] = op_start_node
+                    p1["length_m"] = 0.0
+                    new_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(
+                                LineString([Point(geom.coords[0]), split_point])
+                            ),
+                            "properties": p1,
+                        }
+                    )
+
+                if parts[1] and parts[1].length > 0:
+                    p2 = orig_p.copy()
+                    p2["id"] = f"{orig_p['id']}_part2"
+                    p2["source_node"] = op_end_node
+                    p2["length_m"] = geod.geometry_length(parts[1])
+                    new_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(parts[1]),
+                            "properties": p2,
+                        }
+                    )
+                else:
+                    p2 = orig_p.copy()
+                    p2["id"] = f"{orig_p['id']}_part2"
+                    p2["source_node"] = op_end_node
+                    p2["length_m"] = 0.0
+                    new_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(
+                                LineString([split_point, Point(geom.coords[-1])])
+                            ),
+                            "properties": p2,
+                        }
+                    )
+
+    return [
         f for f in all_features if f["properties"].get("id") not in items_to_remove
-    ]
-    final_features.extend(new_features)
-
-    connected_nodes = set()
-    for f in final_features:
-        if f["properties"].get("feature_type") == "fairway_segment":
-            if pd.notna(f["properties"].get("source_node")):
-                connected_nodes.add(f["properties"]["source_node"])
-            if pd.notna(f["properties"].get("target_node")):
-                connected_nodes.add(f["properties"]["target_node"])
-
-    cleaned_features = []
-    for f in final_features:
-        if f["properties"].get("feature_type") == "node" and f["properties"].get(
-            "node_type"
-        ) in ("bridge_split", "bridge_merge"):
-            if f["properties"]["id"] not in connected_nodes:
-                continue
-        cleaned_features.append(f)
-
-    return cleaned_features
+    ] + new_features
 
 
 def _export_graph(

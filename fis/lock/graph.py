@@ -276,6 +276,9 @@ def _process_fairway_connections(
     """
     Helper to process fairway connections (upstream/downstream) and key nodes.
     Only generates the internal split/merge nodes.
+
+    Note: "split" and "merge" are determined by the geometry direction of the fairway;
+    "split" is where the fairway enters the complex and "merge" is where it exits.
     """
     features = []
 
@@ -347,6 +350,9 @@ def _process_berths(c):
 def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point):
     """
     Helper to process chambers and generate related graph features.
+
+    Chamber "start" and "end" nodes follow the geometry direction of the fairway
+    (relative to the split and merge points).
     """
     features = []
 
