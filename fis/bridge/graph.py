@@ -2,6 +2,8 @@ import geopandas as gpd
 from shapely import wkt
 from shapely.geometry import Point, LineString, mapping
 from pyproj import Geod
+import json
+import pandas as pd
 
 geod = Geod(ellps="WGS84")
 CRS = "EPSG:4326"
@@ -238,7 +240,19 @@ def build_graph_features(complexes):
                 )
 
             passage_geom = LineString([op_geom, op_geom])
-            op_attrs = {k: v for k, v in opening.items() if k not in ["id", "geometry"]}
+
+            # Serialize metadata and handle nominal length
+            op_attrs = {}
+            for k, v in opening.items():
+                if k in ["id", "geometry"]:
+                    continue
+                if isinstance(v, (list, dict)):
+                    op_attrs[k] = json.dumps(v)
+                elif pd.isna(v):
+                    op_attrs[k] = None
+                else:
+                    op_attrs[k] = v
+
             features.append(
                 {
                     "type": "Feature",
@@ -252,7 +266,7 @@ def build_graph_features(complexes):
                         "opening_id": op_id,
                         "source_node": op_start_node,
                         "target_node": op_end_node,
-                        "length_m": 0.0,
+                        "length_m": 2.0,  # Nominal length for simulation compatibility
                     },
                 }
             )

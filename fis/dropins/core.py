@@ -488,12 +488,14 @@ def _generate_obstacle_cuts(
 
         dist = line_rd.project(geom_rd)
         if dropin["type"] == "lock":
-            max_len = 0.0
-            for child in obj.get("locks", []):
-                for ch in child.get("chambers", []):
-                    if ch.get("length"):
-                        max_len = max(max_len, float(ch["length"]))
-            buffer_dist = (max_len / 2.0) + LOCK_BUFFER_BASE
+            buffer_dist = obj.get("fairway_buffer_dist")
+            if buffer_dist is None:
+                max_len = 0.0
+                for child in obj.get("locks", []):
+                    for ch in child.get("chambers", []):
+                        if ch.get("length"):
+                            max_len = max(max_len, float(ch["length"]))
+                buffer_dist = (max_len / 2.0) + LOCK_BUFFER_BASE
         else:
             buffer_dist = BRIDGE_BUFFER
 
