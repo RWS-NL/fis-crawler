@@ -141,6 +141,14 @@ jobs:
         run: uv run python -m fis.cli lock schematize
         continue-on-error: true
 
+      - name: Run Bridge Schematization
+        run: uv run python -m fis.cli bridge schematize
+        continue-on-error: true
+
+      - name: Run Integrated Dropins Schematization
+        run: uv run python -m fis.cli dropins schematize
+        continue-on-error: true
+
       - name: Generate FIS Validation Report
         run: >
           uv run python -m fis.cli graph validate
@@ -171,4 +179,8 @@ jobs:
             output/merged-graph/*.geoparquet
             output/lock-schematization/*.geoparquet
             output/lock-schematization/*.json
+            output/bridge-schematization/*.geoparquet
+            output/bridge-schematization/*.json
+            output/integrated-schematization/*.geoparquet
+            output/integrated-schematization/*.json
           retention-days: 30
