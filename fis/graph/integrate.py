@@ -140,12 +140,12 @@ def find_geometric_border_connections(
 
         if p:
             # Project point and find nearest FIS node
-            bh_gdf = gpd.GeoDataFrame({"geometry": [p]}, crs="EPSG:4326").to_crs(
-                "EPSG:32631"
-            )
+            from ..lock.utils import project_geometry
+
+            bh_geom_rd = project_geometry(p, "EPSG:4326", "EPSG:32631")
 
             # Simple distance to all (fast enough for <10k nodes)
-            dists = fis_gdf.distance(bh_gdf.iloc[0].geometry)
+            dists = fis_gdf.distance(bh_geom_rd)
             min_dist = dists.min()
             nearest_idx = dists.idxmin()
 

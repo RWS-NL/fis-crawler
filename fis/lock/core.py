@@ -130,11 +130,11 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
     matched_disk_bridges = []
 
     complex_geoms_rd = []
+    from .utils import project_geometry
+
     lock_geom_rd = None
     if hasattr(lock, "geometry") and lock.geometry:
-        lock_geom_rd = (
-            gpd.GeoSeries([lock.geometry], crs="EPSG:4326").to_crs("EPSG:28992").iloc[0]
-        )
+        lock_geom_rd = project_geometry(lock.geometry, "EPSG:4326", "EPSG:28992")
         complex_geoms_rd.append(lock_geom_rd)
 
     chamber_geoms_rd = []

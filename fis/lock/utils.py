@@ -13,7 +13,13 @@ def project_geometry(geometry, crs_from="EPSG:4326", crs_to="EPSG:28992"):
     if not geometry:
         return None
 
-    project = pyproj.Transformer.from_crs(crs_from, crs_to, always_xy=True).transform
+    transformer = pyproj.Transformer.from_crs(crs_from, crs_to, always_xy=True)
+
+    def project(x, y, z=None):
+        if z is not None:
+            return transformer.transform(x, y, z)
+        return transformer.transform(x, y)
+
     return transform(project, geometry)
 
 

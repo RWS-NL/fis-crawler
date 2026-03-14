@@ -119,17 +119,25 @@ class FairwaySplicer:
             current_distance = merge_distance
             current_source_id = obs.id
 
-            seg_line = substring(self.line, start_distance, split_distance)
+            if split_distance > start_distance + EPSILON:
+                seg_line = substring(self.line, start_distance, split_distance)
 
-            segments.append(
-                SplicedSegment(
-                    geometry=seg_line,
-                    start_distance=start_distance,
-                    end_distance=split_distance,
-                    source_obstacle_id=source_id,
-                    target_obstacle_id=obs.id,
+                segments.append(
+                    SplicedSegment(
+                        geometry=seg_line,
+                        start_distance=start_distance,
+                        end_distance=split_distance,
+                        source_obstacle_id=source_id,
+                        target_obstacle_id=obs.id,
+                    )
                 )
-            )
+            else:
+                # If there's no space for a segment (overlapping buffers),
+                # we don't add a segment but we still need to potentially update node connections.
+                # For now, just logging or skipping. The next segment will start from merge_distance.
+                logger.debug(
+                    f"Skipping segment between {source_id} and {obs.id} due to overlap."
+                )
 
         # 3. Final trailing segment after the last obstacle
         if current_distance < self.total_length:

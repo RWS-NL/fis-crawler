@@ -80,9 +80,11 @@ def _load_and_group_dropins(
             if df is None or df.empty or "geometry" not in df.columns:
                 return df
             geoms = df["geometry"].apply(
-                lambda x: wkt.loads(x)
-                if isinstance(x, str) and x
-                else (x if not isinstance(x, str) else None)
+                lambda x: (
+                    wkt.loads(x)
+                    if isinstance(x, str) and x
+                    else (x if not isinstance(x, str) else None)
+                )
             )
             mask = gpd.GeoSeries(geoms, crs="EPSG:4326").intersects(bbox_poly)
             return df[mask].copy()
