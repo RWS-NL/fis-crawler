@@ -175,7 +175,6 @@ def build_graph_features(complexes):
     Flatten hierarchical complex objects into a list of GeoJSON features (Nodes and Edges).
     """
     features = []
-    seen_nodes = set()
 
     for c in complexes:
         # Lock Feature
@@ -210,10 +209,6 @@ def build_graph_features(complexes):
             )
 
         # Nodes and Fairway Segments
-        start_node = (
-            str(c.get("start_junction_id")) if c.get("start_junction_id") else None
-        )
-        end_node = str(c.get("end_junction_id")) if c.get("end_junction_id") else None
         split_node_id = f"lock_{c['id']}_split"
         merge_node_id = f"lock_{c['id']}_merge"
 
@@ -231,9 +226,6 @@ def build_graph_features(complexes):
         features.extend(
             _process_fairway_connections(
                 c,
-                seen_nodes,
-                start_node,
-                end_node,
                 split_node_id,
                 merge_node_id,
                 split_point,
@@ -276,9 +268,6 @@ def build_graph_features(complexes):
 
 def _process_fairway_connections(
     c,
-    seen_nodes,
-    start_node,
-    end_node,
     split_node_id,
     merge_node_id,
     split_point,
@@ -286,11 +275,15 @@ def _process_fairway_connections(
 ):
     """
     Helper to process fairway connections (upstream/downstream) and key nodes.
+    Only generates the internal split/merge nodes.
+
+    Note: "split" and "merge" are determined by the geometry direction of the fairway;
+    "split" is where the fairway enters the complex and "merge" is where it exits.
     """
     features = []
 
     if c.get("geometry_before_wkt"):
-        g_before_edges = wkt.loads(c["geometry_before_wkt"])
+        wkt.loads(c["geometry_before_wkt"])
 
         # Split Node
         if split_point:
@@ -308,49 +301,7 @@ def _process_fairway_connections(
                 }
             )
 
-        # Before Segment
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": mapping(g_before_edges),
-                "properties": {
-                    "id": f"fairway_segment_{c['id']}_before",
-                    "feature_type": "fairway_segment",
-                    "segment_type": "before",
-                    "lock_id": c["id"],
-                    "fairway_id": c.get("fairway_id"),
-                    "name": c.get("fairway_name"),
-                    "section_id": c.get("sections", [{}])[0].get("id")
-                    if c.get("sections")
-                    else None,
-                    "source_node": start_node,
-                    "target_node": split_node_id,
-                    "length_m": geod.geometry_length(g_before_edges),
-                },
-            }
-        )
-
-        # Start Node (Junction)
-        if start_node and start_node not in seen_nodes:
-            start_point = Point(g_before_edges.coords[0])
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(start_point),
-                    "properties": {
-                        "id": str(start_node),
-                        "feature_type": "node",
-                        "node_type": "junction",
-                        "node_id": str(start_node),
-                        "lock_id": c["id"],
-                    },
-                }
-            )
-            seen_nodes.add(start_node)
-
     if c.get("geometry_after_wkt"):
-        g_after_edges = wkt.loads(c["geometry_after_wkt"])
-
         # Merge Node
         if merge_point:
             features.append(
@@ -366,46 +317,6 @@ def _process_fairway_connections(
                     },
                 }
             )
-
-        # After Segment
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": mapping(g_after_edges),
-                "properties": {
-                    "id": f"fairway_segment_{c['id']}_after",
-                    "feature_type": "fairway_segment",
-                    "segment_type": "after",
-                    "lock_id": c["id"],
-                    "fairway_id": c.get("fairway_id"),
-                    "name": c.get("fairway_name"),
-                    "section_id": c.get("sections", [{}])[0].get("id")
-                    if c.get("sections")
-                    else None,
-                    "source_node": merge_node_id,
-                    "target_node": end_node,
-                    "length_m": geod.geometry_length(g_after_edges),
-                },
-            }
-        )
-
-        # End Node (Junction)
-        if end_node and end_node not in seen_nodes:
-            end_point = Point(g_after_edges.coords[-1])
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(end_point),
-                    "properties": {
-                        "id": str(end_node),
-                        "feature_type": "node",
-                        "node_type": "junction",
-                        "node_id": str(end_node),
-                        "lock_id": c["id"],
-                    },
-                }
-            )
-            seen_nodes.add(end_node)
 
     return features
 
@@ -439,6 +350,9 @@ def _process_berths(c):
 def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point):
     """
     Helper to process chambers and generate related graph features.
+
+    Chamber "start" and "end" nodes follow the geometry direction of the fairway
+    (relative to the split and merge points).
     """
     features = []
 

@@ -1,4 +1,5 @@
 import pathlib
+from typing import List, Dict, Any
 import logging
 import pandas as pd
 import geopandas as gpd
@@ -69,20 +70,20 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     bridges = read_geo_or_parquet(export_dir, "bridge")
     openings = read_geo_or_parquet(export_dir, "opening")
 
-    return (
-        locks,
-        chambers,
-        subchambers,
-        isrs,
-        fairways,
-        berths,
-        sections,
-        disk_locks,
-        disk_bridges,
-        operatingtimes,
-        bridges,
-        openings,
-    )
+    return {
+        "locks": locks,
+        "chambers": chambers,
+        "subchambers": subchambers,
+        "isrs": isrs,
+        "fairways": fairways,
+        "berths": berths,
+        "sections": sections,
+        "disk_locks": disk_locks,
+        "disk_bridges": disk_bridges,
+        "operatingtimes": operatingtimes,
+        "bridges": bridges,
+        "openings": openings,
+    }
 
 
 def to_python(obj):
@@ -130,11 +131,11 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
     matched_disk_bridges = []
 
     complex_geoms_rd = []
+    from .utils import project_geometry
+
     lock_geom_rd = None
     if hasattr(lock, "geometry") and lock.geometry:
-        lock_geom_rd = (
-            gpd.GeoSeries([lock.geometry], crs="EPSG:4326").to_crs("EPSG:28992").iloc[0]
-        )
+        lock_geom_rd = project_geometry(lock.geometry, "EPSG:4326", "EPSG:28992")
         complex_geoms_rd.append(lock_geom_rd)
 
     chamber_geoms_rd = []
@@ -231,7 +232,9 @@ def _resolve_ris_info(lock_isrs_code, ris_df):
     return ris_info
 
 
-def _resolve_fairway_data(lock, lock_chambers, fairways, sections_gdf):
+def _resolve_fairway_data(
+    lock, lock_chambers, fairways, sections_gdf, openings_data=None
+):
     fairway_data = {}
     chamber_routes = {}
     if fairways is not None and pd.notna(lock.get("FairwayId")):
@@ -249,7 +252,9 @@ def _resolve_fairway_data(lock, lock_chambers, fairways, sections_gdf):
                 max_length = 0
 
             buffer_dist = (max_length / 2) + 50
-            geom_data = process_fairway_geometry(fw_obj, lock, buffer_dist=buffer_dist)
+            geom_data = process_fairway_geometry(
+                fw_obj, lock, buffer_dist=buffer_dist, openings_data=openings_data
+            )
             fairway_data.update(geom_data)
 
             if sections_gdf is not None:
@@ -442,25 +447,23 @@ def _build_chamber_objects(lock_chambers, chamber_routes, subchambers, op_times_
     return chambers_list
 
 
-def group_complexes(
-    locks,
-    chambers,
-    subchambers,
-    isrs,
-    ris_df,
-    fairways,
-    berths,
-    sections,
-    network_graph=None,
-    disk_locks=None,
-    disk_bridges=None,
-    operatingtimes=None,
-    bridges=None,
-    openings=None,
-):
+def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     """
     Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, Section, and DISK data.
     """
+    locks = data.get("locks")
+    chambers = data.get("chambers")
+    subchambers = data.get("subchambers")
+    isrs = data.get("isrs")
+    ris_df = data.get("ris_df")
+    fairways = data.get("fairways")
+    berths = data.get("berths")
+    sections = data.get("sections")
+    disk_locks = data.get("disk_locks")
+    disk_bridges = data.get("disk_bridges")
+    operatingtimes = data.get("operatingtimes")
+    bridges = data.get("bridges")
+    openings = data.get("openings")
     complexes = []
 
     # Convert locks to GeoDataFrame for spatial ops if needed
@@ -534,13 +537,22 @@ def group_complexes(
                 }
 
     for idx, lock in tqdm(
-        locks_gdf.iterrows(), total=len(locks_gdf), desc="Processing locks"
+        locks_gdf.iterrows(),
+        total=len(locks_gdf),
+        desc="Processing locks",
+        mininterval=2.0,
     ):
         lock_chambers = chambers[chambers["ParentId"] == lock["Id"]]
         lock_isrs_code = _resolve_isrs_code(lock, isrs)
         ris_info = _resolve_ris_info(lock_isrs_code, ris_df)
+
+        # Resolve associated bridge openings FIRST to allow dynamic buffer calculation
+        openings_data = _resolve_openings(
+            lock, lock_chambers, bridges, openings, op_times_map
+        )
+
         fairway_data, chamber_routes = _resolve_fairway_data(
-            lock, lock_chambers, fairways, sections_gdf
+            lock, lock_chambers, fairways, sections_gdf, openings_data=openings_data
         )
 
         logger.debug("  Checking connected fairways and sections...")
@@ -578,10 +590,7 @@ def group_complexes(
                 disk_complex_name = dl.get("complex_naam")
                 break
 
-        # Resolve associated bridge openings
-        openings_data = _resolve_openings(
-            lock, lock_chambers, bridges, openings, op_times_map
-        )
+        # openings_data resolved earlier for fairway buffer calculation
 
         lock_id = int(lock["Id"])
         lock_op_times = None
@@ -652,9 +661,10 @@ def split_fairway(fairway_geom, lock_km, fairway_start_km, fairway_end_km):
     return before, after
 
 
-def process_fairway_geometry(fw_row, lock_row, buffer_dist=0):
+def process_fairway_geometry(fw_row, lock_row, buffer_dist=0, openings_data=None):
     """
     Calculate fairway segments and distance using metric projection (EPSG:28992).
+    If openings_data is provided, expand buffer_dist to encompass the farthest opening.
     """
 
     logging.getLogger(__name__)
@@ -697,9 +707,45 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0):
         projected_dist = fw_line_rd.project(lock_point_rd)
         projected_point = fw_line_rd.interpolate(projected_dist)
 
+        # Dynamic buffer expansion based on associated bridge openings
+        if openings_data:
+            max_offset = buffer_dist
+            for op in openings_data:
+                op_geom_wkt = op.get("geometry")
+                if not op_geom_wkt:
+                    continue
+                op_geom = wkt.loads(op_geom_wkt)
+                gs_op = gpd.GeoSeries([op_geom], crs="EPSG:4326").to_crs("EPSG:28992")
+                op_point_rd = gs_op.iloc[0]
+                if op_point_rd.geom_type != "Point":
+                    op_point_rd = op_point_rd.centroid
+
+                op_proj_dist = fw_line_rd.project(op_point_rd)
+                dist_from_lock = abs(op_proj_dist - projected_dist)
+
+                # Check available space on the fairway section to move the node back
+                if op_proj_dist >= projected_dist:
+                    # Opening is after the lock, space left until the end of the section
+                    space_left = fw_line_rd.length - op_proj_dist
+                else:
+                    # Opening is before the lock, space left until the start of the section
+                    space_left = op_proj_dist
+
+                # We want the lock's buffer distance to reach out to the opening PLUS an extra 100m margin.
+                # 'dist_from_lock' is the absolute distance from the lock's projection to the opening's projection.
+                target_margin = 100
+                actual_margin = min(target_margin, space_left)
+
+                # Expand buffer to include opening plus safety margin
+                required_buffer_for_this_opening = dist_from_lock + actual_margin
+                max_offset = max(max_offset, required_buffer_for_this_opening)
+
+            buffer_dist = max_offset
+
         fairway_data["lock_to_fairway_distance_meters"] = lock_point_rd.distance(
             projected_point
         )
+        fairway_data["fairway_buffer_dist"] = buffer_dist
 
         # Split using spatial projection with buffer
         dist_split = max(0, projected_dist - buffer_dist)

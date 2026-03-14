@@ -135,11 +135,11 @@ def test_edges_gdf_columns():
         assert col in gdf.columns, f"Missing column: {col}"
 
 
-def test_edges_gdf_has_before_and_after():
+def test_edges_gdf_has_approach_and_exit():
     gdf = build_edges_gdf(COMPLEXES)
     seg_types = set(gdf["segment_type"].dropna())
-    assert "before" in seg_types
-    assert "after" in seg_types
+    assert "chamber_approach" in seg_types
+    assert "chamber_exit" in seg_types
 
 
 def test_edges_gdf_length_nonnegative():
