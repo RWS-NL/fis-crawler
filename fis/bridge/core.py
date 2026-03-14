@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict
+from typing import List, Dict, Any
 
 import geopandas as gpd
 import pandas as pd
@@ -21,17 +21,16 @@ def sanitize_attrs(obj):
     return res
 
 
-def group_bridge_complexes(
-    bridges_df: pd.DataFrame,
-    openings_df: pd.DataFrame,
-    sections_gdf: gpd.GeoDataFrame = None,
-    disk_bridges: gpd.GeoDataFrame = None,
-    operatingtimes: pd.DataFrame = None,
-) -> List[Dict]:
+def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
     """
     Groups FIS Bridges with their Openings, Sections, and Operating Times.
     Also spatially matches them to DISK physical bridge structures.
     """
+    bridges_df = data.get("bridges")
+    openings_df = data.get("openings")
+    sections_gdf = data.get("sections")
+    disk_bridges = data.get("disk_bridges")
+    operatingtimes = data.get("operatingtimes")
     complexes = []
 
     # Map operating times

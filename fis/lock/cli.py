@@ -61,20 +61,7 @@ def schematize(
     output_dir: pathlib.Path,
 ) -> None:
     """Process lock complexes into detailed graph features."""
-    (
-        locks,
-        chambers,
-        subchambers,
-        isrs,
-        fairways,
-        berths,
-        sections,
-        disk_locks,
-        disk_bridges,
-        operatingtimes,
-        bridges,
-        openings,
-    ) = load_data(export_dir, disk_dir)
+    data = load_data(export_dir, disk_dir)
 
     # Load RIS Index
     ris_df = None
@@ -97,22 +84,8 @@ def schematize(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Group complexes
-    result = group_complexes(
-        locks,
-        chambers,
-        subchambers,
-        isrs,
-        ris_df,
-        fairways,
-        berths,
-        sections,
-        network_graph,
-        disk_locks,
-        disk_bridges,
-        operatingtimes,
-        bridges,
-        openings,
-    )
+    data["ris_df"] = ris_df
+    result = group_complexes(data, network_graph)
 
     # Summary JSON (per-lock metadata)
     output_json = output_dir / "summary.json"

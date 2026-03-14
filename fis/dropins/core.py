@@ -55,21 +55,7 @@ def _load_and_group_dropins(
     export_dir: pathlib.Path, disk_dir: pathlib.Path, bbox=None
 ) -> Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame]:
     """Loads all parquet files and delegates to the grouped domain builders."""
-    res = lock_load_data(export_dir, disk_dir)
-    (
-        locks,
-        chambers,
-        subchambers,
-        isrs,
-        fairways,
-        berths,
-        sections,
-        disk_locks,
-        disk_bridges,
-        operatingtimes,
-        bridges,
-        openings,
-    ) = res
+    data = lock_load_data(export_dir, disk_dir)
 
     if bbox:
         import shapely.geometry
@@ -79,44 +65,33 @@ def _load_and_group_dropins(
         def filter_df(df, name):
             if df is None or df.empty or "geometry" not in df.columns:
                 return df
-            geoms = df["geometry"].apply(
-                lambda x: (
-                    wkt.loads(x)
-                    if isinstance(x, str) and x
-                    else (x if not isinstance(x, str) else None)
-                )
-            )
-            mask = gpd.GeoSeries(geoms, crs="EPSG:4326").intersects(bbox_poly)
+            if df["geometry"].dtype == "object":
+                # Only use from_wkt on strings, keep existing objects (e.g. from GeoParquet)
+                is_str = df["geometry"].apply(lambda x: isinstance(x, str))
+                if is_str.any():
+                    df = df.copy()
+                    df.loc[is_str, "geometry"] = gpd.GeoSeries.from_wkt(
+                        df.loc[is_str, "geometry"]
+                    )
+            mask = gpd.GeoSeries(df["geometry"], crs="EPSG:4326").intersects(bbox_poly)
             return df[mask].copy()
 
-        locks = filter_df(locks, "locks")
-        bridges = filter_df(bridges, "bridges")
-        sections = filter_df(sections, "sections")
+        data["locks"] = filter_df(data.get("locks"), "locks")
+        data["bridges"] = filter_df(data.get("bridges"), "bridges")
+        data["sections"] = filter_df(data.get("sections"), "sections")
 
     logger.info("Grouping Locks...")
-    lock_complexes = group_locks(
-        locks,
-        chambers,
-        subchambers,
-        isrs,
-        None,
-        fairways,
-        berths,
-        sections,
-        None,
-        disk_locks,
-        disk_bridges,
-        operatingtimes,
-        bridges,
-        openings,
-    )
+    lock_complexes = group_locks(data)
 
     logger.info("Grouping Bridges...")
-    bridge_complexes = group_bridges(
-        bridges, openings, sections, disk_bridges, operatingtimes
-    )
+    bridge_complexes = group_bridges(data)
 
-    return lock_complexes, bridge_complexes, sections, openings
+    return (
+        lock_complexes,
+        bridge_complexes,
+        data.get("sections"),
+        data.get("openings"),
+    )
 
 
 def _identify_embedded_structures(

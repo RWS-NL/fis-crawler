@@ -1,4 +1,5 @@
 import pathlib
+from typing import List, Dict, Any
 import logging
 import pandas as pd
 import geopandas as gpd
@@ -69,20 +70,20 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     bridges = read_geo_or_parquet(export_dir, "bridge")
     openings = read_geo_or_parquet(export_dir, "opening")
 
-    return (
-        locks,
-        chambers,
-        subchambers,
-        isrs,
-        fairways,
-        berths,
-        sections,
-        disk_locks,
-        disk_bridges,
-        operatingtimes,
-        bridges,
-        openings,
-    )
+    return {
+        "locks": locks,
+        "chambers": chambers,
+        "subchambers": subchambers,
+        "isrs": isrs,
+        "fairways": fairways,
+        "berths": berths,
+        "sections": sections,
+        "disk_locks": disk_locks,
+        "disk_bridges": disk_bridges,
+        "operatingtimes": operatingtimes,
+        "bridges": bridges,
+        "openings": openings,
+    }
 
 
 def to_python(obj):
@@ -446,25 +447,23 @@ def _build_chamber_objects(lock_chambers, chamber_routes, subchambers, op_times_
     return chambers_list
 
 
-def group_complexes(
-    locks,
-    chambers,
-    subchambers,
-    isrs,
-    ris_df,
-    fairways,
-    berths,
-    sections,
-    network_graph=None,
-    disk_locks=None,
-    disk_bridges=None,
-    operatingtimes=None,
-    bridges=None,
-    openings=None,
-):
+def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     """
     Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, Section, and DISK data.
     """
+    locks = data.get("locks")
+    chambers = data.get("chambers")
+    subchambers = data.get("subchambers")
+    isrs = data.get("isrs")
+    ris_df = data.get("ris_df")
+    fairways = data.get("fairways")
+    berths = data.get("berths")
+    sections = data.get("sections")
+    disk_locks = data.get("disk_locks")
+    disk_bridges = data.get("disk_bridges")
+    operatingtimes = data.get("operatingtimes")
+    bridges = data.get("bridges")
+    openings = data.get("openings")
     complexes = []
 
     # Convert locks to GeoDataFrame for spatial ops if needed

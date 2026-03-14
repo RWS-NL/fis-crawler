@@ -131,30 +131,11 @@ def schematize(
     output_dir: pathlib.Path,
 ) -> None:
     """Process bridge complexes from FIS and DISK into structured outputs."""
-    (
-        locks,
-        chambers,
-        subchambers,
-        isrs,
-        fairways,
-        berths,
-        sections,
-        disk_locks,
-        disk_bridges,
-        operatingtimes,
-        bridges,
-        openings,
-    ) = load_data(export_dir, disk_dir)
+    data = load_data(export_dir, disk_dir)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    result = group_bridge_complexes(
-        bridges,
-        openings,
-        sections,
-        disk_bridges,
-        operatingtimes,
-    )
+    result = group_bridge_complexes(data)
 
     output_json = output_dir / "summary.json"
     with open(output_json, "w") as f:
