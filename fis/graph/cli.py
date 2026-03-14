@@ -426,6 +426,7 @@ def validate(
     validator.check_border_integrity()
     validator.check_schema_compliance()
     validator.check_critical_connections()
+    validator.check_dropins()
 
     # Generate report
     report = validator.generate_markdown_report()

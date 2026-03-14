@@ -28,6 +28,7 @@ class GraphValidator:
             "border_integrity": {},
             "schema_compliance": {},
             "critical_connections": {},
+            "dropins": {},
         }
 
     def check_statistics(self) -> Dict[str, Any]:
@@ -62,6 +63,19 @@ class GraphValidator:
                     }
                 )
 
+        # Drop-in specific counts
+        dropin_node_types = {}
+        for _, d in self.graph.nodes(data=True):
+            f_type = d.get("feature_type")
+            if f_type:
+                dropin_node_types[f_type] = dropin_node_types.get(f_type, 0) + 1
+
+        dropin_edge_types = {}
+        for _, _, d in self.graph.edges(data=True):
+            f_type = d.get("feature_type")
+            if f_type:
+                dropin_edge_types[f_type] = dropin_edge_types.get(f_type, 0) + 1
+
         stats = {
             "total_nodes": self.graph.number_of_nodes(),
             "total_edges": self.graph.number_of_edges(),
@@ -71,6 +85,11 @@ class GraphValidator:
             "largest_component_size": len(components[0]) if components else 0,
             "subgraphs": component_stats,
             "unique_fairway_sections": len(fairway_ids),
+            "dropin_node_types": dropin_node_types,
+            "dropin_edge_types": dropin_edge_types,
+            "dropin_keys": sorted(
+                list(set(dropin_node_types.keys()) | set(dropin_edge_types.keys()))
+            ),
         }
         self.results["statistics"] = stats
         return stats
@@ -233,12 +252,49 @@ class GraphValidator:
         self.results["critical_connections"] = {"checks": checks}
         return {"checks": checks}
 
+    def check_dropins(self) -> Dict[str, Any]:
+        """Check the presence and health of drop-in features (locks, bridges)."""
+        logger.info("Checking drop-in schematization health...")
+
+        found_locks = any(
+            d.get("feature_type") == "lock" for _, d in self.graph.nodes(data=True)
+        )
+        found_bridges = any(
+            d.get("feature_type") == "bridge" for _, d in self.graph.nodes(data=True)
+        )
+        found_openings = any(
+            d.get("feature_type") == "bridge_opening"
+            for _, d in self.graph.nodes(data=True)
+        )
+        found_chambers = any(
+            d.get("feature_type") == "chamber" for _, d in self.graph.nodes(data=True)
+        )
+
+        # Count splicing artifacts
+        splices = sum(
+            1 for _, _, d in self.graph.edges(data=True) if d.get("is_splice")
+        )
+
+        dropins_health = {
+            "locks_present": found_locks,
+            "bridges_present": found_bridges,
+            "openings_present": found_openings,
+            "chambers_present": found_chambers,
+            "total_splices": splices,
+            "status": "PASS"
+            if (found_locks or found_bridges) and splices > 0
+            else "WARNING",
+        }
+        self.results["dropins"] = dropins_health
+        return dropins_health
+
     def generate_markdown_report(self) -> str:
         """Generate a Markdown report from results using Jinja2 template."""
         stats = self.results["statistics"]
         border = self.results["border_integrity"]
         schema = self.results["schema_compliance"]
         critical = self.results["critical_connections"]
+        dropins = self.results.get("dropins", {})
 
         # Calculate sources for table
         sources = set(
@@ -256,5 +312,6 @@ class GraphValidator:
             border=border,
             schema=schema,
             critical=critical,
+            dropins=dropins,
             sources=list(sources),
         )

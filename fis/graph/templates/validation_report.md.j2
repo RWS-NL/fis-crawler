@@ -15,6 +15,13 @@
 | {{ src }} | {{ stats.nodes_by_source.get(src, 0) }} | {{ stats.edges_by_source.get(src, 0) }} |
 {% endfor %}
 
+### Drop-in Features
+| Feature Type | Nodes | Edges |
+|--------------|-------|-------|
+{% for k in stats.dropin_keys %}
+| `{{ k }}` | {{ stats.dropin_node_types.get(k, 0) }} | {{ stats.dropin_edge_types.get(k, 0) }} |
+{% endfor %}
+
 ### Largest Subgraphs
 | Subgraph ID | Nodes | Edges |
 |-------------|-------|-------|
@@ -67,7 +74,16 @@
 | {{ check.name }} | {% if check.status == "PASS" %}✅{% else %}⚠️{% endif %} {{ check.status }} | {{ check.details }} |
 {% endfor %}
 
-## 5. Suggested Improvements
+## 5. Drop-in Schematization Health
+- **Status**: {% if dropins.status == "PASS" %}✅{% else %}⚠️{% endif %} {{ dropins.status }}
+- **Locks Present**: {{ "Yes" if dropins.locks_present else "No" }}
+- **Bridges Present**: {{ "Yes" if dropins.bridges_present else "No" }}
+- **Chambers Integrated**: {{ "Yes" if dropins.chambers_present else "No" }}
+- **Bridge Openings Integrated**: {{ "Yes" if dropins.openings_present else "No" }}
+- **Total Spliced Edges**: {{ dropins.total_splices }}
+
+## 6. Suggested Improvements
 - **Attribute Cleanup**: Investigate attributes with high missing/null counts (>50%) and determine if they are required or can be dropped.
 - **Graph Connectivity**: There are multiple disjoint subgraphs. Investigate whether the top 2-10 subgraphs are legitimately disconnected waterways or missing logical connections.
 - **Legacy Attributes**: If non-standard legacy attributes are flagged, ensure they are added to `schema.toml` `attributes.edges` or `attributes.nodes` to map to canonical names.
+- **Drop-in Splicing**: If "Total Spliced Edges" is 0, verify that `lock schematize` and `bridge schematize` were run before merging the graph.
