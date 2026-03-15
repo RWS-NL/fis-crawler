@@ -252,7 +252,7 @@ def export_euris_graph(
         "num_edges": graph.number_of_edges(),
         "num_connected_components": nx.number_connected_components(graph),
     }
-    with open(output_dir / "summary.json", "w") as f:
+    with open(output_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     # Copy ris-index.gpkg

@@ -157,7 +157,7 @@ def enrich_fis(
         "num_connected_components": nx.number_connected_components(graph),
         "edges_with_cemt": enriched_edges,
     }
-    with open(output_dir / "summary.json", "w") as f:
+    with open(output_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     logger.info("FIS enriched graph exported to %s", output_dir)
@@ -207,7 +207,7 @@ def enrich_euris(
         "num_connected_components": nx.number_connected_components(graph),
         "enrichment": ["sailing_speed"],
     }
-    with open(output_dir / "summary.json", "w") as f:
+    with open(output_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     logger.info("EURIS enriched graph at %s", output_dir)
@@ -358,7 +358,7 @@ def merge(
         "border_connections": len(connections),
         "schema_version": schema_version,
     }
-    with open(output_dir / "summary.json", "w") as f:
+    with open(output_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     # Export border connections for inspection
@@ -432,7 +432,7 @@ def validate(
     report = validator.generate_markdown_report()
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write(report)
 
     logger.info("Validation report written to %s", output_file)

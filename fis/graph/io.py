@@ -82,7 +82,7 @@ def export_graph(
     }
     summary_path = output_dir / "summary.json"
     logger.info("Exporting summary to %s", summary_path)
-    with open(summary_path, "w") as f:
+    with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     logger.info("Export complete: %s", output_dir)
