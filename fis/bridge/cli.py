@@ -138,7 +138,7 @@ def schematize(
     result = group_bridge_complexes(data)
 
     output_json = output_dir / "summary.json"
-    with open(output_json, "w") as f:
+    with open(output_json, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
     logger.info("Saved summary to %s", output_json)
 
