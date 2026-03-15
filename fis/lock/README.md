@@ -47,7 +47,6 @@ All spatial outputs are produced in two formats: `.geojson` (GIS / interoperabil
 | `berths.geojson` / `.geoparquet` | Waiting berths associated with each lock |
 | `summary.json` | Detailed JSON export of the lock hierarchy (complex → lock → chamber → subchamber) |
 
-
 ## Node Types (`node_type`)
 
 | Type | Description |
