@@ -4,10 +4,10 @@
 reference/
 
 # Ignore export and file storage directories
-fis-export/
-euris-export/
-output/
-files-store/
+/fis-export/
+/euris-export/
+/output/
+/files-store/
 
 
 # data files
@@ -16,6 +16,10 @@ notebooks/data/*.geojson
 *.jsonl
 *.parquet
 *.geoparquet
+
+# Allow test fixtures
+!tests/data/**/*.parquet
+!tests/data/**/*.geoparquet
 
 # merge conflicts
 *.orig
@@ -104,7 +108,7 @@ target/
 .ipynb_checkpoints
 
 # Data
-fis-export/
+/fis-export/
 lock-output/
 geotypes.json
 
