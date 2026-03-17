@@ -126,3 +126,23 @@ fis/
 ├── pipelines.py    # Data export pipelines
 └── settings.py     # Scrapy settings
 ```
+
+## Testing
+
+Integration tests verify the topological correctness of the network generation logic.
+
+### Running Tests
+```bash
+uv run pytest tests/
+```
+
+### Integration Test Data
+Some tests (e.g., `tests/test_topological_scenarios.py`) require a schematized network graph. In CI, this is generated automatically from a minimal data subset stored in `tests/data/`.
+
+To update or expand this test data subset from your local full export:
+1. Ensure you have full data in `output/fis-export/` and `output/disk-export/`.
+2. Run the subsetting script:
+   ```bash
+   uv run python scripts/subset_test_data.py
+   ```
+   This script filters the global dataset to a specific bounding box (Volkerak/Krammer area) to keep the repository lightweight while maintaining test coverage.
