@@ -13,7 +13,7 @@ import networkx as nx
 
 from fis.lock.core import load_data as lock_load_data, group_complexes as group_locks
 from fis.bridge.core import group_bridge_complexes as group_bridges
-from fis.splicer import FairwaySplicer, ObstacleCut
+from fis.splicer import FairwaySplicer, StructureCut
 
 from fis.lock.graph import build_graph_features as lock_graph_features
 from fis.bridge.graph import build_graph_features as bridge_graph_features
@@ -62,7 +62,7 @@ def build_integrated_dropins_graph(
     all_features.extend(bridge_graph_features(detailed_bridges))
 
     logger.info(
-        "Generating simplified passage edges for standalone/simplified obstacles..."
+        "Generating simplified passage edges for standalone/simplified structures..."
     )
     all_features.extend(_generate_simplified_passages(simplified_locks, "lock"))
     all_features.extend(_generate_simplified_passages(simplified_bridges, "bridge"))
@@ -249,14 +249,14 @@ def _splice_fairways(
 ) -> List[Dict]:
     """
     Iterates over all fairway sections and splices them into sub-segments
-    based on the obstacles (drop-ins) that lie upon them.
+    based on the structures (drop-ins) that lie upon them.
 
     Embedded bridges are explicitly omitted from slicing the main fairway,
     since they only interrupt internal lock chamber routes.
 
     Args:
         sections: DataFrame of fairway sections.
-        dropins_by_section: Precomputed mapping of section IDs to drop-in obstacles.
+        dropins_by_section: Precomputed mapping of section IDs to drop-in structures.
         embedded_bridges: Mapping of bridge opening IDs that are embedded in locks.
 
     Returns:
@@ -292,14 +292,14 @@ def _splice_fairways(
 
 def _is_embedded(dropin: Dict, embedded_ids: Set[str]) -> bool:
     """
-    Checks if a given dropin obstacle matches any of the known embedded bridge IDs.
+    Checks if a given dropin structure matches any of the known embedded bridge IDs.
 
     Args:
-        dropin: The obstacle dict `{"type": ..., "obj": ...}`.
+        dropin: The structure dict `{"type": ..., "obj": ...}`.
         embedded_ids: A set of opening IDs considered embedded.
 
     Returns:
-        True if the obstacle is an embedded bridge, False otherwise.
+        True if the structure is an embedded bridge, False otherwise.
     """
     if dropin["type"] != "bridge":
         return False
@@ -358,7 +358,7 @@ def _slice_section_with_dropins(
     line_rd = line_rd_series.to_crs(utm_crs).iloc[0]
 
     splicer = FairwaySplicer(line_rd)
-    cuts = _generate_obstacle_cuts(line_rd, visible_dropins, utm_crs)
+    cuts = _generate_structure_cuts(line_rd, visible_dropins, utm_crs)
     segments = splicer.splice(cuts)
 
     for i, segment in enumerate(segments):
@@ -406,13 +406,13 @@ def _determine_source_node(
 ) -> Tuple[Optional[str], bool]:
     """
     Determines the correct source node ID for a spliced segment.
-    If the segment starts from a drop-in obstacle, evaluates the obstacle type
+    If the segment starts from a drop-in structure, evaluates the structure type
     and uses the appropriate `_split` or `_merge` node suffix.
 
     Args:
         segment: The generated SplicedSegment object.
         start_junc: The default StartJunctionId from the section.
-        dropins: The list of drop-in obstacles present on the section.
+        dropins: The list of drop-in structures present on the section.
         seg_4326: The current segment's geometry in 4326 projection.
 
     Returns:
@@ -420,8 +420,8 @@ def _determine_source_node(
     """
     is_start = True
     node = str(int(start_junc)) if pd.notna(start_junc) else None
-    if segment.source_obstacle_id:
-        dtype, did = segment.source_obstacle_id.split("_")
+    if segment.source_structure_id:
+        dtype, did = segment.source_structure_id.split("_")
         node = f"{dtype}_{did}_merge"
         _assign_geom_wkt(dropins, dtype, int(did), "geometry_after_wkt", seg_4326.wkt)
         is_start = False
@@ -433,13 +433,13 @@ def _determine_target_node(
 ) -> Tuple[Optional[str], bool]:
     """
     Determines the correct target node ID for a spliced segment.
-    If the segment ends at a drop-in obstacle, evaluates the obstacle type
+    If the segment ends at a drop-in structure, evaluates the structure type
     and uses the appropriate `_split` or `_merge` node suffix.
 
     Args:
         segment: The generated SplicedSegment object.
         end_junc: The default EndJunctionId from the section.
-        dropins: The list of drop-in obstacles present on the section.
+        dropins: The list of drop-in structures present on the section.
         seg_4326: The current segment's geometry in 4326 projection.
 
     Returns:
@@ -447,21 +447,21 @@ def _determine_target_node(
     """
     is_end = True
     node = str(int(end_junc)) if pd.notna(end_junc) else None
-    if segment.target_obstacle_id:
-        dtype, did = segment.target_obstacle_id.split("_")
+    if segment.target_structure_id:
+        dtype, did = segment.target_structure_id.split("_")
         node = f"{dtype}_{did}_split"
         _assign_geom_wkt(dropins, dtype, int(did), "geometry_before_wkt", seg_4326.wkt)
         is_end = False
     return node, is_end
 
 
-def _generate_obstacle_cuts(
+def _generate_structure_cuts(
     line_rd: Any, dropins_on_sec: List[Dict], utm_crs: str
-) -> List[ObstacleCut]:
+) -> List[StructureCut]:
     """
-    Generates ObstacleCuts for each drop-in obstacle along a fairway section.
+    Generates StructureCuts for each drop-in structure along a fairway section.
 
-    Calculates the 1D projection distance of each obstacle's centroid onto the
+    Calculates the 1D projection distance of each structure's centroid onto the
     underlying line geometry. Differentiates buffers depending on drop-in type
     (e.g., 50m fallback for locks, 10m for bridges).
 
@@ -471,7 +471,7 @@ def _generate_obstacle_cuts(
         utm_crs: String identifier of the metric CRS being used for distances.
 
     Returns:
-        A list of ObstacleCut geometric objects.
+        A list of StructureCut geometric objects.
     """
     cuts = []
     LOCK_BUFFER_BASE = 50.0
@@ -502,7 +502,7 @@ def _generate_obstacle_cuts(
             buffer_dist = BRIDGE_BUFFER
 
         cuts.append(
-            ObstacleCut(
+            StructureCut(
                 id=f"{dropin['type']}_{obj['id']}",
                 geometry=geom_rd,
                 projected_distance=dist,
@@ -874,7 +874,7 @@ def _export_dataframes(
 
 
 def _generate_simplified_passages(
-    complexes: List[Dict], obstacle_type: str
+    complexes: List[Dict], structure_type: str
 ) -> List[Dict]:
     features = []
     for comp in complexes:
@@ -884,7 +884,7 @@ def _generate_simplified_passages(
 
         if not bwkt or not awkt:
             logger.debug(
-                f"Skipping simplified passage for {obstacle_type} {cid}: missing split/merge wkt"
+                f"Skipping simplified passage for {structure_type} {cid}: missing split/merge wkt"
             )
             continue
 
@@ -895,13 +895,13 @@ def _generate_simplified_passages(
         pt_merge = Point(geom_after.coords[0])
         line_passage = LineString([pt_split, pt_merge])
 
-        split_id = f"{obstacle_type}_{cid}_split"
-        merge_id = f"{obstacle_type}_{cid}_merge"
+        split_id = f"{structure_type}_{cid}_split"
+        merge_id = f"{structure_type}_{cid}_merge"
 
         # Common properties for nodes and edges
         base_props = {
-            "obstacle_type": obstacle_type,
-            "obstacle_id": cid,
+            "structure_type": structure_type,
+            "structure_id": cid,
             "name": comp.get("name", comp.get("Name")),
         }
 
@@ -914,7 +914,7 @@ def _generate_simplified_passages(
                 | {
                     "id": split_id,
                     "feature_type": "node",
-                    "node_type": f"{obstacle_type}_split",
+                    "node_type": f"{structure_type}_split",
                 },
             }
         )
@@ -928,7 +928,7 @@ def _generate_simplified_passages(
                 | {
                     "id": merge_id,
                     "feature_type": "node",
-                    "node_type": f"{obstacle_type}_merge",
+                    "node_type": f"{structure_type}_merge",
                 },
             }
         )
@@ -937,7 +937,7 @@ def _generate_simplified_passages(
         agg_constraints = {}
         constituent_ids = []
 
-        if obstacle_type == "bridge":
+        if structure_type == "bridge":
             # For bridges, we want the most RESTRICTIVE (MIN) dimensions
             widths, heights = [], []
             for op in comp.get("openings", []):
@@ -953,7 +953,7 @@ def _generate_simplified_passages(
             if heights:
                 agg_constraints["dim_height"] = min(heights)
 
-        elif obstacle_type == "lock":
+        elif structure_type == "lock":
             # For locks, we want the LARGEST (MAX) chamber capacity
             widths, lengths = [], []
             for child in comp.get("locks", []):
@@ -972,9 +972,9 @@ def _generate_simplified_passages(
 
         # 3. Create passage edge
         edge_props = base_props | {
-            "id": f"{obstacle_type}_passage_{cid}",
+            "id": f"{structure_type}_passage_{cid}",
             "feature_type": "fairway_segment",
-            "segment_type": f"{obstacle_type}_passage",
+            "segment_type": f"{structure_type}_passage",
             "source_node": split_id,
             "target_node": merge_id,
             "length_m": geod.geometry_length(line_passage),

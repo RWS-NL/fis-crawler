@@ -58,7 +58,7 @@ CRAWL → NETWORKS → ENRICH → SCHEMATIZE → MERGE
 
 ### Drop-in Schematization (Locks and Bridges)
 
-The drop-in schematization step produces **drop-in replacement subgraphs** for the sections of the network that contain locks or bridges. It processes all obstacles simultaneously using a `FairwaySplicer` to guarantee that overlapping structures (e.g. a bridge physically sitting on top of a lock complex) are properly topologically connected.
+The drop-in schematization step produces **drop-in replacement subgraphs** for the sections of the network that contain locks or bridges. It processes all structures simultaneously using a `FairwaySplicer` to guarantee that overlapping structures (e.g. a bridge physically sitting on top of a lock complex) are properly topologically connected.
 The nodes and edges it generates replace the corresponding fairway stretch in the routing network, adding chamber-level routing and bridge passage constraints for discrete event simulation use cases.
 
 ## Output File Formats

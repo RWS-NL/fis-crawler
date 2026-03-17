@@ -1,7 +1,6 @@
-import logging
 from dataclasses import dataclass
 from typing import List, Optional
-
+import logging
 from shapely.geometry import LineString, Point
 from shapely.ops import substring
 
@@ -11,94 +10,67 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SplicedSegment:
     """
-    Represents a geometric segment of a fairway sliced by obstacles.
-    A segment can be bounded by 0, 1, or 2 obstacles depending on its position:
-    - 0 obstacles: Splicer ran with an empty obstacle list.
-    - 1 obstacle: The segment is at the very beginning or very end of the fairway.
-    - 2 obstacles: The segment lies between two consecutive obstacles (e.g., Lock A then Lock B).
-
-    `source` is the obstacle it just left, `target` is the obstacle it is approaching.
+    A single segment of a sliced fairway.
     """
 
     geometry: LineString
-    # Distances are in the relative coordinate units of the CRS (e.g. degrees if 4326, meters if 28992)
-    start_distance: float
-    end_distance: float
-    source_obstacle_id: Optional[str] = None
-    target_obstacle_id: Optional[str] = None
+    source_structure_id: Optional[str] = None
+    target_structure_id: Optional[str] = None
 
 
 @dataclass
-class ObstacleCut:
-    """Represents an obstacle projected onto a LineString."""
+class StructureCut:
+    """Represents a structure projected onto a LineString."""
 
     id: str
     geometry: Point
-    # The projected coordinate distance along the LineString (units of the CRS, not strictly geodetic meters)
+    # Distance from the start of the line (in units of the CRS)
     projected_distance: float
-    # The coordinate buffer to slice out around the obstacle (units of the CRS)
-    buffer_distance: float = 0.0
+    # The coordinate buffer to slice out around the structure (units of the CRS)
+    buffer_distance: float
 
 
 class FairwaySplicer:
     """
-    Pure geometric utility to slice a LineString fairway into segments
-    given a list of obstacles.
+    Slices a LineString into multiple segments based on a set of structures.
     """
 
     def __init__(self, line: LineString):
-        """
-        Args:
-            line: The canonical fairway LineString to slice. Must be an EPSG:28992
-                  or a projected CRS where distances are meaningful.
-        """
-        if not isinstance(line, LineString):
-            raise ValueError("FairwaySplicer requires a valid LineString.")
         self.line = line
-        # Note: line.length is in the units of the LineString's CRS.
-        # If the input is EPSG:4326, this is in degrees. If EPSG:28992, it is in meters.
-        # Splicer operates in relative distance of the provided CRS.
         self.total_length = line.length
 
-    def splice(self, obstacles: List[ObstacleCut]) -> List[SplicedSegment]:
+    def splice(self, structures: List[StructureCut]) -> List[SplicedSegment]:
         """
-        Splice the fairway line given an unordered list of obstacles.
-
-        Args:
-            obstacles: List of ObstacleCuts containing their projected distance along the line.
-
-        Returns:
-            A consecutive sequence of `SplicedSegment`s from start to end of the fairway.
+        Splice the fairway line given an unordered list of structures.
         """
-        segments = []
-
-        if not obstacles:
-            segments.append(
+        if not structures:
+            return [
                 SplicedSegment(
                     geometry=self.line,
-                    start_distance=0.0,
-                    end_distance=self.total_length,
+                    source_structure_id=None,
+                    target_structure_id=None,
                 )
-            )
-            return segments
+            ]
 
-        # 1. Sort obstacles purely by projected sequential distance along the line
-        sorted_obstacles = sorted(obstacles, key=lambda o: o.projected_distance)
+        # 1. Sort structures purely by projected sequential distance along the line
+        sorted_structures = sorted(structures, key=lambda o: o.projected_distance)
 
-        # 2. Slice iteratively
+        segments = []
         current_distance = 0.0
         current_source_id = None
 
+        # Minimal gap to avoid zero-length segments or precision errors
         EPSILON = 0.001
 
-        for obs in sorted_obstacles:
-            split_distance = max(0.0, obs.projected_distance - obs.buffer_distance)
+        for struct in sorted_structures:
+            split_distance = max(
+                0.0, struct.projected_distance - struct.buffer_distance
+            )
             merge_distance = min(
-                self.total_length, obs.projected_distance + obs.buffer_distance
+                self.total_length, struct.projected_distance + struct.buffer_distance
             )
 
-            # Ensure we don't go backwards or overlap negatively due to large buffers on close obstacles
-            # We strictly require split_distance > current_distance to create a valid connecting line segment
+            # Ensure we don't go backwards or overlap negatively
             split_distance = max(current_distance + EPSILON, split_distance)
 
             # Prevent going out of bounds
@@ -117,39 +89,33 @@ class FairwaySplicer:
             source_id = current_source_id
 
             current_distance = merge_distance
-            current_source_id = obs.id
+            current_source_id = struct.id
 
             if split_distance > start_distance + EPSILON:
-                seg_line = substring(self.line, start_distance, split_distance)
+                geom = substring(self.line, start_distance, split_distance)
+                if not geom.is_empty:
+                    segments.append(
+                        SplicedSegment(
+                            geometry=geom,
+                            source_structure_id=source_id,
+                            target_structure_id=struct.id,
+                        )
+                    )
+            else:
+                logger.debug(
+                    f"Skipping segment between {source_id} and {struct.id} due to overlap or precision limit."
+                )
 
+        # 3. Final trailing segment after the last structure
+        if current_distance < self.total_length:
+            geom = substring(self.line, current_distance, self.total_length)
+            if not geom.is_empty:
                 segments.append(
                     SplicedSegment(
-                        geometry=seg_line,
-                        start_distance=start_distance,
-                        end_distance=split_distance,
-                        source_obstacle_id=source_id,
-                        target_obstacle_id=obs.id,
+                        geometry=geom,
+                        source_structure_id=current_source_id,
+                        target_structure_id=None,
                     )
                 )
-            else:
-                # If there's no space for a segment (overlapping buffers),
-                # we don't add a segment but we still need to potentially update node connections.
-                # For now, just logging or skipping. The next segment will start from merge_distance.
-                logger.debug(
-                    f"Skipping segment between {source_id} and {obs.id} due to overlap."
-                )
-
-        # 3. Final trailing segment after the last obstacle
-        if current_distance < self.total_length:
-            seg_line = substring(self.line, current_distance, self.total_length)
-            segments.append(
-                SplicedSegment(
-                    geometry=seg_line,
-                    start_distance=current_distance,
-                    end_distance=self.total_length,
-                    source_obstacle_id=current_source_id,
-                    target_obstacle_id=None,
-                )
-            )
 
         return segments
