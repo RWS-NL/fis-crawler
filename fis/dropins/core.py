@@ -942,7 +942,7 @@ def _generate_simplified_passages(
             widths, heights = [], []
             for op in comp.get("openings", []):
                 constituent_ids.append(str(op["id"]))
-                w, h = op.get("Width"), op.get("Height")
+                w, h = op.get("Width"), op.get("ClearanceHeightClosed")
                 if pd.notna(w):
                     widths.append(float(w))
                 if pd.notna(h):
