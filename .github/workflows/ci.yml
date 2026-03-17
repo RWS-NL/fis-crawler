@@ -36,5 +36,8 @@ jobs:
       - name: Run Ruff Formatter Check
         run: uvx ruff format --check fis/ tests/
         
+      - name: Run Integrated Dropins Schematization (subset)
+        run: uv run python -m fis.cli dropins schematize --export-dir tests/data/fis-export --disk-dir tests/data/disk-export --output-dir output/dropins-schematization
+
       - name: Run Pytest
         run: uv run pytest tests/
