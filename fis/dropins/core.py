@@ -27,6 +27,7 @@ def build_integrated_dropins_graph(
     disk_dir: pathlib.Path,
     output_dir: pathlib.Path,
     bbox=None,
+    mode="detailed",
 ):
     """Main orchestrator to build the completely integrated Drop-ins graph."""
     lock_complexes, bridge_complexes, sections, openings = _load_and_group_dropins(
@@ -37,15 +38,39 @@ def build_integrated_dropins_graph(
     dropins_by_section = _map_dropins_to_sections(lock_complexes, bridge_complexes)
     all_features = _splice_fairways(sections, dropins_by_section, embedded_bridges)
 
-    logger.info("Generating internal domain graph features for locks...")
-    all_features.extend(lock_graph_features(lock_complexes))
+    # Determine which complexes to detail and which to simplify based on mode
+    detailed_locks = lock_complexes if mode == "detailed" else []
+    simplified_locks = [] if mode == "detailed" else lock_complexes
 
-    logger.info("Generating internal domain graph features for bridges...")
-    all_features.extend(bridge_graph_features(bridge_complexes))
+    detailed_bridges = []
+    simplified_bridges = []
+    embedded_ids = set(embedded_bridges.keys())
+    for b in bridge_complexes:
+        # A bridge is embedded if any of its openings are in embedded_bridges
+        is_embedded = any(
+            str(op.get("id")) in embedded_ids for op in b.get("openings", [])
+        )
+        if mode == "detailed" and is_embedded:
+            detailed_bridges.append(b)
+        else:
+            simplified_bridges.append(b)
 
-    all_features = _inject_embedded_bridges(
-        all_features, lock_complexes, bridge_complexes, embedded_bridges
+    logger.info("Generating internal domain graph features for detailed locks...")
+    all_features.extend(lock_graph_features(detailed_locks))
+
+    logger.info("Generating internal domain graph features for detailed bridges...")
+    all_features.extend(bridge_graph_features(detailed_bridges))
+
+    logger.info(
+        "Generating simplified passage edges for standalone/simplified obstacles..."
     )
+    all_features.extend(_generate_simplified_passages(simplified_locks, "lock"))
+    all_features.extend(_generate_simplified_passages(simplified_bridges, "bridge"))
+
+    if mode == "detailed":
+        all_features = _inject_embedded_bridges(
+            all_features, lock_complexes, bridge_complexes, embedded_bridges
+        )
 
     _export_graph(all_features, lock_complexes, bridge_complexes, output_dir)
     logger.info("Done! Exported integrated dropins graph to %s", output_dir)
@@ -846,3 +871,116 @@ def _export_dataframes(
             gdf.to_parquet(output_dir / f"{name}.geoparquet")
             gdf.to_file(output_dir / f"{name}.geojson", driver="GeoJSON")
             logger.info("Exported %s with %d rows", name, len(gdf))
+
+
+def _generate_simplified_passages(
+    complexes: List[Dict], obstacle_type: str
+) -> List[Dict]:
+    features = []
+    for comp in complexes:
+        cid = comp["id"]
+        bwkt = comp.get("geometry_before_wkt")
+        awkt = comp.get("geometry_after_wkt")
+
+        if not bwkt or not awkt:
+            logger.debug(
+                f"Skipping simplified passage for {obstacle_type} {cid}: missing split/merge wkt"
+            )
+            continue
+
+        geom_before = wkt.loads(bwkt)
+        geom_after = wkt.loads(awkt)
+
+        pt_split = Point(geom_before.coords[-1])
+        pt_merge = Point(geom_after.coords[0])
+        line_passage = LineString([pt_split, pt_merge])
+
+        split_id = f"{obstacle_type}_{cid}_split"
+        merge_id = f"{obstacle_type}_{cid}_merge"
+
+        # 1. Create split node
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(pt_split),
+                "properties": {
+                    "id": split_id,
+                    "feature_type": "node",
+                    "node_type": f"{obstacle_type}_split",
+                    f"{obstacle_type}_id": cid,
+                    "name": comp.get("name", comp.get("Name")),
+                },
+            }
+        )
+
+        # 2. Create merge node
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(pt_merge),
+                "properties": {
+                    "id": merge_id,
+                    "feature_type": "node",
+                    "node_type": f"{obstacle_type}_merge",
+                    f"{obstacle_type}_id": cid,
+                    "name": comp.get("name", comp.get("Name")),
+                },
+            }
+        )
+
+        # Aggregate constraints
+        max_w, max_h, max_l = None, None, None
+        constituent_ids = []
+
+        if obstacle_type == "bridge":
+            for op in comp.get("openings", []):
+                constituent_ids.append(str(op["id"]))
+                w = op.get("max_width") or op.get("width")
+                h = op.get("max_height") or op.get("height")
+                if pd.notna(w):
+                    max_w = min(max_w, float(w)) if max_w is not None else float(w)
+                if pd.notna(h):
+                    max_h = min(max_h, float(h)) if max_h is not None else float(h)
+        elif obstacle_type == "lock":
+            for child in comp.get("locks", []):
+                for ch in child.get("chambers", []):
+                    constituent_ids.append(str(ch["id"]))
+                    w = ch.get("Width") or ch.get("width")
+                    ch_len = ch.get("Length") or ch.get("length")
+                    if pd.notna(w):
+                        max_w = max(max_w, float(w)) if max_w is not None else float(w)
+                    if pd.notna(ch_len):
+                        max_l = (
+                            max(max_l, float(ch_len))
+                            if max_l is not None
+                            else float(ch_len)
+                        )
+
+        # 3. Create passage edge
+        edge_props = {
+            "id": f"{obstacle_type}_passage_{cid}",
+            "feature_type": "fairway_segment",
+            "segment_type": f"{obstacle_type}_passage",
+            "source_node": split_id,
+            "target_node": merge_id,
+            "length_m": geod.geometry_length(line_passage),
+            f"{obstacle_type}_id": cid,
+            "name": comp.get("name", comp.get("Name")),
+            "constituent_ids": ",".join(constituent_ids),
+        }
+        if max_w is not None:
+            edge_props["max_width"] = max_w
+        if max_h is not None:
+            edge_props["max_height"] = max_h
+        if max_l is not None:
+            edge_props["max_length"] = max_l
+
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(line_passage),
+                "properties": edge_props,
+            }
+        )
+
+    return features
