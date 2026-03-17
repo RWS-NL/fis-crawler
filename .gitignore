@@ -1,4 +1,8 @@
 
+
+# Reference files
+reference/
+
 # Ignore export and file storage directories
 fis-export/
 euris-export/
