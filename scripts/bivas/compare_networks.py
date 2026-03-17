@@ -96,6 +96,18 @@ def main():
     bivas_matched.to_parquet("output/bivas-validation/bivas_matched.geoparquet")
     bivas_unmatched.to_parquet("output/bivas-validation/bivas_unmatched.geoparquet")
 
+    # Export to GeoJSON for compatibility
+    fis_matched.to_file("output/bivas-validation/fis_matched.geojson", driver="GeoJSON")
+    fis_unmatched.to_file(
+        "output/bivas-validation/fis_unmatched.geojson", driver="GeoJSON"
+    )
+    bivas_matched.to_file(
+        "output/bivas-validation/bivas_matched.geojson", driver="GeoJSON"
+    )
+    bivas_unmatched.to_file(
+        "output/bivas-validation/bivas_unmatched.geojson", driver="GeoJSON"
+    )
+
     # Calculate Total Statistics
     total_bivas_arc_cnt = 9631  # From database query
     total_bivas_len = 26446.2  # From database query
