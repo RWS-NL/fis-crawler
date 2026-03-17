@@ -1,0 +1,12 @@
+{
+"type": "FeatureCollection",
+"name": "berths",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "id": 18167, "name": "Wachtplaats 1 Volkeraksluizen - Zuid Kegel", "km": 3.4, "dist_m": 1278.6, "relation": "after", "lock_id": 42863 }, "geometry": { "type": "Polygon", "coordinates": [ [ [ 4.39331697, 51.68367088 ], [ 4.39478997, 51.68446712 ], [ 4.39464764, 51.68456886 ], [ 4.39317464, 51.68377261 ], [ 4.39331697, 51.68367088 ] ] ] } },
+{ "type": "Feature", "properties": { "id": 23764, "name": "Wachtplaats 1 Volkeraksluizen - Zuid", "km": 3.3, "dist_m": 1115.9, "relation": "after", "lock_id": 42863 }, "geometry": { "type": "Polygon", "coordinates": [ [ [ 4.39501569, 51.68453113 ], [ 4.3967578, 51.68547747 ], [ 4.3965675, 51.68561283 ], [ 4.39482539, 51.68466648 ], [ 4.39501569, 51.68453113 ] ] ] } },
+{ "type": "Feature", "properties": { "id": 38895, "name": "Wachtplaats 2 Volkeraksluizen - Zuid Kegel", "km": 3.6, "dist_m": 1357.2, "relation": "after", "lock_id": 42863 }, "geometry": { "type": "Polygon", "coordinates": [ [ [ 4.39211416775515, 51.682925981539199 ], [ 4.39440586262166, 51.684164308210903 ], [ 4.39418767761321, 51.684320331680503 ], [ 4.39189598231926, 51.683082000764799 ], [ 4.39211416775515, 51.682925981539199 ] ] ] } },
+{ "type": "Feature", "properties": { "id": 48871, "name": "Wachtplaats 2 Volkeraksluizen - Zuid", "km": 3.1, "dist_m": 1112.8, "relation": "after", "lock_id": 42863 }, "geometry": { "type": "Polygon", "coordinates": [ [ [ 4.39544996, 51.68162911 ], [ 4.40122918, 51.68475765 ], [ 4.4009443, 51.684961 ], [ 4.39516507, 51.68183245 ], [ 4.39544996, 51.68162911 ] ] ] } },
+{ "type": "Feature", "properties": { "id": 54137, "name": "Wachtplaats autoafzetplaats Volkeraksluizen - Zuid", "km": 3.7, "dist_m": 1477.8, "relation": "after", "lock_id": 42863 }, "geometry": { "type": "Polygon", "coordinates": [ [ [ 4.39359009, 51.68065435 ], [ 4.39507843, 51.68143942 ], [ 4.39493811, 51.68154223 ], [ 4.39344977, 51.68075716 ], [ 4.39359009, 51.68065435 ] ] ] } }
+]
+}
