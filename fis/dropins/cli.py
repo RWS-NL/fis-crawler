@@ -35,7 +35,13 @@ def dropins_cli():
     help="Bounding box to filter by coordinates in 'minx,miny,maxx,maxy' (EPSG:4326). Useful for fast iteration.",
     default=None,
 )
-def schematize(export_dir, disk_dir, output_dir, bbox):
+@click.option(
+    "--mode",
+    type=click.Choice(["detailed", "simplified"]),
+    default="detailed",
+    help="Level of detail for the schematization. 'detailed' (default) preserves lock-associated subgraphs; 'simplified' represents all bridges and locks as single edges.",
+)
+def schematize(export_dir, disk_dir, output_dir, bbox, mode):
     """Integrate locks and bridges into fairways globally."""
     bbox_tuple = None
     if bbox:
@@ -46,4 +52,6 @@ def schematize(export_dir, disk_dir, output_dir, bbox):
         except Exception:
             raise click.BadParameter("BBox must be 'minx,miny,maxx,maxy'")
 
-    build_integrated_dropins_graph(export_dir, disk_dir, output_dir, bbox=bbox_tuple)
+    build_integrated_dropins_graph(
+        export_dir, disk_dir, output_dir, bbox=bbox_tuple, mode=mode
+    )
