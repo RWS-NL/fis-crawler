@@ -898,17 +898,23 @@ def _generate_simplified_passages(
         split_id = f"{obstacle_type}_{cid}_split"
         merge_id = f"{obstacle_type}_{cid}_merge"
 
+        # Common properties for nodes and edges
+        base_props = {
+            "obstacle_type": obstacle_type,
+            "obstacle_id": cid,
+            "name": comp.get("name", comp.get("Name")),
+        }
+
         # 1. Create split node
         features.append(
             {
                 "type": "Feature",
                 "geometry": mapping(pt_split),
-                "properties": {
+                "properties": base_props
+                | {
                     "id": split_id,
                     "feature_type": "node",
                     "node_type": f"{obstacle_type}_split",
-                    f"{obstacle_type}_id": cid,
-                    "name": comp.get("name", comp.get("Name")),
                 },
             }
         )
@@ -918,62 +924,63 @@ def _generate_simplified_passages(
             {
                 "type": "Feature",
                 "geometry": mapping(pt_merge),
-                "properties": {
+                "properties": base_props
+                | {
                     "id": merge_id,
                     "feature_type": "node",
                     "node_type": f"{obstacle_type}_merge",
-                    f"{obstacle_type}_id": cid,
-                    "name": comp.get("name", comp.get("Name")),
                 },
             }
         )
 
         # Aggregate constraints
-        max_w, max_h, max_l = None, None, None
+        agg_constraints = {}
         constituent_ids = []
 
         if obstacle_type == "bridge":
+            # For bridges, we want the most RESTRICTIVE (MIN) dimensions
+            widths, heights = [], []
             for op in comp.get("openings", []):
                 constituent_ids.append(str(op["id"]))
-                w = op.get("max_width") or op.get("width")
-                h = op.get("max_height") or op.get("height")
+                w, h = op.get("Width"), op.get("Height")
                 if pd.notna(w):
-                    max_w = min(max_w, float(w)) if max_w is not None else float(w)
+                    widths.append(float(w))
                 if pd.notna(h):
-                    max_h = min(max_h, float(h)) if max_h is not None else float(h)
+                    heights.append(float(h))
+
+            if widths:
+                agg_constraints["dim_width"] = min(widths)
+            if heights:
+                agg_constraints["dim_height"] = min(heights)
+
         elif obstacle_type == "lock":
+            # For locks, we want the LARGEST (MAX) chamber capacity
+            widths, lengths = [], []
             for child in comp.get("locks", []):
                 for ch in child.get("chambers", []):
                     constituent_ids.append(str(ch["id"]))
-                    w = ch.get("Width") or ch.get("width")
-                    ch_len = ch.get("Length") or ch.get("length")
+                    w, ch_len = ch.get("Width"), ch.get("Length")
                     if pd.notna(w):
-                        max_w = max(max_w, float(w)) if max_w is not None else float(w)
+                        widths.append(float(w))
                     if pd.notna(ch_len):
-                        max_l = (
-                            max(max_l, float(ch_len))
-                            if max_l is not None
-                            else float(ch_len)
-                        )
+                        lengths.append(float(ch_len))
+
+            if widths:
+                agg_constraints["dim_width"] = max(widths)
+            if lengths:
+                agg_constraints["dim_length"] = max(lengths)
 
         # 3. Create passage edge
-        edge_props = {
+        edge_props = base_props | {
             "id": f"{obstacle_type}_passage_{cid}",
             "feature_type": "fairway_segment",
             "segment_type": f"{obstacle_type}_passage",
             "source_node": split_id,
             "target_node": merge_id,
             "length_m": geod.geometry_length(line_passage),
-            f"{obstacle_type}_id": cid,
-            "name": comp.get("name", comp.get("Name")),
             "constituent_ids": ",".join(constituent_ids),
         }
-        if max_w is not None:
-            edge_props["max_width"] = max_w
-        if max_h is not None:
-            edge_props["max_height"] = max_h
-        if max_l is not None:
-            edge_props["max_length"] = max_l
+        edge_props.update(agg_constraints)
 
         features.append(
             {
