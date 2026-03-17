@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import pathlib
 import geopandas as gpd
 import pandas as pd
