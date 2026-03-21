@@ -3,13 +3,16 @@ from shapely.geometry import Point
 import pyproj
 from shapely.geometry import LineString
 from shapely.ops import nearest_points
+from fis import settings
 
 
-def project_geometry(geometry, crs_from="EPSG:4326", crs_to="EPSG:28992"):
+def project_geometry(geometry, crs_from="EPSG:4326", crs_to=None):
     """
     Project a shapely geometry from one CRS to another.
-    Default is WGS84 (4326) to Amersfoort / RD New (28992).
+    Default is WGS84 (4326) to the metric CRS defined in settings.
     """
+    if crs_to is None:
+        crs_to = settings.PROJECTED_CRS
     if not geometry:
         return None
 
@@ -38,9 +41,9 @@ def find_chamber_doors(chamber_geom, split_point, merge_point):
         return None, None
 
     # Project inputs to Meters for robust MRR calculation
-    c_geom_rd = project_geometry(chamber_geom, "EPSG:4326", "EPSG:28992")
-    split_rd = project_geometry(split_point, "EPSG:4326", "EPSG:28992")
-    merge_rd = project_geometry(merge_point, "EPSG:4326", "EPSG:28992")
+    c_geom_rd = project_geometry(chamber_geom, "EPSG:4326", settings.PROJECTED_CRS)
+    split_rd = project_geometry(split_point, "EPSG:4326", settings.PROJECTED_CRS)
+    merge_rd = project_geometry(merge_point, "EPSG:4326", settings.PROJECTED_CRS)
 
     if not c_geom_rd or not split_rd or not merge_rd:
         return None, None
@@ -147,7 +150,7 @@ def find_chamber_doors(chamber_geom, split_point, merge_point):
     end_rd = scored[-1][0]
 
     # Project back to WGS84
-    door_start = project_geometry(start_rd, "EPSG:28992", "EPSG:4326")
-    door_end = project_geometry(end_rd, "EPSG:28992", "EPSG:4326")
+    door_start = project_geometry(start_rd, settings.PROJECTED_CRS, "EPSG:4326")
+    door_end = project_geometry(end_rd, settings.PROJECTED_CRS, "EPSG:4326")
 
     return door_start, door_end

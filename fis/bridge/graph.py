@@ -185,6 +185,18 @@ def build_graph_features(complexes):
             op_start_node = f"opening_{op_id}_start"
             op_end_node = f"opening_{op_id}_end"
 
+            sections = c.get("sections", [])
+            best_sec_id = None
+            if sections:
+                best_sec = next(
+                    (s for s in sections if s.get("relation") == "direct"),
+                    next(
+                        (s for s in sections if s.get("relation") == "overlap"),
+                        sections[0],
+                    ),
+                )
+                best_sec_id = best_sec.get("id")
+
             features.append(
                 {
                     "type": "Feature",
@@ -228,8 +240,11 @@ def build_graph_features(complexes):
                             "id": f"bridge_approach_{bridge_id}_{op_id}",
                             "feature_type": "fairway_segment",
                             "segment_type": "bridge_approach",
+                            "structure_type": "bridge",
+                            "structure_id": bridge_id,
                             "bridge_id": bridge_id,
                             "opening_id": op_id,
+                            "section_id": best_sec_id,
                             "source_node": split_node_id,
                             "target_node": op_start_node,
                             "length_m": geod.geometry_length(approach_geom)
@@ -262,8 +277,11 @@ def build_graph_features(complexes):
                         "id": f"bridge_passage_{bridge_id}_{op_id}",
                         "feature_type": "fairway_segment",
                         "segment_type": "bridge_passage",
+                        "structure_type": "bridge",
+                        "structure_id": bridge_id,
                         "bridge_id": bridge_id,
                         "opening_id": op_id,
+                        "section_id": best_sec_id,
                         "source_node": op_start_node,
                         "target_node": op_end_node,
                         "length_m": 2.0,  # Nominal length for simulation compatibility
@@ -285,8 +303,11 @@ def build_graph_features(complexes):
                             "id": f"bridge_exit_{bridge_id}_{op_id}",
                             "feature_type": "fairway_segment",
                             "segment_type": "bridge_exit",
+                            "structure_type": "bridge",
+                            "structure_id": bridge_id,
                             "bridge_id": bridge_id,
                             "opening_id": op_id,
+                            "section_id": best_sec_id,
                             "source_node": op_end_node,
                             "target_node": merge_node_id,
                             "length_m": geod.geometry_length(exit_geom)

@@ -1,7 +1,6 @@
 import logging
 import pandas as pd
-from shapely.ops import nearest_points
-from shapely.ops import substring
+from shapely.ops import nearest_points, substring
 
 logger = logging.getLogger(__name__)
 

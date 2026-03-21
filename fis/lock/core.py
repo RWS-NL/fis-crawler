@@ -12,6 +12,7 @@ from shapely.geometry import Point, LineString
 from pyproj import Geod
 from shapely.ops import substring
 from shapely.ops import unary_union
+from fis import settings
 
 logger = logging.getLogger(__name__)
 
@@ -131,11 +132,14 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
     matched_disk_bridges = []
 
     complex_geoms_rd = []
-    from .utils import project_geometry
 
     lock_geom_rd = None
     if hasattr(lock, "geometry") and lock.geometry:
-        lock_geom_rd = project_geometry(lock.geometry, "EPSG:4326", "EPSG:28992")
+        lock_geom_rd = (
+            gpd.GeoSeries([lock.geometry], crs="EPSG:4326")
+            .to_crs(settings.PROJECTED_CRS)
+            .iloc[0]
+        )
         complex_geoms_rd.append(lock_geom_rd)
 
     chamber_geoms_rd = []
@@ -149,7 +153,7 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
                 )
                 c_geom_rd = (
                     gpd.GeoSeries([c_geom], crs="EPSG:4326")
-                    .to_crs("EPSG:28992")
+                    .to_crs(settings.PROJECTED_CRS)
                     .iloc[0]
                 )
                 chamber_geoms_rd.append(c_geom_rd)
@@ -158,7 +162,7 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
     if complex_geoms_rd:
         # For bridges, we use the complex buffered bounds
         complex_union_rd = unary_union(complex_geoms_rd)
-        complex_buffered_rd = complex_union_rd.buffer(500)
+        complex_buffered_rd = complex_union_rd.buffer(settings.DISK_MATCH_BUFFER_LOCK_M)
 
         # Match DISK Bridges
         if disk_bridges_rd is not None:
@@ -177,9 +181,9 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
                 for _, lock_row in disk_locks_rd[lock_mask_strict].iterrows():
                     matched_disk_locks.append(sanitize_attrs(lock_row))
 
-            # 2. If NO locks matched via chambers, fallback to 500m lock complex buffer
+            # 2. If NO locks matched via chambers, fallback to settings buffer
             if not matched_disk_locks and lock_geom_rd:
-                lock_buffer_rd = lock_geom_rd.buffer(500)
+                lock_buffer_rd = lock_geom_rd.buffer(settings.DISK_MATCH_BUFFER_LOCK_M)
                 lock_mask_loose = disk_locks_rd.intersects(lock_buffer_rd)
                 for _, lock_row in disk_locks_rd[lock_mask_loose].iterrows():
                     matched_disk_locks.append(sanitize_attrs(lock_row))
@@ -282,9 +286,42 @@ def _find_connected_sections(
     sections_data = []
     internal_sections = set()
     connected_fairways = set()
+    matched_section_ids = set()
 
     if fairway_data.get("fairway_id"):
         connected_fairways.add(fairway_data["fairway_id"])
+
+    # 1. Attribute-based matching (FairwaySectionId, FairwayId)
+    if sections_gdf is not None:
+        fsid = lock.get("FairwaySectionId")
+        if pd.notna(fsid):
+            matches = sections_gdf[sections_gdf["Id"] == int(fsid)]
+            for _, s_row in matches.iterrows():
+                sid = int(s_row["Id"])
+                if sid not in matched_section_ids:
+                    fid = (
+                        int(s_row["FairwayId"])
+                        if pd.notna(s_row.get("FairwayId"))
+                        else None
+                    )
+                    internal_sections.add(sid)
+                    if fid:
+                        connected_fairways.add(fid)
+                    sections_data.append(
+                        {
+                            "id": sid,
+                            "name": s_row["Name"],
+                            "fairway_id": fid,
+                            "length": float(s_row["Length"])
+                            if pd.notna(s_row.get("Length"))
+                            else None,
+                            "geometry": s_row.geometry.wkt
+                            if hasattr(s_row, "geometry") and s_row.geometry
+                            else None,
+                            "relation": "direct",
+                        }
+                    )
+                    matched_section_ids.add(sid)
 
     if network_graph:
         for j_id in [
@@ -314,11 +351,16 @@ def _find_connected_sections(
         if complex_geoms:
             complex_union = unary_union([g for g in complex_geoms if g])
             if complex_union:
-                buffered_union = complex_union.buffer(0.0001)
+                buffered_union = complex_union.buffer(
+                    settings.LOCK_SECTION_MATCH_BUFFER_DEG
+                )
                 intersecting = sections_gdf[sections_gdf.intersects(buffered_union)]
 
                 for _, s_row in intersecting.iterrows():
                     sid = int(s_row["Id"])
+                    if sid in matched_section_ids:
+                        continue
+
                     fid = (
                         int(s_row["FairwayId"])
                         if pd.notna(s_row.get("FairwayId"))
@@ -343,6 +385,7 @@ def _find_connected_sections(
                             "relation": "overlap",
                         }
                     )
+                    matched_section_ids.add(sid)
     return sections_data, internal_sections, connected_fairways
 
 
@@ -513,7 +556,7 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
         and not disk_locks.empty
         and "geometry" in disk_locks.columns
     ):
-        disk_locks_rd = disk_locks.to_crs("EPSG:28992")
+        disk_locks_rd = disk_locks.to_crs(settings.PROJECTED_CRS)
 
     disk_bridges_rd = None
     if (
@@ -521,7 +564,7 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
         and not disk_bridges.empty
         and "geometry" in disk_bridges.columns
     ):
-        disk_bridges_rd = disk_bridges.to_crs("EPSG:28992")
+        disk_bridges_rd = disk_bridges.to_crs(settings.PROJECTED_CRS)
 
     # Pre-process operating times
     op_times_map = {}
@@ -777,7 +820,7 @@ def find_nearby_berths(
     berths_gdf,
     fairway_geom_before,
     fairway_geom_after,
-    max_dist_m=2000,
+    max_dist_m=None,
     allowed_categories=None,
     allowed_fairways=None,
     disallowed_sections=None,
@@ -785,8 +828,11 @@ def find_nearby_berths(
 ):
     """
     Find berths associated with the lock's fairway and determine if they are before or after.
-    Enforces a strict distance check (default 2km) and category filtering.
+    Enforces a strict distance check (default from settings) and category filtering.
     """
+    if max_dist_m is None:
+        max_dist_m = settings.BERTH_MATCH_MAX_DIST_M
+
     if allowed_categories is None:
         allowed_categories = ["WAITING_AREA"]
 
@@ -822,8 +868,12 @@ def find_nearby_berths(
         disallowed_geoms = sections_gdf[invalid_mask].geometry.tolist()
 
     disallowed_union = unary_union(disallowed_geoms) if disallowed_geoms else None
-    # Pre-buffer for performance (EPSG:4326 is in degrees, 0.00005 is roughly 5 meters)
-    disallowed_mask = disallowed_union.buffer(0.00005) if disallowed_union else None
+    # Pre-buffer for performance (EPSG:4326 is in degrees)
+    disallowed_mask = (
+        disallowed_union.buffer(settings.BERTH_INTERNAL_SECTION_BUFFER_DEG)
+        if disallowed_union
+        else None
+    )
 
     # Pre-parse fairway geometries
     g_before = wkt.loads(fairway_geom_before) if fairway_geom_before else None
