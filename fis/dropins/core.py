@@ -31,12 +31,18 @@ def build_integrated_dropins_graph(
     mode="detailed",
 ):
     """Main orchestrator to build the completely integrated Drop-ins graph."""
-    lock_complexes, bridge_complexes, sections, openings = _load_and_group_dropins(
-        export_dir, disk_dir, bbox
-    )
+    (
+        lock_complexes,
+        bridge_complexes,
+        terminals,
+        sections,
+        openings,
+    ) = _load_and_group_dropins(export_dir, disk_dir, bbox)
 
     embedded_bridges = _identify_embedded_structures(lock_complexes, bridge_complexes)
-    dropins_by_section = _map_dropins_to_sections(lock_complexes, bridge_complexes)
+    dropins_by_section = _map_dropins_to_sections(
+        lock_complexes, bridge_complexes, terminals
+    )
     all_features = _splice_fairways(
         sections, dropins_by_section, embedded_bridges, mode=mode
     )
@@ -64,6 +70,9 @@ def build_integrated_dropins_graph(
     logger.info("Generating internal domain graph features for detailed bridges...")
     all_features.extend(bridge_graph_features(detailed_bridges))
 
+    logger.info("Generating terminal nodes and access edges...")
+    all_features.extend(_generate_terminal_graph_features(terminals))
+
     logger.info(
         "Generating simplified passage edges for standalone/simplified structures..."
     )
@@ -81,9 +90,23 @@ def build_integrated_dropins_graph(
 
 def _load_and_group_dropins(
     export_dir: pathlib.Path, disk_dir: pathlib.Path, bbox=None
-) -> Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame]:
+) -> Tuple[List[Dict], List[Dict], List[Dict], pd.DataFrame, pd.DataFrame]:
     """Loads all parquet files and delegates to the grouped domain builders."""
     data = lock_load_data(export_dir, disk_dir)
+
+    terminal_path = export_dir / "terminal.geoparquet"
+    if not terminal_path.exists():
+        terminal_path = export_dir / "terminal.parquet"
+
+    if terminal_path.exists():
+        try:
+            terminals = gpd.read_parquet(terminal_path)
+            data["terminals"] = terminals
+        except Exception as e:
+            logger.warning("Could not load terminals from %s: %s", terminal_path, e)
+            data["terminals"] = None
+    else:
+        data["terminals"] = None
 
     if bbox:
         import shapely.geometry
@@ -107,6 +130,7 @@ def _load_and_group_dropins(
         data["locks"] = filter_df(data.get("locks"), "locks")
         data["bridges"] = filter_df(data.get("bridges"), "bridges")
         data["sections"] = filter_df(data.get("sections"), "sections")
+        data["terminals"] = filter_df(data.get("terminals"), "terminals")
 
     logger.info("Grouping Locks...")
     lock_complexes = group_locks(data)
@@ -114,9 +138,23 @@ def _load_and_group_dropins(
     logger.info("Grouping Bridges...")
     bridge_complexes = group_bridges(data)
 
+    logger.info("Preparing Terminals...")
+    terminals_list = []
+    if data.get("terminals") is not None:
+        for _, row in data["terminals"].iterrows():
+            term_dict = row.to_dict()
+            # Normalize ID
+            if "Id" in term_dict:
+                term_dict["id"] = term_dict["Id"]
+            # Ensure geometry is WKT if it's a point, for consistency
+            if "geometry" in term_dict and hasattr(term_dict["geometry"], "wkt"):
+                term_dict["geometry"] = term_dict["geometry"].wkt
+            terminals_list.append(term_dict)
+
     return (
         lock_complexes,
         bridge_complexes,
+        terminals_list,
         data.get("sections"),
         data.get("openings"),
     )
@@ -217,15 +255,18 @@ def _calculate_semantic_spatial_score(op_name: str, ch_name: str, dist: float) -
 
 
 def _map_dropins_to_sections(
-    lock_complexes: List[Dict], bridge_complexes: List[Dict]
+    lock_complexes: List[Dict],
+    bridge_complexes: List[Dict],
+    terminals: List[Dict],
 ) -> Dict[Any, List[Dict]]:
     """
-    Creates a reverse mapping of fairway section ID to all drop-ins (locks/bridges)
+    Creates a reverse mapping of fairway section ID to all drop-ins (locks/bridges/terminals)
     that are spatially associated with that section.
 
     Args:
         lock_complexes: Grouped lock complexes.
         bridge_complexes: Grouped bridge complexes.
+        terminals: List of individual terminals.
 
     Returns:
         Dict mapping section ID to a list of dicts `{"type": str, "obj": Dict}` representing
@@ -242,6 +283,13 @@ def _map_dropins_to_sections(
             dropins_by_section.setdefault(sid, []).append(
                 {"type": "bridge", "obj": bridge}
             )
+    for term in terminals:
+        sid = utils.stringify_id(term.get("FairwaySectionId"))
+        if sid:
+            dropins_by_section.setdefault(sid, []).append(
+                {"type": "terminal", "obj": term}
+            )
+
     return dropins_by_section
 
 
@@ -434,10 +482,21 @@ def _determine_source_node(
     is_start = True
     node = utils.stringify_id(start_junc)
     if segment.source_structure_id:
-        dtype, did = segment.source_structure_id.split("_")
+        dtype, did = segment.source_structure_id.split("_", 1)
         did = utils.stringify_id(did)
-        node = f"{dtype}_{did}_merge"
-        _assign_geom_wkt(dropins, dtype, did, "geometry_after_wkt", seg_4326.wkt)
+        if dtype == "terminal":
+            node = f"terminal_{did}_connection"
+            # Store the connection point geometry (first coordinate of segment after the split)
+            _assign_geom_wkt(
+                dropins,
+                dtype,
+                did,
+                "connection_geometry",
+                Point(seg_4326.coords[0]).wkt,
+            )
+        else:
+            node = f"{dtype}_{did}_merge"
+            _assign_geom_wkt(dropins, dtype, did, "geometry_after_wkt", seg_4326.wkt)
         is_start = False
     return node, is_start
 
@@ -462,10 +521,21 @@ def _determine_target_node(
     is_end = True
     node = utils.stringify_id(end_junc)
     if segment.target_structure_id:
-        dtype, did = segment.target_structure_id.split("_")
+        dtype, did = segment.target_structure_id.split("_", 1)
         did = utils.stringify_id(did)
-        node = f"{dtype}_{did}_split"
-        _assign_geom_wkt(dropins, dtype, did, "geometry_before_wkt", seg_4326.wkt)
+        if dtype == "terminal":
+            node = f"terminal_{did}_connection"
+            # Store the connection point geometry (last coordinate of segment before the split)
+            _assign_geom_wkt(
+                dropins,
+                dtype,
+                did,
+                "connection_geometry",
+                Point(seg_4326.coords[-1]).wkt,
+            )
+        else:
+            node = f"{dtype}_{did}_split"
+            _assign_geom_wkt(dropins, dtype, did, "geometry_before_wkt", seg_4326.wkt)
         is_end = False
     return node, is_end
 
@@ -518,6 +588,8 @@ def _generate_structure_cuts(
                     if mode == "simplified"
                     else (max_len / 2.0) + settings.DETAILED_LOCK_SPLICING_BUFFER_M
                 )
+        elif dropin["type"] == "terminal":
+            buffer_dist = 0.0
         else:
             buffer_dist = settings.BRIDGE_SPLICING_BUFFER_M
 
@@ -1036,6 +1108,82 @@ def _generate_simplified_passages(
                 "type": "Feature",
                 "geometry": mapping(line_passage),
                 "properties": edge_props,
+            }
+        )
+
+    return features
+
+
+def _generate_terminal_graph_features(terminals: List[Dict]) -> List[Dict]:
+    """
+    Generates node and edge features for terminals.
+    Each terminal gets a node and an 'access' edge connecting it to the
+    fairway junction node created during splicing.
+    """
+    features = []
+    for term in terminals:
+        tid = utils.stringify_id(term["Id"])
+        conn_wkt = term.get("connection_geometry")
+        if not conn_wkt:
+            # Terminal was not mapped to a section or section was not spliced
+            continue
+
+        conn_pt = wkt.loads(conn_wkt)
+        term_geom = term.get("geometry")
+        if not term_geom:
+            continue
+        term_pt = wkt.loads(term_geom)
+        if term_pt.geom_type != "Point":
+            term_pt = term_pt.centroid
+
+        # 1. Connection node on the fairway (where the split happened)
+        conn_id = f"terminal_{tid}_connection"
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(conn_pt),
+                "properties": {
+                    "id": conn_id,
+                    "feature_type": "node",
+                    "node_type": "junction",
+                    "node_id": conn_id,
+                },
+            }
+        )
+
+        # 2. Terminal node itself
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(term_pt),
+                "properties": {
+                    "id": f"terminal_{tid}",
+                    "feature_type": "node",
+                    "node_type": "terminal",
+                    "node_id": f"terminal_{tid}",
+                    "name": term.get("Name"),
+                    "terminal_id": tid,
+                    "isrs_id": term.get("IsrsId"),
+                },
+            }
+        )
+
+        # 3. Access edge
+        # LineString from connection point on fairway to terminal point
+        access_line = LineString([conn_pt, term_pt])
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(access_line),
+                "properties": {
+                    "id": f"terminal_access_{tid}",
+                    "feature_type": "fairway_segment",
+                    "segment_type": "terminal_access",
+                    "terminal_id": tid,
+                    "source_node": conn_id,
+                    "target_node": f"terminal_{tid}",
+                    "length_m": geod.geometry_length(access_line),
+                },
             }
         )
 
