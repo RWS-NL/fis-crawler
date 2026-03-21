@@ -84,7 +84,7 @@ def build_integrated_dropins_graph(
             all_features, lock_complexes, bridge_complexes, embedded_bridges
         )
 
-    _export_graph(all_features, lock_complexes, bridge_complexes, output_dir)
+    _export_graph(all_features, lock_complexes, bridge_complexes, terminals, output_dir)
     logger.info("Done! Exported integrated dropins graph to %s", output_dir)
 
 
@@ -873,6 +873,7 @@ def _export_graph(
     all_features: List[Dict],
     lock_complexes: List[Dict],
     bridge_complexes: List[Dict],
+    terminals: List[Dict],
     output_dir: pathlib.Path,
 ):
     logger.info("Exporting drop-ins network graph and components...")
@@ -898,7 +899,7 @@ def _export_graph(
         G.number_of_edges(),
     )
     _export_dataframes(
-        lock_complexes, bridge_complexes, nodes_gdf, edges_gdf, output_dir
+        lock_complexes, bridge_complexes, terminals, nodes_gdf, edges_gdf, output_dir
     )
 
 
@@ -943,7 +944,7 @@ def _populate_graph(
 
 
 def _export_dataframes(
-    lock_complexes, bridge_complexes, nodes_gdf, edges_gdf, output_dir
+    lock_complexes, bridge_complexes, terminals, nodes_gdf, edges_gdf, output_dir
 ):
     from fis.lock.graph import (
         build_locks_gdf,
@@ -962,6 +963,7 @@ def _export_dataframes(
         "berths": build_berths_gdf(lock_complexes),
         "bridges": build_bridges_gdf(bridge_complexes),
         "openings": build_openings_gdf(bridge_complexes),
+        "terminals": _build_terminals_gdf(terminals),
     }
 
     from fis import utils
@@ -970,7 +972,7 @@ def _export_dataframes(
     id_cols = schema.get("identifiers", {}).get("columns", [])
 
     for name, gdf in gdfs.items():
-        if not gdf.empty:
+        if gdf is not None and not gdf.empty:
             # pyarrow fails if a column has mixed types (e.g. int and str)
             # We ensure all ID columns are consistently strings for export.
             gdf = gdf.copy()
@@ -982,6 +984,22 @@ def _export_dataframes(
             gdf.to_parquet(output_dir / f"{name}.geoparquet")
             gdf.to_file(output_dir / f"{name}.geojson", driver="GeoJSON")
             logger.info("Exported %s with %d rows", name, len(gdf))
+
+
+def _build_terminals_gdf(terminals: List[Dict]) -> gpd.GeoDataFrame:
+    """Builds a GeoDataFrame of terminals from the source dicts."""
+    if not terminals:
+        return None
+
+    rows = []
+    for term in terminals:
+        row = term.copy()
+        geom_wkt = row.get("geometry")
+        if geom_wkt:
+            row["geometry"] = wkt.loads(geom_wkt)
+        rows.append(row)
+
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")
 
 
 def _generate_simplified_passages(
