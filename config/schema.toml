@@ -57,13 +57,6 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 # Fairway type
 "type_CharacterTypeCode" = "fairway_type"
 
-# --- TODO: GitHub Issue #83 - Audit and Standardize Attribute Naming ---
-# Review all graph-generating modules to ensure they consistently add canonical 
-# attributes to edges during simplified and detailed schematization. 
-# Key attributes: section_id, segment_type, structure_type, structure_id, 
-# and dimension prefixes (dim_width, dim_length, dim_height).
-# -------------------------------------------------------------------------
-
 # Tidal
 # Routing attributes
 "Id" = "fis_id"

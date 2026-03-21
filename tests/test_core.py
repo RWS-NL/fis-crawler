@@ -1,6 +1,5 @@
 import pytest
 import pandas as pd
-import numpy as np
 import geopandas as gpd
 from shapely.geometry import Point, LineString
 from fis.utils import find_nearby_berths
@@ -156,9 +155,7 @@ def test_find_nearby_berths_geometric_position():
 
 
 def test_sanitize_attrs():
-    row = pd.Series(
-        {"id": 1, "name": "Test", "geometry": Point(0, 0), "extra": np.int64(42)}
-    )
+    row = pd.Series({"id": 1, "name": "Test", "geometry": Point(0, 0), "extra": 42})
     sanitized = sanitize_attrs(row)
 
     assert sanitized["id"] == 1
