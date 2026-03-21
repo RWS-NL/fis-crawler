@@ -67,3 +67,4 @@ When adding new FIS data sources:
 1. Add the FIS column names to the appropriate section in `config/schema.toml`.
 2. Define their canonical snake_case equivalents.
 3. Ensure the ingestion logic calls `normalize_attributes`.
+
