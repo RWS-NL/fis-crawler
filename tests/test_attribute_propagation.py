@@ -102,8 +102,9 @@ def test_normalize_attributes_enforces_string_ids():
     }
     normalized = utils.normalize_attributes(df, "locks", schema)
 
-    assert normalized["id"].dtype == "object"  # String type in pandas
-    assert normalized["parent_id"].dtype == "object"
+    # In pandas 3.0+, string-like columns might have a 'string' or 'StringDtype' instead of 'object'
+    assert pd.api.types.is_string_dtype(normalized["id"])
+    assert pd.api.types.is_string_dtype(normalized["parent_id"])
     assert normalized.iloc[0]["id"] == "1"
     assert normalized.iloc[0]["parent_id"] == "10"
     assert normalized["some_other"].dtype == "float64"

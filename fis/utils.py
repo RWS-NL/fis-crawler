@@ -82,6 +82,40 @@ def sanitize_attrs(row_obj):
     return attrs
 
 
+def stringify_id(val):
+    """
+    Standardize ID values as clean strings.
+    Handles float-like strings ("123.0" -> "123") and numeric types.
+    Returns None for NaN values.
+    """
+    if pd.isna(val) or val is None:
+        return None
+
+    # If it's already a string, check if it's a "float-string" like "123.0"
+    if isinstance(val, str):
+        if val.lower() == "nan":
+            return None
+        try:
+            # Attempt conversion to see if it's numeric
+            f_val = float(val)
+            if f_val.is_integer():
+                return str(int(f_val))
+            return str(f_val)
+        except ValueError:
+            return val
+
+    # Handle numeric types (float, int, np.integer, etc.)
+    try:
+        f_val = float(val)
+        if not np.isfinite(f_val):
+            return None
+        if f_val.is_integer():
+            return str(int(f_val))
+        return str(val)
+    except (ValueError, TypeError):
+        return str(val)
+
+
 def normalize_attributes(
     df: pd.DataFrame, schema_section: str, schema: Dict[str, Any] = None
 ) -> pd.DataFrame:
@@ -126,30 +160,6 @@ def normalize_attributes(
         # 3. Standardize common ID columns as STRINGS
         # Load list from identifiers section in schema.toml
         id_cols = schema.get("identifiers", {}).get("columns", [])
-
-        def stringify_id(val):
-            if pd.isna(val):
-                return None
-
-            # If it's already a string, check if it's a "float-string" like "123.0"
-            if isinstance(val, str):
-                try:
-                    # Attempt conversion to see if it's numeric
-                    f_val = float(val)
-                    if f_val.is_integer():
-                        return str(int(f_val))
-                    return str(f_val)
-                except ValueError:
-                    return val
-
-            # Handle numeric types (float, int, np.integer, etc.)
-            try:
-                f_val = float(val)
-                if np.isfinite(f_val) and f_val.is_integer():
-                    return str(int(f_val))
-                return str(val)
-            except (ValueError, TypeError):
-                return str(val)
 
         for col in id_cols:
             if col in new_df.columns:

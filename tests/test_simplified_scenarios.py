@@ -29,7 +29,7 @@ def simplified_graph(tmp_path):
     edges = gpd.read_parquet(output_dir / "edges.geoparquet")
     G = nx.DiGraph()
     for _, edge in edges.iterrows():
-        if edge.source_node is not None and edge.target_node is not None:
+        if pd.notna(edge.source_node) and pd.notna(edge.target_node):
             G.add_edge(edge.source_node, edge.target_node, **edge.to_dict())
     return G, edges
 
@@ -72,6 +72,8 @@ def test_simplified_lock_topology(simplified_graph):
         # (Though they might exist if other tests ran, but here we have a fresh G).
         nodes = list(G.nodes)
         for node in nodes:
+            if not isinstance(node, str):
+                continue
             assert not node.startswith("chamber_"), (
                 f"Micro-node {node} should not exist in simplified mode"
             )

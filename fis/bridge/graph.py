@@ -4,6 +4,7 @@ from shapely.geometry import Point, LineString, mapping
 from pyproj import Geod
 import json
 import pandas as pd
+from fis import utils
 
 geod = Geod(ellps="WGS84")
 CRS = "EPSG:4326"
@@ -112,7 +113,7 @@ def build_graph_features(complexes):
     features = []
 
     for c in complexes:
-        bridge_id = c["id"]
+        bridge_id = utils.stringify_id(c["id"])
 
         split_node_id = f"bridge_{bridge_id}_split"
         merge_node_id = f"bridge_{bridge_id}_merge"
@@ -160,7 +161,7 @@ def build_graph_features(complexes):
         if not openings:
             openings = [
                 {
-                    "id": -int(bridge_id),
+                    "id": f"-{bridge_id}",
                     "width": None,
                     "height": None,
                     "geometry": c.get("geometry"),
@@ -168,7 +169,7 @@ def build_graph_features(complexes):
             ]
 
         for opening in openings:
-            op_id = opening["id"]
+            op_id = utils.stringify_id(opening["id"])
 
             assert "geometry" in opening and opening["geometry"], (
                 f"Bridge passage opening {op_id} is missing a geometry definition."
@@ -195,7 +196,7 @@ def build_graph_features(complexes):
                         sections[0],
                     ),
                 )
-                best_sec_id = best_sec.get("id")
+                best_sec_id = utils.stringify_id(best_sec.get("id"))
 
             features.append(
                 {

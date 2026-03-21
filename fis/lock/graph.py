@@ -5,6 +5,7 @@ from shapely import wkt
 from shapely.geometry import Point, mapping
 from pyproj import Geod
 from fis.lock.utils import find_chamber_doors
+from fis import utils
 from shapely.geometry import LineString
 from shapely.geometry import shape
 
@@ -209,8 +210,9 @@ def build_graph_features(complexes):
             )
 
         # Nodes and Fairway Segments
-        split_node_id = f"lock_{c['id']}_split"
-        merge_node_id = f"lock_{c['id']}_merge"
+        lock_id = utils.stringify_id(c["id"])
+        split_node_id = f"lock_{lock_id}_split"
+        merge_node_id = f"lock_{lock_id}_merge"
 
         # Pre-calculate points
         split_point = None
@@ -242,12 +244,12 @@ def build_graph_features(complexes):
                         "type": "Feature",
                         "geometry": mapping(s_geom),
                         "properties": {
-                            "id": str(section.get("id")),
+                            "id": utils.stringify_id(section.get("id")),
                             "feature_type": "fairway_section",
                             "name": section.get("name"),
-                            "lock_id": c["id"],
-                            "section_id": section.get("id"),
-                            "fairway_id": section.get("fairway_id"),
+                            "lock_id": lock_id,
+                            "section_id": utils.stringify_id(section.get("id")),
+                            "fairway_id": utils.stringify_id(section.get("fairway_id")),
                             "length": section.get("length"),
                             "length_m": geod.geometry_length(s_geom),
                             "relation": section.get("relation"),
@@ -358,12 +360,12 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
     (relative to the split and merge points).
     """
     features = []
-
-    # Import locally if needed to avoid circular import issues, though we imported at top
+    lock_id = utils.stringify_id(c["id"])
+    fairway_id = utils.stringify_id(c.get("fairway_id"))
 
     for l_obj in c.get("locks", []):
         for chamber in l_obj.get("chambers", []):
-            chamber_id = chamber.get("id")
+            chamber_id = utils.stringify_id(chamber.get("id"))
             chamber_node_start_id = f"chamber_{chamber_id}_start"
             chamber_node_end_id = f"chamber_{chamber_id}_end"
 
@@ -388,6 +390,8 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                 features.extend(
                     _build_chamber_route_features(
                         c,
+                        lock_id,
+                        fairway_id,
                         chamber,
                         chamber_id,
                         chamber_node_start_id,
@@ -451,7 +455,7 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                         "properties": {
                             "feature_type": "chamber",
                             "name": chamber.get("name"),
-                            "lock_id": c["id"],
+                            "lock_id": lock_id,
                             "chamber_id": chamber_id,
                             "dim_length": chamber.get("dim_length"),
                             "dim_width": chamber.get("dim_width"),
@@ -464,6 +468,8 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
 
 def _build_chamber_route_features(
     c,
+    lock_id,
+    fairway_id,
     chamber,
     chamber_id,
     chamber_node_start_id,
@@ -491,7 +497,7 @@ def _build_chamber_route_features(
                 "feature_type": "node",
                 "node_type": "chamber_start",
                 "node_id": chamber_node_start_id,
-                "lock_id": c["id"],
+                "lock_id": lock_id,
                 "chamber_id": chamber_id,
             },
         }
@@ -506,7 +512,7 @@ def _build_chamber_route_features(
                 "feature_type": "node",
                 "node_type": "chamber_end",
                 "node_id": chamber_node_end_id,
-                "lock_id": c["id"],
+                "lock_id": lock_id,
                 "chamber_id": chamber_id,
             },
         }
@@ -520,16 +526,16 @@ def _build_chamber_route_features(
             "type": "Feature",
             "geometry": mapping(approach_line),
             "properties": {
-                "id": f"fairway_segment_{c['id']}_{chamber_id}_approach",
+                "id": f"fairway_segment_{lock_id}_{chamber_id}_approach",
                 "feature_type": "fairway_segment",
                 "segment_type": "chamber_approach",
                 "structure_type": "lock",
-                "structure_id": c["id"],
-                "lock_id": c["id"],
+                "structure_id": lock_id,
+                "lock_id": lock_id,
                 "chamber_id": chamber_id,
-                "fairway_id": c.get("fairway_id"),
+                "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": c.get("sections", [{}])[0].get("id")
+                "section_id": utils.stringify_id(c.get("sections", [{}])[0].get("id"))
                 if c.get("sections")
                 else None,
                 "source_node": split_node_id,
@@ -546,16 +552,16 @@ def _build_chamber_route_features(
             "type": "Feature",
             "geometry": mapping(chamber_line),
             "properties": {
-                "id": f"fairway_segment_{c['id']}_{chamber_id}_route",
+                "id": f"fairway_segment_{lock_id}_{chamber_id}_route",
                 "feature_type": "fairway_segment",
                 "segment_type": "chamber_route",
                 "structure_type": "lock",
-                "structure_id": c["id"],
-                "lock_id": c["id"],
+                "structure_id": lock_id,
+                "lock_id": lock_id,
                 "chamber_id": chamber_id,
-                "fairway_id": c.get("fairway_id"),
+                "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": c.get("sections", [{}])[0].get("id")
+                "section_id": utils.stringify_id(c.get("sections", [{}])[0].get("id"))
                 if c.get("sections")
                 else None,
                 "dim_length": chamber.get("dim_length"),
@@ -574,16 +580,16 @@ def _build_chamber_route_features(
             "type": "Feature",
             "geometry": mapping(exit_line),
             "properties": {
-                "id": f"fairway_segment_{c['id']}_{chamber_id}_exit",
+                "id": f"fairway_segment_{lock_id}_{chamber_id}_exit",
                 "feature_type": "fairway_segment",
                 "segment_type": "chamber_exit",
                 "structure_type": "lock",
-                "structure_id": c["id"],
-                "lock_id": c["id"],
+                "structure_id": lock_id,
+                "lock_id": lock_id,
                 "chamber_id": chamber_id,
-                "fairway_id": c.get("fairway_id"),
+                "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": c.get("sections", [{}])[0].get("id")
+                "section_id": utils.stringify_id(c.get("sections", [{}])[0].get("id"))
                 if c.get("sections")
                 else None,
                 "source_node": chamber_node_end_id,
