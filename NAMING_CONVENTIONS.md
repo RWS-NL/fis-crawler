@@ -47,6 +47,10 @@ To support the mix of numeric FIS IDs, country-prefixed EURIS IDs, and complex s
 1. **Early Normalization:** `utils.normalize_attributes` automatically converts all columns listed in the `[identifiers]` section of `config/schema.toml` to strings immediately after loading.
 2. **Graph Construction:** When building internal graph features (in `fis/lock/graph.py` and `fis/bridge/graph.py`), all generated node and edge IDs are passed through `utils.stringify_id`.
 3. **Data Export:** The `_export_dataframes` function in `fis/dropins/core.py` ensures all ID columns are stringified before writing to Parquet/GeoJSON to prevent schema mismatches in downstream tools.
+4. **Synthetic IDs:**
+   - **Why:** Some FIS structures lack explicit sub-component records (e.g., a bridge with no openings). To create a valid traversal path in the final graph, we must generate a placeholder element.
+   - **How:** We use a `virtual_` prefix followed by the parent structure's ID (e.g., `virtual_123`). This replaces the older convention of using negative integers, making synthetic elements explicitly identifiable and searchable.
+   - **Where:** This logic is applied during internal graph construction in `fis/bridge/graph.py` and `fis/lock/graph.py` whenever source data is incomplete.
 
 #### How it is implemented
 We use `utils.stringify_id(val)` which:
