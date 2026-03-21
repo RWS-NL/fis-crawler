@@ -81,7 +81,7 @@ def build_openings_gdf(complexes) -> gpd.GeoDataFrame:
             bridge_id = utils.stringify_id(c["id"])
             openings = [
                 {
-                    "id": f"-{bridge_id}",
+                    "id": f"virtual_{bridge_id}",
                     "width": None,
                     "height": None,
                     "geometry": c.get("geometry"),
@@ -165,7 +165,7 @@ def build_graph_features(complexes):
         if not openings:
             openings = [
                 {
-                    "id": f"-{bridge_id}",
+                    "id": f"virtual_{bridge_id}",
                     "width": None,
                     "height": None,
                     "geometry": c.get("geometry"),
