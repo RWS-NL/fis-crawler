@@ -884,8 +884,23 @@ def _export_dataframes(
         "openings": build_openings_gdf(bridge_complexes),
     }
 
+    from fis import utils
+
+    schema = utils.load_schema()
+    id_cols = schema.get("identifiers", {}).get("columns", [])
+
     for name, gdf in gdfs.items():
         if not gdf.empty:
+            # pyarrow fails if a column has mixed types (e.g. int and str)
+            # We ensure all ID columns are consistently strings for export.
+            gdf = gdf.copy()
+            for col in id_cols:
+                if col in gdf.columns:
+                    # We use the same stringify logic if available,
+                    # but simple astype(str) is usually enough here as
+                    # normalization should have already happened.
+                    gdf[col] = gdf[col].astype(str)
+
             gdf.to_parquet(output_dir / f"{name}.geoparquet")
             gdf.to_file(output_dir / f"{name}.geojson", driver="GeoJSON")
             logger.info("Exported %s with %d rows", name, len(gdf))
@@ -960,7 +975,7 @@ def _generate_simplified_passages(
             widths, heights = [], []
             for op in comp.get("openings", []):
                 constituent_ids.append(str(op["id"]))
-                w, h = op.get("Width"), op.get("ClearanceHeightClosed")
+                w, h = op.get("dim_width"), op.get("dim_height")
                 if pd.notna(w):
                     widths.append(float(w))
                 if pd.notna(h):
@@ -977,7 +992,7 @@ def _generate_simplified_passages(
             for child in comp.get("locks", []):
                 for ch in child.get("chambers", []):
                     constituent_ids.append(str(ch["id"]))
-                    w, ch_len = ch.get("Width"), ch.get("Length")
+                    w, ch_len = ch.get("dim_width"), ch.get("dim_length")
                     if pd.notna(w):
                         widths.append(float(w))
                     if pd.notna(ch_len):

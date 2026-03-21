@@ -211,17 +211,17 @@ class TestBuildSectionEnrichment:
 
         result = build_fis_section_enrichment(datasets)
 
-        # Check dimensions
-        assert "dim_GeneralDepth" in result.columns
-        assert result.loc[1, "dim_GeneralDepth"] == 3.5
+        # Check dimensions (canonical)
+        assert "dim_depth" in result.columns
+        assert result.loc[1, "dim_depth"] == 3.5
 
-        # Check CEMT class
+        # Check CEMT class (canonical)
         assert "cemt_class" in result.columns
         assert result.loc[1, "cemt_class"] == "IV"
 
-        # Check speed
-        assert "speed_Speed" in result.columns
-        assert result.loc[1, "speed_Speed"] == 12.0
+        # Check speed (canonical)
+        assert "maxspeed" in result.columns
+        assert result.loc[1, "maxspeed"] == 12.0
 
 
 # =============================================================================
@@ -236,7 +236,7 @@ class TestEnrichFisGraph:
         """Should add enrichment attributes to graph edges."""
         enrichment = pd.DataFrame(
             {
-                "dim_GeneralDepth": [3.5, None, 2.0],
+                "dim_depth": [3.5, None, 2.0],
                 "cemt_class": ["IV", "III", None],
             },
             index=[1, 2, 3],
@@ -245,7 +245,7 @@ class TestEnrichFisGraph:
         result = enrich_fis_graph(sample_graph, sample_sections, enrichment)
 
         # Edge 1001-1002 (section 1)
-        assert result[1001][1002]["dim_GeneralDepth"] == 3.5
+        assert result[1001][1002]["dim_depth"] == 3.5
         assert result[1001][1002]["cemt_class"] == "IV"
 
         # Edge 1002-1004 (section 2)

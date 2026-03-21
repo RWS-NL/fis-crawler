@@ -5,11 +5,10 @@ import pandas as pd
 import geopandas as gpd
 from shapely import wkt
 from tqdm import tqdm
-from shapely.geometry.base import BaseGeometry
-import numpy as np
 
 from shapely.geometry import Point, LineString
 from shapely.ops import unary_union
+from fis.utils import to_python, sanitize_attrs
 from fis import settings, utils
 
 logger = logging.getLogger(__name__)
@@ -22,14 +21,35 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
         gpq = dir_path / f"{stem}.geoparquet"
         pq = dir_path / f"{stem}.parquet"
         if gpq.exists():
-            return gpd.read_parquet(gpq)
+            gdf = gpd.read_parquet(gpq)
+            # Standardize on lowercase 'geometry'
+            if "Geometry" in gdf.columns and "geometry" not in gdf.columns:
+                gdf = gdf.rename(columns={"Geometry": "geometry"}).set_geometry(
+                    "geometry"
+                )
+            elif "Geometry" in gdf.columns and "geometry" in gdf.columns:
+                # If both exist, drop the uppercase one and ensure lowercase is active
+                gdf = gdf.drop(columns=["Geometry"]).set_geometry("geometry")
+            return gdf
         if pq.exists():
             df = pd.read_parquet(pq)
-            if "Geometry" in df.columns and df["Geometry"].dtype == "object":
-                df["geometry"] = df["Geometry"].apply(
-                    lambda x: wkt.loads(x) if x else None
+            # Standardize geometry column
+            if "Geometry" in df.columns:
+                geoms = df["Geometry"].apply(
+                    lambda x: wkt.loads(x) if isinstance(x, str) else x
                 )
-                return gpd.GeoDataFrame(df, geometry="geometry")
+                df = df.drop(columns=["Geometry"])
+                # If 'geometry' also exists (e.g. as string), overwrite it with parsed geoms
+                if "geometry" in df.columns:
+                    df = df.drop(columns=["geometry"])
+                return gpd.GeoDataFrame(df, geometry=geoms, crs="EPSG:4326")
+            elif "geometry" in df.columns:
+                # Standardize existing 'geometry' column (if it's WKT)
+                if df["geometry"].dtype == "object":
+                    df["geometry"] = df["geometry"].apply(
+                        lambda x: wkt.loads(x) if isinstance(x, str) else x
+                    )
+                return gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
             return df
         return None
 
@@ -99,45 +119,6 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
         "bridges": bridges,
         "openings": openings,
     }
-
-
-def to_python(obj):
-    """Recursively convert numpy/pandas types to plain Python for JSON serialization."""
-    if isinstance(obj, np.ndarray):
-        return [to_python(v) for v in obj.tolist()]
-    if isinstance(obj, np.integer):
-        return int(obj)
-    if isinstance(obj, np.floating):
-        return float(obj)
-    if isinstance(obj, np.bool_):
-        return bool(obj)
-    if isinstance(obj, dict):
-        return {k: to_python(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [to_python(v) for v in obj]
-    return obj
-
-
-def sanitize_attrs(row_obj):
-    """Clean row values into pure Python JSON-serializable types, skipping geometry and nested objects."""
-    attrs = {}
-    for k, v in row_obj.items():
-        if k == "geometry":
-            continue
-        if isinstance(v, (list, dict, np.ndarray)):
-            continue
-        if pd.isna(v):
-            attrs[k] = None
-        elif isinstance(v, BaseGeometry):
-            attrs[k] = v.wkt
-        elif hasattr(v, "isoformat"):
-            attrs[k] = v.isoformat()
-        else:
-            attrs[k] = to_python(v)
-    geom = row_obj.get("geometry")
-    if geom is not None:
-        attrs["geometry"] = geom.wkt if hasattr(geom, "wkt") else str(geom)
-    return attrs
 
 
 def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
@@ -527,41 +508,10 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     openings = data.get("openings")
     complexes = []
 
-    # Convert locks to GeoDataFrame for spatial ops if needed
-    if "geometry" in locks.columns and locks["geometry"].dtype == "object":
-        locks = locks.copy()
-        locks["geometry"] = locks["geometry"].apply(
-            lambda x: wkt.loads(x) if x else None
-        )
-    locks_gdf = gpd.GeoDataFrame(locks, geometry="geometry")
-
-    # Convert berths to GDF if needed
-    berths_gdf = None
-    if berths is not None:
-        if "geometry" in berths.columns and berths["geometry"].dtype == "object":
-            berths = berths.copy()
-            berths["geometry"] = berths["geometry"].apply(
-                lambda x: wkt.loads(x) if x else None
-            )
-        berths_gdf = (
-            gpd.GeoDataFrame(berths, geometry="geometry")
-            if "geometry" in berths.columns
-            else berths
-        )
-
-    # Convert sections to GDF if needed
-    sections_gdf = None
-    if sections is not None:
-        if "geometry" in sections.columns and sections["geometry"].dtype == "object":
-            sections = sections.copy()
-            sections["geometry"] = sections["geometry"].apply(
-                lambda x: wkt.loads(x) if x else None
-            )
-        sections_gdf = (
-            gpd.GeoDataFrame(sections, geometry="geometry")
-            if "geometry" in sections.columns
-            else sections
-        )
+    # Expect GeoDataFrames at this stage
+    locks_gdf = locks
+    berths_gdf = berths
+    sections_gdf = sections
 
     # Create spatial index for sections if not already present
     if sections_gdf is not None:

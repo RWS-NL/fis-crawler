@@ -84,10 +84,10 @@ def find_geometric_border_connections(
     for n, d in fis_graph.nodes(data=True):
         # Extract geometry (could be x,y or shapely obj)
         p = None
-        if "Geometry" in d and isinstance(d["Geometry"], Point):
-            p = d["Geometry"]
-        elif "geometry" in d and isinstance(d["geometry"], Point):
+        if "geometry" in d and isinstance(d["geometry"], Point):
             p = d["geometry"]
+        elif "Geometry" in d and isinstance(d["Geometry"], Point):
+            p = d["Geometry"]
         elif "x" in d and "y" in d:
             p = Point(d["x"], d["y"])
 

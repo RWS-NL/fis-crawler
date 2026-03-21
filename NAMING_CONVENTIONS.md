@@ -27,6 +27,21 @@ All mappings are defined in `config/schema.toml`. The format is:
 | | `GeneralHeight` | `dim_height` |
 | **Geography** | `RouteKmBegin` | `route_km_begin` |
 | | `RouteKmEnd` | `route_km_end` |
+| | `Geometry` | `geometry` |
+
+### Special Case: Geometry
+In accordance with GIS standards, the project standardizes on a lowercase **`geometry`** column for all spatial data.
+- **Ingestion:** Raw FIS sources use `Geometry` (uppercase). This is converted to a lowercase `geometry` column containing Shapely objects immediately upon loading in `read_geo_or_parquet`.
+- **Processing:** All processing functions (grouping, routing, enrichment) expect a `GeoDataFrame` with an active geometry column named `geometry`.
+- **Export:** Final GeoParquet/GeoJSON exports use `geometry`.
+
+### Special Case: Identifiers (IDs)
+To support the mix of numeric FIS IDs, country-prefixed EURIS IDs, and complex spliced IDs (e.g., `123_split`), the project standardizes on **strings** for all identifier columns.
+- **Columns:** `id`, `parent_id`, `fairway_id`, `section_id`, `start_junction_id`, `end_junction_id`, `isrs_id`, `code`, `operating_times_id`.
+- **Normalization:** `utils.normalize_attributes` automatically converts these columns to strings. 
+- **Native Strings:** Identifiers that are strings from the start (e.g., ISRS codes like `NLAMS00001...`) are preserved as-is.
+- **Integer Handling:** Purely numeric IDs are converted to "clean" strings (e.g., `123.0` or `123` both become `"123"`) to avoid float inconsistencies and `.0` suffixes.
+- **Strictness:** Internal logic should treat IDs as strings. Avoid wrapping IDs in `int()` calls unless performing specific numeric calculations.
 
 ## 3. Implementation Strategy: "Normalize Early"
 To maintain consistency, we normalize data immediately after loading from raw sources (Parquet/GeoParquet).
@@ -60,3 +75,4 @@ When adding new FIS data sources:
 1. Add the FIS column names to the appropriate section in `config/schema.toml`.
 2. Define their canonical snake_case equivalents.
 3. Ensure the ingestion logic calls `normalize_attributes`.
+

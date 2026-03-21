@@ -57,13 +57,6 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 # Fairway type
 "type_CharacterTypeCode" = "fairway_type"
 
-# --- TODO: GitHub Issue #83 - Audit and Standardize Attribute Naming ---
-# Review all graph-generating modules to ensure they consistently add canonical 
-# attributes to edges during simplified and detailed schematization. 
-# Key attributes: section_id, segment_type, structure_type, structure_id, 
-# and dimension prefixes (dim_width, dim_length, dim_height).
-# -------------------------------------------------------------------------
-
 # Tidal
 # Routing attributes
 "Id" = "fis_id"
@@ -129,12 +122,14 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "FairwayId" = "fairway_id"
 "FairwaySectionId" = "section_id"
 "RouteKmBegin" = "route_km"
+"Category" = "category"
 
 [attributes.bridges]
 "Id" = "id"
 "Name" = "name"
 "FairwaySectionId" = "section_id"
 "FairwayId" = "fairway_id"
+"OperatingTimesId" = "operating_times_id"
 
 [attributes.openings]
 "Id" = "id"
@@ -142,8 +137,11 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "ParentId" = "parent_id"
 "GeneralWidth" = "dim_width"
 "GeneralHeight" = "dim_height"
+"ClearanceHeightClosed" = "dim_height"
+"Width" = "dim_width"
 "PushedWidth" = "dim_pushed_width"
 "PushedHeight" = "dim_pushed_height"
+"OperatingTimesId" = "operating_times_id"
 
 [attributes.nodes]
 # Node attributes are mostly preserved as-is
@@ -200,3 +198,28 @@ add_source_prefix = false  # If true, adds "fis_" or "euris_" prefix to all attr
 
 # Columns to track source
 source_column = "data_source"  # Values: "fis", "euris", "merged"
+
+# =============================================================================
+# Identifier Standardization
+# =============================================================================
+# Define columns that should be standardized as strings to avoid float/int 
+# inconsistencies and support complex spliced IDs.
+
+[identifiers]
+columns = [
+    "id",
+    "parent_id",
+    "fairway_id",
+    "section_id",
+    "start_junction_id",
+    "end_junction_id",
+    "isrs_id",
+    "code",
+    "operating_times_id",
+    "source_node",
+    "target_node",
+    "structure_id",
+    "constituent_ids"
+]
+target_type = "string"
+

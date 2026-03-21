@@ -29,11 +29,65 @@ def load_schema(
         return tomllib.load(f)
 
 
+def camel_to_snake(name: str) -> str:
+    """Convert CamelCase to snake_case."""
+    import re
+
+    # Skip geometry columns
+    if name.lower() == "geometry":
+        return "geometry"
+
+    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub("([a-z0-0])([A-Z])", r"\1_\2", s1).lower()
+
+
+def to_python(obj):
+    """Recursively convert numpy/pandas types to plain Python for JSON serialization."""
+    if isinstance(obj, np.ndarray):
+        return [to_python(v) for v in obj.tolist()]
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, dict):
+        return {k: to_python(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [to_python(v) for v in obj]
+    return obj
+
+
+def sanitize_attrs(row_obj):
+    """Clean row values into pure Python JSON-serializable types, skipping geometry and nested objects."""
+    from shapely.geometry.base import BaseGeometry
+
+    attrs = {}
+    for k, v in row_obj.items():
+        if k == "geometry":
+            continue
+        if isinstance(v, (list, dict, np.ndarray)):
+            continue
+        if pd.isna(v):
+            attrs[k] = None
+        elif isinstance(v, BaseGeometry):
+            attrs[k] = v.wkt
+        elif hasattr(v, "isoformat"):
+            attrs[k] = v.isoformat()
+        else:
+            attrs[k] = to_python(v)
+    geom = row_obj.get("geometry")
+    if geom is not None:
+        attrs["geometry"] = geom.wkt if hasattr(geom, "wkt") else str(geom)
+    return attrs
+
+
 def normalize_attributes(
     df: pd.DataFrame, schema_section: str, schema: Dict[str, Any] = None
 ) -> pd.DataFrame:
     """
     Normalize DataFrame columns based on schema mappings.
+    Any columns not in the explicit schema are converted from CamelCase to snake_case.
 
     Args:
         df: Input DataFrame or GeoDataFrame.
@@ -50,15 +104,58 @@ def normalize_attributes(
         schema = load_schema()
 
     mappings = schema.get("attributes", {}).get(schema_section, {})
-    if not mappings:
-        logger.debug("No mappings found for section: %s", schema_section)
-        return df
 
-    # Only rename columns that exist in the DataFrame
-    rename_map = {k: v for k, v in mappings.items() if k in df.columns}
+    # 1. Start with automatic snake_case renaming for ALL columns
+    rename_map = {col: camel_to_snake(col) for col in df.columns}
+
+    # 2. Apply explicit overrides from schema.toml (highest priority)
+    for k, v in mappings.items():
+        if k in df.columns:
+            rename_map[k] = v
+
     if rename_map:
-        logger.info("Normalizing %d columns for %s", len(rename_map), schema_section)
-        return df.rename(columns=rename_map)
+        logger.info("Normalizing columns for %s", schema_section)
+        # Avoid duplicate columns by dropping existing columns that will be overwritten by a rename
+        new_df = df.copy()
+        for old_col, new_col in rename_map.items():
+            if old_col != new_col and new_col in new_df.columns:
+                new_df = new_df.drop(columns=[new_col])
+        # Perform rename
+        new_df = new_df.rename(columns=rename_map)
+
+        # 3. Standardize common ID columns as STRINGS
+        # Load list from identifiers section in schema.toml
+        id_cols = schema.get("identifiers", {}).get("columns", [])
+
+        def stringify_id(val):
+            if pd.isna(val):
+                return None
+
+            # If it's already a string, check if it's a "float-string" like "123.0"
+            if isinstance(val, str):
+                try:
+                    # Attempt conversion to see if it's numeric
+                    f_val = float(val)
+                    if f_val.is_integer():
+                        return str(int(f_val))
+                    return str(f_val)
+                except ValueError:
+                    return val
+
+            # Handle numeric types (float, int, np.integer, etc.)
+            try:
+                f_val = float(val)
+                if np.isfinite(f_val) and f_val.is_integer():
+                    return str(int(f_val))
+                return str(val)
+            except (ValueError, TypeError):
+                return str(val)
+
+        for col in id_cols:
+            if col in new_df.columns:
+                new_df[col] = new_df[col].apply(stringify_id)
+
+        return new_df
 
     return df
 
@@ -71,8 +168,15 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0, openings_data=None
     fairway_data = {}
 
     # Extract geometries safely
+    from shapely import wkt
+
     fw_geom = fw_row.geometry if hasattr(fw_row, "geometry") else None
+    if isinstance(fw_geom, str):
+        fw_geom = wkt.loads(fw_geom)
+
     lock_geom = lock_row.geometry if hasattr(lock_row, "geometry") else None
+    if isinstance(lock_geom, str):
+        lock_geom = wkt.loads(lock_geom)
 
     if not fw_geom or not lock_geom:
         return fairway_data
@@ -164,11 +268,11 @@ def find_nearby_berths(
 
     candidates = berths_gdf.copy()
 
-    # Filter by Category (if present)
-    if "Category" in candidates.columns and allowed_categories:
+    # Filter by category (if present)
+    if "category" in candidates.columns and allowed_categories:
         candidates = candidates[
-            candidates["Category"].isna()
-            | candidates["Category"].isin(allowed_categories)
+            candidates["category"].isna()
+            | candidates["category"].isin(allowed_categories)
         ]
 
     # Filter by allowed FairwayIDs (normalized)
@@ -194,8 +298,22 @@ def find_nearby_berths(
             )
 
     # Pre-parse fairway geometries
-    g_before = wkt.loads(fairway_geom_before) if fairway_geom_before else None
-    g_after = wkt.loads(fairway_geom_after) if fairway_geom_after else None
+    from shapely.geometry import LineString
+
+    g_before = (
+        wkt.loads(fairway_geom_before)
+        if isinstance(fairway_geom_before, str)
+        else fairway_geom_before
+        if isinstance(fairway_geom_before, LineString)
+        else None
+    )
+    g_after = (
+        wkt.loads(fairway_geom_after)
+        if isinstance(fairway_geom_after, str)
+        else fairway_geom_after
+        if isinstance(fairway_geom_after, LineString)
+        else None
+    )
 
     for _, berth in candidates.iterrows():
         is_nearby = False

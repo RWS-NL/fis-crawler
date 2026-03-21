@@ -23,8 +23,11 @@ def test_build_chamber_route_features():
     split_node_id = f"lock_{c['id']}_split"
     merge_node_id = f"lock_{c['id']}_merge"
 
+    chamber = {"dim_length": 100, "dim_width": 12}
+
     features = _build_chamber_route_features(
         c,
+        chamber,
         chamber_id,
         chamber_node_start_id,
         chamber_node_end_id,
