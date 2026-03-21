@@ -81,6 +81,70 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "ForeignCode" = "foreign_code"
 "Geometry" = "geometry"
 
+[attributes.locks]
+# FIS → Canonical mappings
+"Id" = "id"
+"Name" = "name"
+"FairwaySectionId" = "section_id"
+"FairwayId" = "fairway_id"
+
+[attributes.chambers]
+# FIS → Canonical mappings
+"Id" = "id"
+"Name" = "name"
+"ParentId" = "parent_id"
+"Length" = "dim_length"
+"Width" = "dim_width"
+"ThresholdUpperLevel" = "dim_threshold_upper"
+"ThresholdLowerLevel" = "dim_threshold_lower"
+
+[attributes.subchambers]
+"Id" = "id"
+"Name" = "name"
+"ParentId" = "parent_id"
+"Length" = "dim_length"
+
+[attributes.isrs]
+"Id" = "id"
+"Code" = "code"
+
+[attributes.sections]
+"Id" = "id"
+"Name" = "name"
+"FairwayId" = "fairway_id"
+"RouteId" = "route_id"
+"RouteKmBegin" = "route_km_begin"
+"RouteKmEnd" = "route_km_end"
+"Length" = "length"
+"StartJunctionId" = "start_junction_id"
+"EndJunctionId" = "end_junction_id"
+
+[attributes.fairways]
+"Id" = "id"
+"Name" = "name"
+
+[attributes.berths]
+"Id" = "id"
+"Name" = "name"
+"FairwayId" = "fairway_id"
+"FairwaySectionId" = "section_id"
+"RouteKmBegin" = "route_km"
+
+[attributes.bridges]
+"Id" = "id"
+"Name" = "name"
+"FairwaySectionId" = "section_id"
+"FairwayId" = "fairway_id"
+
+[attributes.openings]
+"Id" = "id"
+"Name" = "name"
+"ParentId" = "parent_id"
+"GeneralWidth" = "dim_width"
+"GeneralHeight" = "dim_height"
+"PushedWidth" = "dim_pushed_width"
+"PushedHeight" = "dim_pushed_height"
+
 [attributes.nodes]
 # Node attributes are mostly preserved as-is
 # FIS uses uppercase style, EURIS uses lowercase

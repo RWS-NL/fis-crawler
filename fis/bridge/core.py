@@ -38,8 +38,8 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
     op_times_map = {}
     if operatingtimes is not None and not operatingtimes.empty:
         for _, row in operatingtimes.iterrows():
-            if pd.notna(row.get("Id")):
-                op_id = int(row["Id"])
+            if pd.notna(row.get("id")):
+                op_id = int(row["id"])
                 op_times_map[op_id] = {
                     "NormalSchedules": row.get("NormalSchedules", []),
                     "HolidaySchedules": row.get("HolidaySchedules", []),
@@ -74,7 +74,7 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
         desc="Processing bridges",
         mininterval=2.0,
     ):
-        bridge_id = bridge["Id"]
+        bridge_id = bridge["id"]
         bridge_data = sanitize_attrs(bridge)
         bridge_data["id"] = bridge_id
         bridge_data["feature_type"] = "bridge"
@@ -83,10 +83,10 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
         # Related openings
         bridge_openings = []
         if openings_df is not None and not openings_df.empty:
-            openings_match = openings_df[openings_df["ParentId"] == bridge_id]
+            openings_match = openings_df[openings_df["parent_id"] == bridge_id]
             for _, op in openings_match.iterrows():
                 op_data = sanitize_attrs(op)
-                op_data["id"] = int(op["Id"])
+                op_data["id"] = int(op["id"])
 
                 # Restore opening geometry (stripped by sanitize_attrs)
                 geom_val = op.get("geometry", op.get("Geometry"))
@@ -109,14 +109,14 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
         intersecting_sections = []
         matched_section_ids = set()
 
-        # 1. Attribute-based matching (FairwaySectionId, FairwayId)
+        # 1. Attribute-based matching (section_id, fairway_id)
         if sections_gdf is not None:
-            # Match directly by FairwaySectionId
-            fsid = bridge.get("FairwaySectionId")
+            # Match directly by section_id
+            fsid = bridge.get("section_id")
             if pd.notna(fsid):
-                matches = sections_gdf[sections_gdf["Id"] == int(fsid)]
+                matches = sections_gdf[sections_gdf["id"] == int(fsid)]
                 for _, sec in matches.iterrows():
-                    sid = int(sec["Id"])
+                    sid = int(sec["id"])
                     if sid not in matched_section_ids:
                         s_data = sanitize_attrs(sec)
                         s_data["id"] = sid
@@ -124,12 +124,12 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
                         intersecting_sections.append(s_data)
                         matched_section_ids.add(sid)
 
-            # Match by FairwayId (as context)
-            fid = bridge.get("FairwayId")
+            # Match by fairway_id (as context)
+            fid = bridge.get("fairway_id")
             if pd.notna(fid):
-                matches = sections_gdf[sections_gdf["FairwayId"] == int(fid)]
+                matches = sections_gdf[sections_gdf["fairway_id"] == int(fid)]
                 for _, sec in matches.iterrows():
-                    sid = int(sec["Id"])
+                    sid = int(sec["id"])
                     # We don't automatically add all fairway sections,
                     # but we keep this for context if needed.
                     pass
@@ -145,7 +145,7 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
 
             mask = sections_rd.intersects(bridge_buf)
             for _, sec in sections_gdf[mask].iterrows():
-                sid = int(sec["Id"])
+                sid = int(sec["id"])
                 if sid not in matched_section_ids:
                     s_data = sanitize_attrs(sec)
                     s_data["id"] = sid

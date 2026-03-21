@@ -283,7 +283,7 @@ def _splice_fairways(
         if not line_geom or line_geom.is_empty:
             continue
 
-        sid = sec["Id"]
+        sid = sec["id"]
         dropins_on_sec = dropins_by_section.get(sid, [])
 
         # Only skip embedded structures in detailed mode
@@ -332,8 +332,8 @@ def _prepare_sections_gdf(sections: pd.DataFrame) -> gpd.GeoDataFrame:
 
 
 def _handle_clear_section(all_features, sec):
-    sid = sec["Id"]
-    fairway_id = sec.get("FairwayId")
+    sid = sec["id"]
+    fairway_id = sec.get("fairway_id")
     name = sec.get("Name", sec.get("FairwayName"))
     start_junc = sec.get("StartJunctionId")
     end_junc = sec.get("EndJunctionId")
@@ -390,13 +390,13 @@ def _slice_section_with_dropins(
                 "type": "Feature",
                 "geometry": mapping(seg_4326),
                 "properties": {
-                    "id": f"fairway_segment_section_{sec['Id']}_{i}",
+                    "id": f"fairway_segment_section_{sec['id']}_{i}",
                     "feature_type": "fairway_segment",
                     "segment_type": "clear"
                     if is_start_junc and is_end_junc
                     else "approach_or_exit",
-                    "section_id": sec["Id"],
-                    "fairway_id": sec.get("FairwayId"),
+                    "section_id": sec["id"],
+                    "fairway_id": sec.get("fairway_id"),
                     "name": sec.get("Name", sec.get("FairwayName")),
                     "source_node": source_node,
                     "target_node": target_node,
@@ -920,7 +920,7 @@ def _generate_simplified_passages(
         base_props = {
             "structure_type": structure_type,
             "structure_id": cid,
-            "name": comp.get("name", comp.get("Name")),
+            "name": comp.get("name", comp.get("name")),
         }
 
         # 1. Create split node
