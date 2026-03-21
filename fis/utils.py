@@ -120,7 +120,33 @@ def normalize_attributes(
         for old_col, new_col in rename_map.items():
             if old_col != new_col and new_col in new_df.columns:
                 new_df = new_df.drop(columns=[new_col])
-        return new_df.rename(columns=rename_map)
+        # Perform rename
+        new_df = new_df.rename(columns=rename_map)
+
+        # 3. Enforce integer types for common ID columns to avoid float IDs (e.g. 123.0)
+        id_cols = [
+            "id",
+            "parent_id",
+            "fairway_id",
+            "section_id",
+            "start_junction_id",
+            "end_junction_id",
+        ]
+        for col in id_cols:
+            if col in new_df.columns:
+                try:
+                    # fillna(0) or similar might be dangerous if 0 is a valid ID,
+                    # but usually these shouldn't be NA if they are being used as IDs.
+                    # We use errors='ignore' to stay safe if it's truly non-numeric.
+                    new_df[col] = (
+                        pd.to_numeric(new_df[col], errors="coerce")
+                        .fillna(0)
+                        .astype(int)
+                    )
+                except Exception as e:
+                    logger.warning("Could not convert column %s to int: %s", col, e)
+
+        return new_df
 
     return df
 

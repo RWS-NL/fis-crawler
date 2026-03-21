@@ -82,3 +82,22 @@ def test_group_complexes_preserves_extra_attributes():
     assert ch["id"] == 101
     assert ch["extra_chamber_attr"] == "ChamberExtra"
     assert ch["dim_length"] == 100.0
+
+
+def test_normalize_attributes_enforces_int_ids():
+    """Should convert float IDs to integers."""
+    df = pd.DataFrame(
+        {
+            "Id": [1.0, 2.0],
+            "ParentId": [10.0, 20.0],
+            "SomeOther": [1.5, 2.5],  # Should stay float
+        }
+    )
+    schema = {"attributes": {"locks": {"Id": "id", "ParentId": "parent_id"}}}
+    normalized = utils.normalize_attributes(df, "locks", schema)
+
+    assert normalized["id"].dtype == "int64"
+    assert normalized["parent_id"].dtype == "int64"
+    assert normalized.iloc[0]["id"] == 1
+    assert normalized.iloc[0]["parent_id"] == 10
+    assert normalized["some_other"].dtype == "float64"
