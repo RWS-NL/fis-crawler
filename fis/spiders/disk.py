@@ -53,10 +53,9 @@ class DiskSpider(scrapy.Spider):
         )
         return spider
 
-    def start_requests(self):
+    async def start(self):
         # We don't actually need Scrapy to make async HTTP requests if we use owslib
-        # but to keep it within the Scrapy lifecycle, we can just yield a dummy request
-        # and do the work in the callback, or just do the work here and yield items.
+        # but to keep it within the Scrapy lifecycle, we can just yield items here.
 
         wfs_url = (
             "https://geo.rijkswaterstaat.nl/services/ogc/gdr/disk_beheerobjecten/ows"
