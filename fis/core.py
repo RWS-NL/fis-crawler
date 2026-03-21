@@ -64,38 +64,10 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
 
     complexes = []
 
-    # Convert locks to GeoDataFrame for spatial ops if needed
-    if "geometry" not in locks.columns and "Geometry" in locks.columns:
-        locks["geometry"] = locks["Geometry"].apply(
-            lambda x: wkt.loads(x) if isinstance(x, str) else x
-        )
-    locks_gdf = gpd.GeoDataFrame(locks, geometry="geometry")
-
-    # Convert berths to GDF if needed
-    berths_gdf = None
-    if berths is not None:
-        if "geometry" not in berths.columns and "Geometry" in berths.columns:
-            berths["geometry"] = berths["Geometry"].apply(
-                lambda x: wkt.loads(x) if isinstance(x, str) else x
-            )
-        berths_gdf = (
-            gpd.GeoDataFrame(berths, geometry="geometry")
-            if "geometry" in berths.columns
-            else berths
-        )
-
-    # Convert sections to GDF if needed
-    sections_gdf = None
-    if sections is not None:
-        if "geometry" not in sections.columns and "Geometry" in sections.columns:
-            sections["geometry"] = sections["Geometry"].apply(
-                lambda x: wkt.loads(x) if isinstance(x, str) else x
-            )
-        sections_gdf = (
-            gpd.GeoDataFrame(sections, geometry="geometry")
-            if "geometry" in sections.columns
-            else sections
-        )
+    # Expect GeoDataFrames at this stage
+    locks_gdf = locks
+    berths_gdf = berths
+    sections_gdf = sections
 
     for idx, lock in locks_gdf.iterrows():
         # Get chambers for this lock

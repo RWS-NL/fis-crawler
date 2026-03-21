@@ -115,7 +115,12 @@ def normalize_attributes(
 
     if rename_map:
         logger.info("Normalizing columns for %s", schema_section)
-        return df.rename(columns=rename_map)
+        # Avoid duplicate columns by dropping existing columns that will be overwritten by a rename
+        new_df = df.copy()
+        for old_col, new_col in rename_map.items():
+            if old_col != new_col and new_col in new_df.columns:
+                new_df = new_df.drop(columns=[new_col])
+        return new_df.rename(columns=rename_map)
 
     return df
 
@@ -128,8 +133,15 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0, openings_data=None
     fairway_data = {}
 
     # Extract geometries safely
+    from shapely import wkt
+
     fw_geom = fw_row.geometry if hasattr(fw_row, "geometry") else None
+    if isinstance(fw_geom, str):
+        fw_geom = wkt.loads(fw_geom)
+
     lock_geom = lock_row.geometry if hasattr(lock_row, "geometry") else None
+    if isinstance(lock_geom, str):
+        lock_geom = wkt.loads(lock_geom)
 
     if not fw_geom or not lock_geom:
         return fairway_data

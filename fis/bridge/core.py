@@ -2,7 +2,6 @@ from typing import List, Dict, Any
 
 import geopandas as gpd
 import pandas as pd
-from shapely import wkt
 from tqdm import tqdm
 from fis import settings
 from fis.utils import sanitize_attrs
@@ -46,13 +45,8 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
     if sections_gdf is not None and not sections_gdf.empty:
         sections_rd = sections_gdf.to_crs(settings.PROJECTED_CRS)
 
-    # Ensure bridges is a GeoDataFrame
-    if "geometry" in bridges_df.columns and bridges_df["geometry"].dtype == "object":
-        bridges_df = bridges_df.copy()
-        bridges_df["geometry"] = bridges_df["geometry"].apply(
-            lambda x: wkt.loads(x) if isinstance(x, str) else x
-        )
-    bridges_gdf = gpd.GeoDataFrame(bridges_df, geometry="geometry")
+    # Expect GeoDataFrames at this stage
+    bridges_gdf = bridges_df
 
     for _, bridge in tqdm(
         bridges_gdf.iterrows(),
