@@ -96,3 +96,57 @@ FEED_EXPORT_ENCODING = "utf-8"
 FIS_EXPORT_DIR = "output/fis-export"
 
 VERSION = "0.2.0"
+
+# --- Graph Integration & Splicing Parameters ---
+
+# Coordinate Reference System for Projected/Metric Operations
+# Used for all metric calculations (distance, area, splicing).
+# TODO: Replace with dynamic estimation (e.g., estimate_utm_crs) for non-NL support.
+PROJECTED_CRS = "EPSG:28992"
+
+# --- Splicing Buffers (Meters) ---
+# These determine the "footprint" of a structure on a fairway section.
+# The splicer "cuts out" this amount of the original fairway to insert the structure subgraph.
+
+# Safety margin added to lock chamber lengths in 'detailed' mode.
+# Total cut = (Max Chamber Length / 2) + DETAILED_LOCK_SPLICING_BUFFER_M
+DETAILED_LOCK_SPLICING_BUFFER_M = 50.0
+
+# Fixed cut distance for bridge structures.
+BRIDGE_SPLICING_BUFFER_M = 10.0
+
+# Minimal buffer for locks in 'simplified' mode.
+# Prevents large lock complexes from "swallowing" nearby bridges or junctions.
+SIMPLIFIED_LOCK_SPLICING_BUFFER_M = 10.0
+
+# Upper bound for lock buffers in simplified mode.
+SIMPLIFIED_LOCK_MAX_BUFFER_M = 50.0
+
+# --- Spatial Matching Buffers ---
+# Used to associate structures with other geographic features.
+
+# Radius (meters) to associate a bridge with a nearby fairway section.
+BRIDGE_SECTION_MATCH_BUFFER_M = 20.0
+
+# Degree-based buffer for matching locks to fairway sections (EPSG:4326).
+# 0.0001 degrees is approximately 10-11 meters in the Netherlands.
+LOCK_SECTION_MATCH_BUFFER_DEG = 0.0001
+
+# Radius (meters) to match FIS bridge records to DISK physical bridge geometries.
+DISK_MATCH_BUFFER_BRIDGE_M = 200.0
+
+# Radius (meters) to match FIS lock records to DISK physical lock geometries.
+DISK_MATCH_BUFFER_LOCK_M = 50.0
+
+# --- Structure Identification ---
+
+# Max distance (meters) to consider a bridge opening part of a nearby lock complex.
+EMBEDDED_STRUCTURE_MAX_DIST_M = 500.0
+
+# --- Berth Association ---
+
+# Max linear distance (meters) to associate a berth with a lock.
+BERTH_MATCH_MAX_DIST_M = 2000.0
+
+# Degree-based buffer to exclude berths that sit inside the internal lock geometry.
+BERTH_INTERNAL_SECTION_BUFFER_DEG = 0.00005

@@ -28,10 +28,10 @@ def build_bridge_features(complexes):
                     "type": "Feature",
                     "geometry": geom_wkt,  # WKT text
                     "properties": {
-                        "id": c.get("Id"),
-                        "name": c.get("Name"),
+                        "id": c.get("id"),
+                        "name": c.get("name"),
                         "feature_type": "bridge",
-                        "bridge_id": c.get("Id"),
+                        "bridge_id": c.get("id"),
                     },
                 }
             )
@@ -44,7 +44,7 @@ def build_bridge_features(complexes):
                 or geom_wkt
             )
             if op_geom:
-                op_id = opening.get("id", opening.get("Id"))
+                op_id = opening.get("id")
                 features.append(
                     {
                         "type": "Feature",
@@ -52,10 +52,10 @@ def build_bridge_features(complexes):
                         "properties": {
                             "id": op_id,
                             "feature_type": "bridge_opening",
-                            "bridge_id": c.get("Id", c.get("id")),
+                            "bridge_id": c.get("id"),
                             "opening_id": op_id,
-                            "width": opening.get("width", opening.get("Width")),
-                            "height": opening.get("height", opening.get("Height")),
+                            "dim_width": opening.get("dim_width"),
+                            "dim_height": opening.get("dim_height"),
                         },
                     }
                 )
@@ -96,7 +96,9 @@ def build_openings_gdf(complexes) -> gpd.GeoDataFrame:
         if f["properties"].get("feature_type") == "bridge_opening"
     ]
     if not rows:
-        return gpd.GeoDataFrame(columns=["id", "bridge_id", "geometry"], crs=CRS)
+        return gpd.GeoDataFrame(
+            columns=["id", "bridge_id", "dim_width", "dim_height", "geometry"], crs=CRS
+        )
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
 
 

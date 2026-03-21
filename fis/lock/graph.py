@@ -326,21 +326,24 @@ def _process_berths(c):
     Helper to process berths and generate related graph features.
     """
     features = []
+    _SKIP = {"geometry"}
     for berth in c.get("berths", []):
         if berth.get("geometry"):
             b_geom = wkt.loads(berth["geometry"])
+            attrs = {
+                k: v
+                for k, v in berth.items()
+                if k not in _SKIP and not isinstance(v, (list, dict))
+            }
             features.append(
                 {
                     "type": "Feature",
                     "geometry": mapping(b_geom),
                     "properties": {
+                        **attrs,
                         "id": str(berth.get("id")),
                         "feature_type": "berth",
-                        "name": berth.get("name"),
                         "lock_id": c["id"],
-                        "berth_id": berth.get("id"),
-                        "dist_m": berth.get("dist_m"),
-                        "relation": berth.get("relation"),
                     },
                 }
             )
@@ -385,6 +388,7 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                 features.extend(
                     _build_chamber_route_features(
                         c,
+                        chamber,
                         chamber_id,
                         chamber_node_start_id,
                         chamber_node_end_id,
@@ -449,8 +453,8 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                             "name": chamber.get("name"),
                             "lock_id": c["id"],
                             "chamber_id": chamber_id,
-                            "length": chamber.get("length"),
-                            "width": chamber.get("width"),
+                            "dim_length": chamber.get("dim_length"),
+                            "dim_width": chamber.get("dim_width"),
                         },
                     }
                 )
@@ -460,6 +464,7 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
 
 def _build_chamber_route_features(
     c,
+    chamber,
     chamber_id,
     chamber_node_start_id,
     chamber_node_end_id,
@@ -518,6 +523,8 @@ def _build_chamber_route_features(
                 "id": f"fairway_segment_{c['id']}_{chamber_id}_approach",
                 "feature_type": "fairway_segment",
                 "segment_type": "chamber_approach",
+                "structure_type": "lock",
+                "structure_id": c["id"],
                 "lock_id": c["id"],
                 "chamber_id": chamber_id,
                 "fairway_id": c.get("fairway_id"),
@@ -542,6 +549,8 @@ def _build_chamber_route_features(
                 "id": f"fairway_segment_{c['id']}_{chamber_id}_route",
                 "feature_type": "fairway_segment",
                 "segment_type": "chamber_route",
+                "structure_type": "lock",
+                "structure_id": c["id"],
                 "lock_id": c["id"],
                 "chamber_id": chamber_id,
                 "fairway_id": c.get("fairway_id"),
@@ -549,6 +558,8 @@ def _build_chamber_route_features(
                 "section_id": c.get("sections", [{}])[0].get("id")
                 if c.get("sections")
                 else None,
+                "dim_length": chamber.get("dim_length"),
+                "dim_width": chamber.get("dim_width"),
                 "source_node": chamber_node_start_id,
                 "target_node": chamber_node_end_id,
                 "length_m": geod.geometry_length(chamber_line),
@@ -566,6 +577,8 @@ def _build_chamber_route_features(
                 "id": f"fairway_segment_{c['id']}_{chamber_id}_exit",
                 "feature_type": "fairway_segment",
                 "segment_type": "chamber_exit",
+                "structure_type": "lock",
+                "structure_id": c["id"],
                 "lock_id": c["id"],
                 "chamber_id": chamber_id,
                 "fairway_id": c.get("fairway_id"),

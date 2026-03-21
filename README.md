@@ -61,6 +61,50 @@ CRAWL → NETWORKS → ENRICH → SCHEMATIZE → MERGE
 The drop-in schematization step produces **drop-in replacement subgraphs** for the sections of the network that contain locks or bridges. It processes all structures simultaneously using a `FairwaySplicer` to guarantee that overlapping structures (e.g. a bridge physically sitting on top of a lock complex) are properly topologically connected.
 The nodes and edges it generates replace the corresponding fairway stretch in the routing network, adding chamber-level routing and bridge passage constraints for discrete event simulation use cases.
 
+## Configuration & Parameters
+
+The behavior of the graph generation, structure splicing, and spatial matching is controlled by centralized parameters in `fis/settings.py`. These ensure consistent topology across the network.
+
+### Coordinate Reference System
+- **`PROJECTED_CRS`** (`EPSG:28992`): The coordinate system used for all metric calculations (meters). Currently hardcoded to the Dutch RD New system.
+
+### Splicing & Topology
+Determines how much of the original fairway is removed to accommodate a lock or bridge "drop-in" subgraph.
+- **`DETAILED_LOCK_SPLICING_BUFFER_M`** (50m): Safety margin added to lock chamber halves in detailed mode.
+- **`BRIDGE_SPLICING_BUFFER_M`** (10m): Standard distance used to cut fairways for bridge passages.
+- **`SIMPLIFIED_LOCK_SPLICING_BUFFER_M`** (10m): Minimal cut used in simplified mode to prevent overlapping nearby structures.
+
+### Spatial Matching
+Used to associate distinct data sources (FIS records vs. DISK geometries) and connect structures to the network.
+- **`BRIDGE_SECTION_MATCH_BUFFER_M`** (20m): Search radius for finding the parent fairway section of a bridge.
+- **`DISK_MATCH_BUFFER_LOCK_M`** (50m): Radius for matching FIS locks to physical DISK geometries.
+- **`EMBEDDED_STRUCTURE_MAX_DIST_M`** (500m): Max distance to consider a bridge part of a larger lock complex.
+
+## Graph Schema & Harmonization
+
+The network graph uses a harmonized schema based on the **EURIS** naming conventions. Attribute mapping and naming consistency are controlled via:
+- **`config/schema.toml`**: Defines the source-to-canonical mapping for edge and node attributes (e.g., mapping FIS `speed_MaxSpeedUp` to `maxspeed_up`). This is part of an ongoing audit to standardize naming across all modules ([Issue #83](https://github.com/RWS-NL/fis-crawler/issues/83)).
+- **Validation**: The `fis.cli graph validate` command checks generated graphs for schema compliance and attribute completeness.
+
+### Standard Edge Attributes
+Every edge in the final network graph strictly follows these standardized naming conventions:
+
+| Attribute | Description |
+|-----------|-------------|
+| `id` | Unique identifier for the edge. |
+| `feature_type` | Always `fairway_segment`. |
+| `segment_type` | Category of segment (e.g., `clear`, `bridge_passage`, `chamber_route`). |
+| `name` | Human-readable name of the fairway or structure. |
+| `source_node` / `target_node` | IDs of the start and end nodes. |
+| `section_id` | ID of the parent FIS fairway section. |
+| `fairway_id` | ID of the parent FIS fairway route. |
+| `length_m` | Geometric length of the segment in meters. |
+| `structure_type` | Type of structure if applicable (`lock`, `bridge`). |
+| `structure_id` | ID of the parent lock or bridge complex. |
+| `dim_width` | Minimum navigable width (meters). |
+| `dim_height` | Minimum navigable height (meters, for bridges). |
+| `dim_length` | Maximum navigable length (meters, for locks). |
+
 ## Output File Formats
 
 All spatial outputs are produced in two formats:

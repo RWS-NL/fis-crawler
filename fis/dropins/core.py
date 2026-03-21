@@ -17,6 +17,7 @@ from fis.splicer import FairwaySplicer, StructureCut
 
 from fis.lock.graph import build_graph_features as lock_graph_features
 from fis.bridge.graph import build_graph_features as bridge_graph_features
+from fis import settings
 
 logger = logging.getLogger(__name__)
 geod = Geod(ellps="WGS84")
@@ -36,7 +37,9 @@ def build_integrated_dropins_graph(
 
     embedded_bridges = _identify_embedded_structures(lock_complexes, bridge_complexes)
     dropins_by_section = _map_dropins_to_sections(lock_complexes, bridge_complexes)
-    all_features = _splice_fairways(sections, dropins_by_section, embedded_bridges)
+    all_features = _splice_fairways(
+        sections, dropins_by_section, embedded_bridges, mode=mode
+    )
 
     # Determine which complexes to detail and which to simplify based on mode
     detailed_locks = lock_complexes if mode == "detailed" else []
@@ -146,8 +149,8 @@ def _identify_embedded_structures(
     if chambers_gdf.empty or openings_gdf.empty:
         return {}
 
-    openings_rd = openings_gdf.to_crs("EPSG:28992")
-    chambers_rd = chambers_gdf.to_crs("EPSG:28992")
+    openings_rd = openings_gdf.to_crs(settings.PROJECTED_CRS)
+    chambers_rd = chambers_gdf.to_crs(settings.PROJECTED_CRS)
     matches = {}
 
     for _, op_row in openings_rd.iterrows():
@@ -158,7 +161,7 @@ def _identify_embedded_structures(
             ch_id = str(ch_row["id"])
             ch_name = str(ch_row.get("name", ch_row.get("Name", ""))).lower()
             dist = op_row.geometry.distance(ch_row.geometry)
-            if dist > 500:
+            if dist > settings.EMBEDDED_STRUCTURE_MAX_DIST_M:
                 continue
             score = _calculate_semantic_spatial_score(op_name, ch_name, dist)
             candidates.append((score, dist, ch_id, ch_row))
@@ -246,18 +249,22 @@ def _splice_fairways(
     sections: pd.DataFrame,
     dropins_by_section: Dict[Any, List[Dict]],
     embedded_bridges: Dict[str, Dict],
+    mode: str = "detailed",
 ) -> List[Dict]:
     """
     Iterates over all fairway sections and splices them into sub-segments
     based on the structures (drop-ins) that lie upon them.
 
-    Embedded bridges are explicitly omitted from slicing the main fairway,
-    since they only interrupt internal lock chamber routes.
+    Embedded bridges are explicitly omitted from slicing the main fairway
+    in 'detailed' mode, since they only interrupt internal lock chamber routes.
+    In 'simplified' mode, they are included to ensure they split the
+    underlying fairway normally.
 
     Args:
         sections: DataFrame of fairway sections.
         dropins_by_section: Precomputed mapping of section IDs to drop-in structures.
         embedded_bridges: Mapping of bridge opening IDs that are embedded in locks.
+        mode: Operation mode ('detailed' or 'simplified').
 
     Returns:
         A list of generated GeoJSON-style feature dicts representing the spliced segments.
@@ -276,17 +283,23 @@ def _splice_fairways(
         if not line_geom or line_geom.is_empty:
             continue
 
-        sid = sec["Id"]
+        sid = sec["id"]
         dropins_on_sec = dropins_by_section.get(sid, [])
+
+        # Only skip embedded structures in detailed mode
         visible_dropins = [
-            d for d in dropins_on_sec if not _is_embedded(d, embedded_ids)
+            d
+            for d in dropins_on_sec
+            if mode == "simplified" or not _is_embedded(d, embedded_ids)
         ]
 
         if not visible_dropins:
             _handle_clear_section(all_features, sec)
             continue
 
-        _slice_section_with_dropins(all_features, sec, visible_dropins, dropins_on_sec)
+        _slice_section_with_dropins(
+            all_features, sec, visible_dropins, dropins_on_sec, mode=mode
+        )
     return all_features
 
 
@@ -319,8 +332,8 @@ def _prepare_sections_gdf(sections: pd.DataFrame) -> gpd.GeoDataFrame:
 
 
 def _handle_clear_section(all_features, sec):
-    sid = sec["Id"]
-    fairway_id = sec.get("FairwayId")
+    sid = sec["id"]
+    fairway_id = sec.get("fairway_id")
     name = sec.get("Name", sec.get("FairwayName"))
     start_junc = sec.get("StartJunctionId")
     end_junc = sec.get("EndJunctionId")
@@ -350,7 +363,7 @@ def _handle_clear_section(all_features, sec):
 
 
 def _slice_section_with_dropins(
-    all_features, sec, visible_dropins, original_dropins_on_sec
+    all_features, sec, visible_dropins, original_dropins_on_sec, mode="detailed"
 ):
     line_geom = sec.geometry
     line_rd_series = gpd.GeoSeries([line_geom], crs="EPSG:4326")
@@ -358,7 +371,7 @@ def _slice_section_with_dropins(
     line_rd = line_rd_series.to_crs(utm_crs).iloc[0]
 
     splicer = FairwaySplicer(line_rd)
-    cuts = _generate_structure_cuts(line_rd, visible_dropins, utm_crs)
+    cuts = _generate_structure_cuts(line_rd, visible_dropins, utm_crs, mode=mode)
     segments = splicer.splice(cuts)
 
     for i, segment in enumerate(segments):
@@ -377,13 +390,13 @@ def _slice_section_with_dropins(
                 "type": "Feature",
                 "geometry": mapping(seg_4326),
                 "properties": {
-                    "id": f"fairway_segment_section_{sec['Id']}_{i}",
+                    "id": f"fairway_segment_section_{sec['id']}_{i}",
                     "feature_type": "fairway_segment",
                     "segment_type": "clear"
                     if is_start_junc and is_end_junc
                     else "approach_or_exit",
-                    "section_id": sec["Id"],
-                    "fairway_id": sec.get("FairwayId"),
+                    "section_id": sec["id"],
+                    "fairway_id": sec.get("fairway_id"),
                     "name": sec.get("Name", sec.get("FairwayName")),
                     "source_node": source_node,
                     "target_node": target_node,
@@ -456,7 +469,7 @@ def _determine_target_node(
 
 
 def _generate_structure_cuts(
-    line_rd: Any, dropins_on_sec: List[Dict], utm_crs: str
+    line_rd: Any, dropins_on_sec: List[Dict], utm_crs: str, mode: str = "detailed"
 ) -> List[StructureCut]:
     """
     Generates StructureCuts for each drop-in structure along a fairway section.
@@ -469,13 +482,12 @@ def _generate_structure_cuts(
         line_rd: Geopandas Series geometry of the fairway section projected in UTM.
         dropins_on_sec: The drop-in attributes mapping to this section.
         utm_crs: String identifier of the metric CRS being used for distances.
+        mode: Operation mode ('detailed' or 'simplified').
 
     Returns:
         A list of StructureCut geometric objects.
     """
     cuts = []
-    LOCK_BUFFER_BASE = 50.0
-    BRIDGE_BUFFER = 10.0
 
     for dropin in dropins_on_sec:
         obj = dropin["obj"]
@@ -491,15 +503,21 @@ def _generate_structure_cuts(
         dist = line_rd.project(geom_rd)
         if dropin["type"] == "lock":
             buffer_dist = obj.get("fairway_buffer_dist")
-            if buffer_dist is None:
+            if buffer_dist is None or mode == "simplified":
                 max_len = 0.0
                 for child in obj.get("locks", []):
                     for ch in child.get("chambers", []):
                         if ch.get("length"):
                             max_len = max(max_len, float(ch["length"]))
-                buffer_dist = (max_len / 2.0) + LOCK_BUFFER_BASE
+
+                # In simplified mode, we use a minimal buffer to avoid swallowing nearby structures
+                buffer_dist = (
+                    settings.SIMPLIFIED_LOCK_SPLICING_BUFFER_M
+                    if mode == "simplified"
+                    else (max_len / 2.0) + settings.DETAILED_LOCK_SPLICING_BUFFER_M
+                )
         else:
-            buffer_dist = BRIDGE_BUFFER
+            buffer_dist = settings.BRIDGE_SPLICING_BUFFER_M
 
         cuts.append(
             StructureCut(
@@ -902,7 +920,7 @@ def _generate_simplified_passages(
         base_props = {
             "structure_type": structure_type,
             "structure_id": cid,
-            "name": comp.get("name", comp.get("Name")),
+            "name": comp.get("name", comp.get("name")),
         }
 
         # 1. Create split node
@@ -971,10 +989,20 @@ def _generate_simplified_passages(
                 agg_constraints["dim_length"] = max(lengths)
 
         # 3. Create passage edge
+        sections = comp.get("sections", [])
+        best_sec_id = None
+        if sections:
+            # Prefer the one with 'overlap' relation if it exists, otherwise first one
+            best_sec = next(
+                (s for s in sections if s.get("relation") == "overlap"), sections[0]
+            )
+            best_sec_id = best_sec.get("id")
+
         edge_props = base_props | {
             "id": f"{structure_type}_passage_{cid}",
             "feature_type": "fairway_segment",
             "segment_type": f"{structure_type}_passage",
+            "section_id": best_sec_id,
             "source_node": split_id,
             "target_node": merge_id,
             "length_m": geod.geometry_length(line_passage),
