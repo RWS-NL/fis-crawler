@@ -1,6 +1,5 @@
 import pandas as pd
 from shapely.geometry import Point
-import numpy as np
 from fis import utils
 from fis.core import group_complexes
 
@@ -29,10 +28,9 @@ def test_sanitize_attrs_preserves_extra_fields():
             "name": "Test",
             "geometry": Point(0, 0),
             "custom_field": "custom",
-            "numeric_field": np.int64(123),
+            "numeric_field": 123,
         }
     )
-
     sanitized = utils.sanitize_attrs(row)
 
     assert sanitized["id"] == 1
