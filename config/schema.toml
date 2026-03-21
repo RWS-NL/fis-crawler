@@ -129,12 +129,14 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "FairwayId" = "fairway_id"
 "FairwaySectionId" = "section_id"
 "RouteKmBegin" = "route_km"
+"Category" = "category"
 
 [attributes.bridges]
 "Id" = "id"
 "Name" = "name"
 "FairwaySectionId" = "section_id"
 "FairwayId" = "fairway_id"
+"OperatingTimesId" = "operating_times_id"
 
 [attributes.openings]
 "Id" = "id"
@@ -142,8 +144,11 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "ParentId" = "parent_id"
 "GeneralWidth" = "dim_width"
 "GeneralHeight" = "dim_height"
+"ClearanceHeightClosed" = "dim_height"
+"Width" = "dim_width"
 "PushedWidth" = "dim_pushed_width"
 "PushedHeight" = "dim_pushed_height"
+"OperatingTimesId" = "operating_times_id"
 
 [attributes.nodes]
 # Node attributes are mostly preserved as-is

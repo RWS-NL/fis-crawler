@@ -47,21 +47,36 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
     """
     Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, and Section data.
     """
+    from fis import utils
+
+    # Normalize all inputs
+    schema = utils.load_schema()
+    locks = utils.normalize_attributes(locks, "locks", schema)
+    chambers = utils.normalize_attributes(chambers, "chambers", schema)
+    if isrs is not None:
+        isrs = utils.normalize_attributes(isrs, "isrs", schema)
+    if fairways is not None:
+        fairways = utils.normalize_attributes(fairways, "fairways", schema)
+    if berths is not None:
+        berths = utils.normalize_attributes(berths, "berths", schema)
+    if sections is not None:
+        sections = utils.normalize_attributes(sections, "sections", schema)
+
     complexes = []
 
     # Convert locks to GeoDataFrame for spatial ops if needed
-    if "Geometry" in locks.columns and locks["Geometry"].dtype == "object":
+    if "geometry" not in locks.columns and "Geometry" in locks.columns:
         locks["geometry"] = locks["Geometry"].apply(
-            lambda x: wkt.loads(x) if x else None
+            lambda x: wkt.loads(x) if isinstance(x, str) else x
         )
     locks_gdf = gpd.GeoDataFrame(locks, geometry="geometry")
 
     # Convert berths to GDF if needed
     berths_gdf = None
     if berths is not None:
-        if "Geometry" in berths.columns and berths["Geometry"].dtype == "object":
+        if "geometry" not in berths.columns and "Geometry" in berths.columns:
             berths["geometry"] = berths["Geometry"].apply(
-                lambda x: wkt.loads(x) if x else None
+                lambda x: wkt.loads(x) if isinstance(x, str) else x
             )
         berths_gdf = (
             gpd.GeoDataFrame(berths, geometry="geometry")
@@ -72,9 +87,9 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
     # Convert sections to GDF if needed
     sections_gdf = None
     if sections is not None:
-        if "Geometry" in sections.columns and sections["Geometry"].dtype == "object":
+        if "geometry" not in sections.columns and "Geometry" in sections.columns:
             sections["geometry"] = sections["Geometry"].apply(
-                lambda x: wkt.loads(x) if x else None
+                lambda x: wkt.loads(x) if isinstance(x, str) else x
             )
         sections_gdf = (
             gpd.GeoDataFrame(sections, geometry="geometry")
@@ -83,15 +98,15 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
         )
 
     for idx, lock in locks_gdf.iterrows():
-        # Get chambers for this lock (using confirmed ParentId key)
-        lock_chambers = chambers[chambers["ParentId"] == lock["Id"]]
+        # Get chambers for this lock
+        lock_chambers = chambers[chambers["parent_id"] == lock["id"]]
 
         # Resolve ISRS
         lock_isrs_code = None
-        if pd.notna(lock.get("IsrsId")) and isrs is not None:
-            isrs_row = isrs[isrs["Id"] == lock["IsrsId"]]
+        if pd.notna(lock.get("isrs_id")) and isrs is not None:
+            isrs_row = isrs[isrs["id"] == lock["isrs_id"]]
             if not isrs_row.empty:
-                lock_isrs_code = isrs_row.iloc[0]["Code"]
+                lock_isrs_code = isrs_row.iloc[0]["code"]
 
         # RIS Enrichment
         ris_info = {}
@@ -106,13 +121,13 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
         # Fairway Mapping
         fairway_data = {}
         fw_obj = None  # Keep reference for processing
-        if fairways is not None and pd.notna(lock.get("FairwayId")):
-            fw_row = fairways[fairways["Id"] == lock["FairwayId"]]
+        if fairways is not None and pd.notna(lock.get("fairway_id")):
+            fw_row = fairways[fairways["id"] == lock["fairway_id"]]
             if not fw_row.empty:
                 fw_obj = fw_row.iloc[0]
                 fairway_data = {
-                    "fairway_name": fw_obj["Name"],
-                    "fairway_id": int(fw_obj["Id"]),
+                    "fairway_name": fw_obj["name"],
+                    "fairway_id": int(fw_obj["id"]),
                 }
                 # Delegate complexity to helper function
                 geom_data = process_fairway_geometry(fw_obj, lock)
@@ -120,7 +135,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
 
                 # Junction Identification
                 start_junction, end_junction = find_fairway_junctions(
-                    sections_gdf, fw_obj["Id"]
+                    sections_gdf, fw_obj["id"]
                 )
 
                 fairway_data["start_junction_id"] = start_junction
@@ -158,11 +173,15 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
             )
 
             # Add chamber geometries
-            if "Geometry" in lock_chambers.columns:
+            if "geometry" in lock_chambers.columns:
                 for _, c_row in lock_chambers.iterrows():
-                    if pd.isna(c_row["Geometry"]):
+                    if pd.isna(c_row["geometry"]):
                         continue
-                    c_geom = wkt.loads(c_row["Geometry"])
+                    c_geom = (
+                        wkt.loads(c_row["geometry"])
+                        if isinstance(c_row["geometry"], str)
+                        else c_row["geometry"]
+                    )
                     complex_geoms.append(c_geom)
 
             if complex_geoms:
@@ -173,13 +192,13 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                     for _, s_row in intersecting.iterrows():
                         sections_data.append(
                             {
-                                "id": int(s_row["Id"]),
-                                "name": s_row["Name"],
-                                "fairway_id": int(s_row["FairwayId"])
-                                if pd.notna(s_row.get("FairwayId"))
+                                "id": int(s_row["id"]),
+                                "name": s_row["name"],
+                                "fairway_id": int(s_row["fairway_id"])
+                                if pd.notna(s_row.get("fairway_id"))
                                 else None,
-                                "length": float(s_row["Length"])
-                                if pd.notna(s_row.get("Length"))
+                                "dim_length": float(s_row["length"])
+                                if pd.notna(s_row.get("length"))
                                 else None,
                                 "geometry": s_row.geometry.wkt
                                 if hasattr(s_row, "geometry") and s_row.geometry
@@ -189,8 +208,8 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                         )
 
         complex_obj = {
-            "id": int(lock["Id"]),
-            "name": lock["Name"],
+            "id": int(lock["id"]),
+            "name": lock["name"],
             "isrs_code": lock_isrs_code,
             "geometry": lock.geometry.wkt
             if hasattr(lock, "geometry") and lock.geometry
@@ -199,7 +218,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
             **fairway_data,
             "berths": berths_data,
             "sections": sections_data,
-            "locks": [{"id": int(lock["Id"]), "name": lock["Name"], "chambers": []}],
+            "locks": [{"id": int(lock["id"]), "name": lock["name"], "chambers": []}],
         }
 
         # Add chambers
@@ -209,10 +228,14 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
             if (
                 "split_point" in chamber_routes
                 and "merge_point" in chamber_routes
-                and "Geometry" in chamber
-                and pd.notna(chamber["Geometry"])
+                and "geometry" in chamber
+                and pd.notna(chamber["geometry"])
             ):
-                ch_geom = wkt.loads(chamber["Geometry"])
+                ch_geom = (
+                    wkt.loads(chamber["geometry"])
+                    if isinstance(chamber["geometry"], str)
+                    else chamber["geometry"]
+                )
                 centroid = ch_geom.centroid
                 route = LineString(
                     [
@@ -224,16 +247,18 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                 route_wkt = route.wkt
 
             c_obj = {
-                "id": int(chamber["Id"]),
-                "name": chamber["Name"],
-                "length": float(chamber["Length"])
-                if pd.notna(chamber["Length"])
+                "id": int(chamber["id"]),
+                "name": chamber["name"],
+                "dim_length": float(chamber["dim_length"])
+                if pd.notna(chamber.get("dim_length"))
                 else None,
-                "width": float(chamber["Width"])
-                if pd.notna(chamber["Width"])
+                "dim_width": float(chamber["dim_width"])
+                if pd.notna(chamber.get("dim_width"))
                 else None,
-                "geometry": chamber["Geometry"]
-                if "Geometry" in chamber and pd.notna(chamber["Geometry"])
+                "geometry": chamber["geometry"].wkt
+                if hasattr(chamber["geometry"], "wkt")
+                else chamber["geometry"]
+                if pd.notna(chamber["geometry"])
                 else None,
                 "route_geometry": route_wkt,
             }

@@ -97,8 +97,8 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
                         op_data["geometry"] = geom_val
 
                 # Operating times for this opening
-                if pd.notna(op.get("OperatingTimesId")):
-                    op_time_id = int(op["OperatingTimesId"])
+                if pd.notna(op.get("operating_times_id")):
+                    op_time_id = int(op["operating_times_id"])
                     if op_time_id in op_times_map:
                         op_data["operating_times"] = op_times_map[op_time_id]
 

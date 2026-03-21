@@ -258,13 +258,31 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         [maxdim_df, nav_df, speed_df, depth_df, type_df, tidal_df, fwc_df], axis=1
     )
 
+    # Map enrichment columns to canonical names early
+    from fis import utils
+
+    schema = utils.load_schema()
+    mappings = schema.get("attributes", {}).get("edges", {})
+
+    # Create mapping for enrichment columns (which have prefixes)
+    # This ensures dim_GeneralWidth -> dim_width, speed_Speed -> maxspeed, etc.
+    rename_map = {}
+    for col in enrichment.columns:
+        if col in mappings:
+            rename_map[col] = mappings[col]
+
+    if rename_map:
+        # If multiple source columns map to same canonical name, we might lose data
+        # but the schema expects unique canonical names.
+        enrichment = enrichment.rename(columns=rename_map)
+
     # Summary stats
     for prefix, desc in [
         ("dim_", "dimensions"),
         ("cemt_", "CEMT"),
-        ("speed_", "speed"),
+        ("maxspeed", "speed"),
         ("depth_", "depth"),
-        ("type_", "type"),
+        ("fairway_type", "type"),
         ("is_tidal", "tidal"),
         ("fwc_", "fairway_classification"),
     ]:
