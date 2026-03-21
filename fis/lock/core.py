@@ -33,10 +33,8 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
             return gdf
         if pq.exists():
             df = pd.read_parquet(pq)
-            print(f"DEBUG: Read {pq}, columns: {df.columns.tolist()}")
             # Standardize geometry column
             if "Geometry" in df.columns:
-                print(f"DEBUG: Found 'Geometry' in {stem}")
                 geoms = df["Geometry"].apply(
                     lambda x: wkt.loads(x) if isinstance(x, str) else x
                 )
@@ -46,7 +44,6 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
                     df = df.drop(columns=["geometry"])
                 return gpd.GeoDataFrame(df, geometry=geoms, crs="EPSG:4326")
             elif "geometry" in df.columns:
-                print(f"DEBUG: Found 'geometry' in {stem}")
                 # Standardize existing 'geometry' column (if it's WKT)
                 if df["geometry"].dtype == "object":
                     df["geometry"] = df["geometry"].apply(

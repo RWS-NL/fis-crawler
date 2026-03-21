@@ -123,28 +123,37 @@ def normalize_attributes(
         # Perform rename
         new_df = new_df.rename(columns=rename_map)
 
-        # 3. Enforce integer types for common ID columns to avoid float IDs (e.g. 123.0)
-        id_cols = [
-            "id",
-            "parent_id",
-            "fairway_id",
-            "section_id",
-            "start_junction_id",
-            "end_junction_id",
-        ]
+        # 3. Standardize common ID columns as STRINGS
+        # Load list from identifiers section in schema.toml
+        id_cols = schema.get("identifiers", {}).get("columns", [])
+
+        def stringify_id(val):
+            if pd.isna(val):
+                return None
+
+            # If it's already a string, check if it's a "float-string" like "123.0"
+            if isinstance(val, str):
+                try:
+                    # Attempt conversion to see if it's numeric
+                    f_val = float(val)
+                    if f_val.is_integer():
+                        return str(int(f_val))
+                    return str(f_val)
+                except ValueError:
+                    return val
+
+            # Handle numeric types (float, int, np.integer, etc.)
+            try:
+                f_val = float(val)
+                if np.isfinite(f_val) and f_val.is_integer():
+                    return str(int(f_val))
+                return str(val)
+            except (ValueError, TypeError):
+                return str(val)
+
         for col in id_cols:
             if col in new_df.columns:
-                try:
-                    # fillna(0) or similar might be dangerous if 0 is a valid ID,
-                    # but usually these shouldn't be NA if they are being used as IDs.
-                    # We use errors='ignore' to stay safe if it's truly non-numeric.
-                    new_df[col] = (
-                        pd.to_numeric(new_df[col], errors="coerce")
-                        .fillna(0)
-                        .astype(int)
-                    )
-                except Exception as e:
-                    logger.warning("Could not convert column %s to int: %s", col, e)
+                new_df[col] = new_df[col].apply(stringify_id)
 
         return new_df
 

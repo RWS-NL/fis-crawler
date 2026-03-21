@@ -99,7 +99,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                 fw_obj = fw_row.iloc[0]
                 fairway_data = {
                     "fairway_name": fw_obj["name"],
-                    "fairway_id": int(fw_obj["id"]),
+                    "fairway_id": fw_obj["id"],
                 }
                 # Delegate complexity to helper function
                 geom_data = process_fairway_geometry(fw_obj, lock)
@@ -165,11 +165,9 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                         s_attrs = sanitize_attrs(s_row)
                         s_attrs.update(
                             {
-                                "id": int(s_row["id"]),
+                                "id": s_row["id"],
                                 "name": s_row["name"],
-                                "fairway_id": int(s_row["fairway_id"])
-                                if pd.notna(s_row.get("fairway_id"))
-                                else None,
+                                "fairway_id": s_row.get("fairway_id"),
                                 "dim_length": float(s_row["length"])
                                 if pd.notna(s_row.get("length"))
                                 else None,
@@ -181,14 +179,14 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
         lock_attrs = sanitize_attrs(lock)
         complex_obj = {
             **lock_attrs,
-            "id": int(lock["id"]),
+            "id": lock["id"],
             "name": lock["name"],
             "isrs_code": lock_isrs_code,
             **ris_info,
             **fairway_data,
             "berths": berths_data,
             "sections": sections_data,
-            "locks": [{"id": int(lock["id"]), "name": lock["name"], "chambers": []}],
+            "locks": [{"id": lock["id"], "name": lock["name"], "chambers": []}],
         }
 
         # Add chambers
@@ -219,7 +217,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
             chamber_attrs = sanitize_attrs(chamber)
             chamber_attrs.update(
                 {
-                    "id": int(chamber["id"]),
+                    "id": chamber["id"],
                     "name": chamber["name"],
                     "dim_length": float(chamber["dim_length"])
                     if pd.notna(chamber.get("dim_length"))

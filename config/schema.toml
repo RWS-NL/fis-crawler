@@ -198,3 +198,28 @@ add_source_prefix = false  # If true, adds "fis_" or "euris_" prefix to all attr
 
 # Columns to track source
 source_column = "data_source"  # Values: "fis", "euris", "merged"
+
+# =============================================================================
+# Identifier Standardization
+# =============================================================================
+# Define columns that should be standardized as strings to avoid float/int 
+# inconsistencies and support complex spliced IDs.
+
+[identifiers]
+columns = [
+    "id",
+    "parent_id",
+    "fairway_id",
+    "section_id",
+    "start_junction_id",
+    "end_junction_id",
+    "isrs_id",
+    "code",
+    "operating_times_id",
+    "source_node",
+    "target_node",
+    "structure_id",
+    "constituent_ids"
+]
+target_type = "string"
+

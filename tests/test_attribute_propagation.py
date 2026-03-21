@@ -11,7 +11,10 @@ def test_normalize_attributes_preserves_unknown_columns():
     )
 
     # Using 'locks' section which only maps 'Id' -> 'id'
-    schema = {"attributes": {"locks": {"Id": "id"}}}
+    schema = {
+        "attributes": {"locks": {"Id": "id"}},
+        "identifiers": {"columns": ["id"]},
+    }
     normalized = utils.normalize_attributes(df, "locks", schema)
 
     assert "id" in normalized.columns
@@ -74,18 +77,18 @@ def test_group_complexes_preserves_extra_attributes():
 
     assert len(complexes) == 1
     c = complexes[0]
-    assert c["id"] == 1
+    assert c["id"] == "1"
     assert c["extra_lock_attr"] == "Extra"
 
     assert len(c["locks"][0]["chambers"]) == 1
     ch = c["locks"][0]["chambers"][0]
-    assert ch["id"] == 101
+    assert ch["id"] == "101"
     assert ch["extra_chamber_attr"] == "ChamberExtra"
     assert ch["dim_length"] == 100.0
 
 
-def test_normalize_attributes_enforces_int_ids():
-    """Should convert float IDs to integers."""
+def test_normalize_attributes_enforces_string_ids():
+    """Should convert float IDs to clean strings."""
     df = pd.DataFrame(
         {
             "Id": [1.0, 2.0],
@@ -93,11 +96,14 @@ def test_normalize_attributes_enforces_int_ids():
             "SomeOther": [1.5, 2.5],  # Should stay float
         }
     )
-    schema = {"attributes": {"locks": {"Id": "id", "ParentId": "parent_id"}}}
+    schema = {
+        "attributes": {"locks": {"Id": "id", "ParentId": "parent_id"}},
+        "identifiers": {"columns": ["id", "parent_id"]},
+    }
     normalized = utils.normalize_attributes(df, "locks", schema)
 
-    assert normalized["id"].dtype == "int64"
-    assert normalized["parent_id"].dtype == "int64"
-    assert normalized.iloc[0]["id"] == 1
-    assert normalized.iloc[0]["parent_id"] == 10
+    assert normalized["id"].dtype == "object"  # String type in pandas
+    assert normalized["parent_id"].dtype == "object"
+    assert normalized.iloc[0]["id"] == "1"
+    assert normalized.iloc[0]["parent_id"] == "10"
     assert normalized["some_other"].dtype == "float64"
