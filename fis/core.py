@@ -6,8 +6,8 @@ from shapely import wkt
 from shapely.geometry import Point, LineString
 from shapely.ops import unary_union
 
-from fis.utils import process_fairway_geometry, find_nearby_berths
-from fis.graph import find_fairway_junctions
+from fis.utils import process_fairway_geometry, find_nearby_berths, sanitize_attrs
+from fis.lock.core import find_fairway_junctions
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +190,8 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                     intersecting = sections_gdf[sections_gdf.intersects(complex_union)]
 
                     for _, s_row in intersecting.iterrows():
-                        sections_data.append(
+                        s_attrs = sanitize_attrs(s_row)
+                        s_attrs.update(
                             {
                                 "id": int(s_row["id"]),
                                 "name": s_row["name"],
@@ -200,20 +201,17 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                                 "dim_length": float(s_row["length"])
                                 if pd.notna(s_row.get("length"))
                                 else None,
-                                "geometry": s_row.geometry.wkt
-                                if hasattr(s_row, "geometry") and s_row.geometry
-                                else None,
                                 "relation": "overlap",
                             }
                         )
+                        sections_data.append(s_attrs)
 
+        lock_attrs = sanitize_attrs(lock)
         complex_obj = {
+            **lock_attrs,
             "id": int(lock["id"]),
             "name": lock["name"],
             "isrs_code": lock_isrs_code,
-            "geometry": lock.geometry.wkt
-            if hasattr(lock, "geometry") and lock.geometry
-            else None,
             **ris_info,
             **fairway_data,
             "berths": berths_data,
@@ -246,23 +244,21 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                 )
                 route_wkt = route.wkt
 
-            c_obj = {
-                "id": int(chamber["id"]),
-                "name": chamber["name"],
-                "dim_length": float(chamber["dim_length"])
-                if pd.notna(chamber.get("dim_length"))
-                else None,
-                "dim_width": float(chamber["dim_width"])
-                if pd.notna(chamber.get("dim_width"))
-                else None,
-                "geometry": chamber["geometry"].wkt
-                if hasattr(chamber["geometry"], "wkt")
-                else chamber["geometry"]
-                if pd.notna(chamber["geometry"])
-                else None,
-                "route_geometry": route_wkt,
-            }
-            complex_obj["locks"][0]["chambers"].append(c_obj)
+            chamber_attrs = sanitize_attrs(chamber)
+            chamber_attrs.update(
+                {
+                    "id": int(chamber["id"]),
+                    "name": chamber["name"],
+                    "dim_length": float(chamber["dim_length"])
+                    if pd.notna(chamber.get("dim_length"))
+                    else None,
+                    "dim_width": float(chamber["dim_width"])
+                    if pd.notna(chamber.get("dim_width"))
+                    else None,
+                    "route_geometry": route_wkt,
+                }
+            )
+            complex_obj["locks"][0]["chambers"].append(chamber_attrs)
 
         complexes.append(complex_obj)
 

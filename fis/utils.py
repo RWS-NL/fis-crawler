@@ -41,6 +41,47 @@ def camel_to_snake(name: str) -> str:
     return re.sub("([a-z0-0])([A-Z])", r"\1_\2", s1).lower()
 
 
+def to_python(obj):
+    """Recursively convert numpy/pandas types to plain Python for JSON serialization."""
+    if isinstance(obj, np.ndarray):
+        return [to_python(v) for v in obj.tolist()]
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, dict):
+        return {k: to_python(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [to_python(v) for v in obj]
+    return obj
+
+
+def sanitize_attrs(row_obj):
+    """Clean row values into pure Python JSON-serializable types, skipping geometry and nested objects."""
+    from shapely.geometry.base import BaseGeometry
+
+    attrs = {}
+    for k, v in row_obj.items():
+        if k == "geometry":
+            continue
+        if isinstance(v, (list, dict, np.ndarray)):
+            continue
+        if pd.isna(v):
+            attrs[k] = None
+        elif isinstance(v, BaseGeometry):
+            attrs[k] = v.wkt
+        elif hasattr(v, "isoformat"):
+            attrs[k] = v.isoformat()
+        else:
+            attrs[k] = to_python(v)
+    geom = row_obj.get("geometry")
+    if geom is not None:
+        attrs["geometry"] = geom.wkt if hasattr(geom, "wkt") else str(geom)
+    return attrs
+
+
 def normalize_attributes(
     df: pd.DataFrame, schema_section: str, schema: Dict[str, Any] = None
 ) -> pd.DataFrame:

@@ -1,4 +1,3 @@
-import logging
 from typing import List, Dict, Any
 
 import geopandas as gpd
@@ -6,20 +5,7 @@ import pandas as pd
 from shapely import wkt
 from tqdm import tqdm
 from fis import settings
-
-logger = logging.getLogger(__name__)
-
-
-def sanitize_attrs(obj):
-    """Sanitize pandas/geopandas objects to serializable dicts."""
-    if isinstance(obj, pd.Series):
-        obj = obj.to_dict()
-    res = {}
-    for k, v in obj.items():
-        if pd.isna(v) or k == "geometry" or k == "Geometry":
-            continue
-        res[k] = v
-    return res
+from fis.utils import sanitize_attrs
 
 
 def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
