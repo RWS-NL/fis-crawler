@@ -54,11 +54,13 @@ def build_berths_gdf(complexes) -> gpd.GeoDataFrame:
                 continue
             geom = wkt.loads(berth["geometry"])
             attrs = {
-                k: v
+                k: utils.stringify_id(v) if k.endswith("_id") or k == "id" else v
                 for k, v in berth.items()
                 if k not in _SKIP and not isinstance(v, (list, dict))
             }
-            rows.append({**attrs, "lock_id": c["id"], "geometry": geom})
+            rows.append(
+                {**attrs, "lock_id": utils.stringify_id(c["id"]), "geometry": geom}
+            )
     if not rows:
         return gpd.GeoDataFrame(columns=["id", "name", "lock_id", "geometry"], crs=CRS)
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=CRS)
@@ -92,6 +94,8 @@ def build_locks_gdf(complexes) -> gpd.GeoDataFrame:
                 continue
             if isinstance(v, (list, dict)):
                 attrs[k] = json.dumps(v)
+            elif k.endswith("_id") or k == "id":
+                attrs[k] = utils.stringify_id(v)
             else:
                 attrs[k] = v
         rows.append({**attrs, "geometry": geom})
@@ -112,14 +116,14 @@ def build_chambers_gdf(complexes) -> gpd.GeoDataFrame:
                     continue
                 geom = wkt.loads(geom_wkt)
                 attrs = {
-                    k: v
+                    k: utils.stringify_id(v) if k.endswith("_id") or k == "id" else v
                     for k, v in chamber.items()
                     if k not in _SKIP and not isinstance(v, (list, dict))
                 }
                 rows.append(
                     {
                         **attrs,
-                        "lock_id": c["id"],
+                        "lock_id": utils.stringify_id(c["id"]),
                         "lock_name": c.get("name"),
                         "geometry": geom,
                     }
@@ -144,16 +148,18 @@ def build_subchambers_gdf(complexes) -> gpd.GeoDataFrame:
                         continue
                     geom = wkt.loads(geom_wkt)
                     attrs = {
-                        k: v
+                        k: utils.stringify_id(v)
+                        if k.endswith("_id") or k == "id"
+                        else v
                         for k, v in sc.items()
                         if k not in _SKIP and not isinstance(v, (list, dict))
                     }
                     rows.append(
                         {
                             **attrs,
-                            "lock_id": c["id"],
+                            "lock_id": utils.stringify_id(c["id"]),
                             "lock_name": c.get("name"),
-                            "chamber_id": chamber["id"],
+                            "chamber_id": utils.stringify_id(chamber["id"]),
                             "chamber_name": chamber.get("name"),
                             "geometry": geom,
                         }

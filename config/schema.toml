@@ -219,6 +219,10 @@ columns = [
     "source_node",
     "target_node",
     "structure_id",
+    "lock_id",
+    "bridge_id",
+    "chamber_id",
+    "opening_id",
     "constituent_ids"
 ]
 target_type = "string"

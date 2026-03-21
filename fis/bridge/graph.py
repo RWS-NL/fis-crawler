@@ -50,7 +50,7 @@ def build_bridges_gdf(complexes) -> gpd.GeoDataFrame:
         geom = wkt.loads(c["geometry"])
 
         attrs = {
-            k: v
+            k: utils.stringify_id(v) if k.endswith("_id") or k == "id" else v
             for k, v in c.items()
             if k
             not in [
@@ -78,9 +78,10 @@ def build_openings_gdf(complexes) -> gpd.GeoDataFrame:
 
         openings = c.get("openings", [])
         if not openings:
+            bridge_id = utils.stringify_id(c["id"])
             openings = [
                 {
-                    "id": -int(c["id"]),
+                    "id": f"-{bridge_id}",
                     "width": None,
                     "height": None,
                     "geometry": c.get("geometry"),
@@ -88,18 +89,21 @@ def build_openings_gdf(complexes) -> gpd.GeoDataFrame:
             ]
 
         for op in openings:
+            op_id = utils.stringify_id(op["id"])
             assert "geometry" in op and op["geometry"], (
-                f"Bridge opening {op['id']} is missing a geometry."
+                f"Bridge opening {op_id} is missing a geometry."
             )
             op_geom = wkt.loads(op["geometry"])
             if not isinstance(op_geom, Point):
                 op_geom = op_geom.centroid
             attrs = {
-                k: v
+                k: utils.stringify_id(v) if k.endswith("_id") or k == "id" else v
                 for k, v in op.items()
                 if k not in ["geometry"] and not isinstance(v, (list, dict))
             }
-            rows.append({**attrs, "bridge_id": c["id"], "geometry": op_geom})
+            rows.append(
+                {**attrs, "bridge_id": utils.stringify_id(c["id"]), "geometry": op_geom}
+            )
 
     if not rows:
         return gpd.GeoDataFrame(columns=["id", "bridge_id", "geometry"], crs=CRS)
