@@ -25,8 +25,15 @@ def test_build_chamber_route_features():
 
     chamber = {"dim_length": 100, "dim_width": 12}
 
+    from fis import utils
+
+    lock_id = utils.stringify_id(c["id"])
+    fairway_id = utils.stringify_id(c.get("fairway_id"))
+
     features = _build_chamber_route_features(
         c,
+        lock_id,
+        fairway_id,
         chamber,
         chamber_id,
         chamber_node_start_id,

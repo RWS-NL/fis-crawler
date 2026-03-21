@@ -17,7 +17,7 @@ from fis.splicer import FairwaySplicer, StructureCut
 
 from fis.lock.graph import build_graph_features as lock_graph_features
 from fis.bridge.graph import build_graph_features as bridge_graph_features
-from fis import settings
+from fis import settings, utils
 
 logger = logging.getLogger(__name__)
 geod = Geod(ellps="WGS84")
@@ -234,12 +234,12 @@ def _map_dropins_to_sections(
     dropins_by_section = {}
     for lock in lock_complexes:
         for sec in lock.get("sections", []):
-            dropins_by_section.setdefault(sec["id"], []).append(
-                {"type": "lock", "obj": lock}
-            )
+            sid = utils.stringify_id(sec["id"])
+            dropins_by_section.setdefault(sid, []).append({"type": "lock", "obj": lock})
     for bridge in bridge_complexes:
         for sec in bridge.get("sections", []):
-            dropins_by_section.setdefault(sec["id"], []).append(
+            sid = utils.stringify_id(sec["id"])
+            dropins_by_section.setdefault(sid, []).append(
                 {"type": "bridge", "obj": bridge}
             )
     return dropins_by_section
@@ -283,7 +283,7 @@ def _splice_fairways(
         if not line_geom or line_geom.is_empty:
             continue
 
-        sid = sec["id"]
+        sid = utils.stringify_id(sec["id"])
         dropins_on_sec = dropins_by_section.get(sid, [])
 
         # Only skip embedded structures in detailed mode
@@ -332,15 +332,15 @@ def _prepare_sections_gdf(sections: pd.DataFrame) -> gpd.GeoDataFrame:
 
 
 def _handle_clear_section(all_features, sec):
-    sid = sec["id"]
-    fairway_id = sec.get("fairway_id")
+    sid = utils.stringify_id(sec["id"])
+    fairway_id = utils.stringify_id(sec.get("fairway_id"))
     name = sec.get("Name", sec.get("FairwayName"))
     start_junc = sec.get("StartJunctionId")
     end_junc = sec.get("EndJunctionId")
     line_geom = sec.geometry
 
-    source_id = str(int(start_junc)) if pd.notna(start_junc) else None
-    target_id = str(int(end_junc)) if pd.notna(end_junc) else None
+    source_id = utils.stringify_id(start_junc)
+    target_id = utils.stringify_id(end_junc)
 
     all_features.append(
         {
@@ -390,13 +390,13 @@ def _slice_section_with_dropins(
                 "type": "Feature",
                 "geometry": mapping(seg_4326),
                 "properties": {
-                    "id": f"fairway_segment_section_{sec['id']}_{i}",
+                    "id": f"fairway_segment_section_{utils.stringify_id(sec['id'])}_{i}",
                     "feature_type": "fairway_segment",
                     "segment_type": "clear"
                     if is_start_junc and is_end_junc
                     else "approach_or_exit",
-                    "section_id": sec["id"],
-                    "fairway_id": sec.get("fairway_id"),
+                    "section_id": utils.stringify_id(sec["id"]),
+                    "fairway_id": utils.stringify_id(sec.get("fairway_id")),
                     "name": sec.get("Name", sec.get("FairwayName")),
                     "source_node": source_node,
                     "target_node": target_node,
@@ -432,11 +432,12 @@ def _determine_source_node(
         A tuple of (node_id or None, is_start_of_fairway Boolean).
     """
     is_start = True
-    node = str(int(start_junc)) if pd.notna(start_junc) else None
+    node = utils.stringify_id(start_junc)
     if segment.source_structure_id:
         dtype, did = segment.source_structure_id.split("_")
+        did = utils.stringify_id(did)
         node = f"{dtype}_{did}_merge"
-        _assign_geom_wkt(dropins, dtype, int(did), "geometry_after_wkt", seg_4326.wkt)
+        _assign_geom_wkt(dropins, dtype, did, "geometry_after_wkt", seg_4326.wkt)
         is_start = False
     return node, is_start
 
@@ -459,11 +460,12 @@ def _determine_target_node(
         A tuple of (node_id or None, is_end_of_fairway Boolean).
     """
     is_end = True
-    node = str(int(end_junc)) if pd.notna(end_junc) else None
+    node = utils.stringify_id(end_junc)
     if segment.target_structure_id:
         dtype, did = segment.target_structure_id.split("_")
+        did = utils.stringify_id(did)
         node = f"{dtype}_{did}_split"
-        _assign_geom_wkt(dropins, dtype, int(did), "geometry_before_wkt", seg_4326.wkt)
+        _assign_geom_wkt(dropins, dtype, did, "geometry_before_wkt", seg_4326.wkt)
         is_end = False
     return node, is_end
 
@@ -532,36 +534,42 @@ def _generate_structure_cuts(
 
 def _yield_junction_nodes(all_features, line, is_start, is_end, start_junc, end_junc):
     if is_start and pd.notna(start_junc):
+        node_id = utils.stringify_id(start_junc)
         all_features.append(
             {
                 "type": "Feature",
                 "geometry": mapping(Point(line.coords[0])),
                 "properties": {
-                    "id": str(int(start_junc)),
+                    "id": node_id,
                     "feature_type": "node",
                     "node_type": "junction",
-                    "node_id": str(int(start_junc)),
+                    "node_id": node_id,
                 },
             }
         )
     if is_end and pd.notna(end_junc):
+        node_id = utils.stringify_id(end_junc)
         all_features.append(
             {
                 "type": "Feature",
                 "geometry": mapping(Point(line.coords[-1])),
                 "properties": {
-                    "id": str(int(end_junc)),
+                    "id": node_id,
                     "feature_type": "node",
                     "node_type": "junction",
-                    "node_id": str(int(end_junc)),
+                    "node_id": node_id,
                 },
             }
         )
 
 
 def _assign_geom_wkt(dropins_list, dtype, did, key, wkt_str):
+    did_str = utils.stringify_id(did)
     for dropin in dropins_list:
-        if dropin["type"] == dtype and int(dropin["obj"]["id"]) == did:
+        if (
+            dropin["type"] == dtype
+            and utils.stringify_id(dropin["obj"]["id"]) == did_str
+        ):
             dropin["obj"][key] = wkt_str
             break
 
@@ -896,10 +904,8 @@ def _export_dataframes(
             gdf = gdf.copy()
             for col in id_cols:
                 if col in gdf.columns:
-                    # We use the same stringify logic if available,
-                    # but simple astype(str) is usually enough here as
-                    # normalization should have already happened.
-                    gdf[col] = gdf[col].astype(str)
+                    # We use the same stringify logic if available
+                    gdf[col] = gdf[col].apply(utils.stringify_id)
 
             gdf.to_parquet(output_dir / f"{name}.geoparquet")
             gdf.to_file(output_dir / f"{name}.geojson", driver="GeoJSON")
@@ -911,7 +917,7 @@ def _generate_simplified_passages(
 ) -> List[Dict]:
     features = []
     for comp in complexes:
-        cid = comp["id"]
+        cid = utils.stringify_id(comp["id"])
         bwkt = comp.get("geometry_before_wkt")
         awkt = comp.get("geometry_after_wkt")
 

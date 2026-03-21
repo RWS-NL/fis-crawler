@@ -166,8 +166,8 @@ def test_berths_gdf_columns():
 
 def test_berths_gdf_values():
     gdf = build_berths_gdf(COMPLEXES)
-    assert gdf.iloc[0]["id"] == 99
-    assert gdf.iloc[0]["lock_id"] == 1
+    assert gdf.iloc[0]["id"] == "99"
+    assert gdf.iloc[0]["lock_id"] == "1"
     assert gdf.iloc[0]["relation"] == "before"
 
 
@@ -227,9 +227,9 @@ def test_subchambers_gdf_columns():
 
 def test_subchambers_gdf_values():
     gdf = build_subchambers_gdf(COMPLEXES)
-    assert gdf.iloc[0]["id"] == 77
-    assert gdf.iloc[0]["chamber_id"] == 55
-    assert gdf.iloc[0]["lock_id"] == 1
+    assert gdf.iloc[0]["id"] == "77"
+    assert gdf.iloc[0]["chamber_id"] == "55"
+    assert gdf.iloc[0]["lock_id"] == "1"
 
 
 # ---------------------------------------------------------------------------

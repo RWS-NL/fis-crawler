@@ -84,6 +84,7 @@ Used to associate distinct data sources (FIS records vs. DISK geometries) and co
 
 The network graph uses a harmonized schema based on the **EURIS** naming conventions. Attribute mapping and naming consistency are controlled via:
 - **`config/schema.toml`**: Defines the source-to-canonical mapping for edge and node attributes (e.g., mapping FIS `speed_MaxSpeedUp` to `maxspeed_up`). This is part of an ongoing audit to standardize naming across all modules ([Issue #83](https://github.com/RWS-NL/fis-crawler/issues/83)).
+- **Identifier Standardization**: All identifier columns (e.g., `id`, `section_id`, `node_id`) are automatically converted to **strings** to prevent float/integer ambiguity and ensure consistent null handling across data sources. See [NAMING_CONVENTIONS.md](NAMING_CONVENTIONS.md#special-case-identifiers-ids) for details.
 - **Validation**: The `fis.cli graph validate` command checks generated graphs for schema compliance and attribute completeness.
 
 ### Standard Edge Attributes

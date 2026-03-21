@@ -37,11 +37,28 @@ In accordance with GIS standards, the project standardizes on a lowercase **`geo
 
 ### Special Case: Identifiers (IDs)
 To support the mix of numeric FIS IDs, country-prefixed EURIS IDs, and complex spliced IDs (e.g., `123_split`), the project standardizes on **strings** for all identifier columns.
-- **Columns:** `id`, `parent_id`, `fairway_id`, `section_id`, `start_junction_id`, `end_junction_id`, `isrs_id`, `code`, `operating_times_id`.
-- **Normalization:** `utils.normalize_attributes` automatically converts these columns to strings. 
-- **Native Strings:** Identifiers that are strings from the start (e.g., ISRS codes like `NLAMS00001...`) are preserved as-is.
-- **Integer Handling:** Purely numeric IDs are converted to "clean" strings (e.g., `123.0` or `123` both become `"123"`) to avoid float inconsistencies and `.0` suffixes.
-- **Strictness:** Internal logic should treat IDs as strings. Avoid wrapping IDs in `int()` calls unless performing specific numeric calculations.
+
+#### Why we do this
+- **Float Ambiguity:** Pandas often reads numeric columns as floats if they contain nulls. This leads to IDs like `123.0`, which cause lookup failures when compared against the integer `123`.
+- **Consistency:** Standardizing on strings ensures that a section ID from a CSV, a lock ID from a Parquet file, and a spliced node ID like `lock_123_split` can all be handled by the same logic.
+- **Nullable IDs:** Numeric columns in Pandas are traditionally non-nullable unless using specific extension types. String columns handle `None` and `NaN` consistently.
+
+#### When and Where it happens
+1. **Early Normalization:** `utils.normalize_attributes` automatically converts all columns listed in the `[identifiers]` section of `config/schema.toml` to strings immediately after loading.
+2. **Graph Construction:** When building internal graph features (in `fis/lock/graph.py` and `fis/bridge/graph.py`), all generated node and edge IDs are passed through `utils.stringify_id`.
+3. **Data Export:** The `_export_dataframes` function in `fis/dropins/core.py` ensures all ID columns are stringified before writing to Parquet/GeoJSON to prevent schema mismatches in downstream tools.
+
+#### How it is implemented
+We use `utils.stringify_id(val)` which:
+- Returns `None` for any `NaN` or null value (avoiding the `"nan"` string).
+- Strips trailing `.0` from float-like IDs (e.g., `123.0` -> `"123"`).
+- Preserves existing string identifiers (like ISRS codes) as-is.
+
+#### Usage Guidelines
+- **Strictness:** Internal logic should treat IDs as strings. Avoid wrapping IDs in `int()` calls.
+- **Comparison:** Always use `utils.stringify_id` when comparing an external ID against an internal one to ensure a "clean" match.
+- **Graph Building:** When adding nodes or edges to a NetworkX graph, ensure the identifiers are strings.
+
 
 ## 3. Implementation Strategy: "Normalize Early"
 To maintain consistency, we normalize data immediately after loading from raw sources (Parquet/GeoParquet).
