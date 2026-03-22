@@ -23,11 +23,24 @@ def timer(func: Callable) -> Callable:
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start_time = time.perf_counter()
-        result = func(*args, **kwargs)
-        end_time = time.perf_counter()
-        duration = end_time - start_time
-        logger.info("Function '%s' executed in %.4f seconds", func.__name__, duration)
-        return result
+        exc_raised = False
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except Exception:
+            exc_raised = True
+            raise
+        finally:
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            if exc_raised:
+                logger.exception(
+                    "Function '%s' failed after %.4f seconds", func.__name__, duration
+                )
+            else:
+                logger.info(
+                    "Function '%s' executed in %.4f seconds", func.__name__, duration
+                )
 
     return wrapper
 

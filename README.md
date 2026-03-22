@@ -168,9 +168,11 @@ fis/
 ├── bridge/         # Bridge schematization and graph features
 ├── dropins/        # Integrated drop-ins (locks, bridges, terminals, berths)
 │   ├── core.py     # Coordination logic
-│   ├── graph.py    # Graph feature generation
+│   ├── graph.py    # Shared graph feature generation
 │   ├── embedded.py # Embedded structure matching
 │   ├── splicing.py # Fairway segment splicing
+│   ├── terminals.py # Terminal-specific features
+│   ├── berths.py    # Berth-specific features
 │   └── io.py       # Data loading and export
 ├── graph/          # Core network graph building (FIS, EURIS, Merge)
 ├── lock/           # Detailed lock schematization
