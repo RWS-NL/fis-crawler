@@ -122,7 +122,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: .
+          path: output/fis-export/
+      - name: Debug - List Files
+        run: ls -R output/
       - name: Build FIS Graph
         run: uv run python -m fis.cli graph fis
       - name: Enrich FIS Graph
@@ -161,7 +163,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: euris-export
-          path: .
+          path: output/euris-export/
       - name: Build EURIS Graph
         run: uv run python -m fis.cli graph euris
       - name: Enrich EURIS Graph
@@ -200,12 +202,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-enriched
-          path: .
+          path: output/fis-enriched/
       - name: Download EURIS Enriched
         uses: actions/download-artifact@v4
         with:
           name: euris-enriched
-          path: .
+          path: output/euris-enriched/
+      - name: Debug - List Files
+        run: ls -R output/
       - name: Merge Graphs
         run: uv run python -m fis.cli graph merge
       - name: Upload Merged Graph
@@ -236,17 +240,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: .
+          path: output/fis-export/
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: .
+          path: output/disk-export/
       - name: Download FIS Graph
         uses: actions/download-artifact@v4
         with:
           name: fis-graph
-          path: .
+          path: output/fis-graph/
+      - name: Debug - List Files
+        run: ls -R output/
       - name: Run Lock Schematization
         run: uv run python -m fis.cli lock schematize --fis-graph output/fis-graph/graph.pickle
       - name: Upload Lock Artifacts
@@ -277,12 +283,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: .
+          path: output/fis-export/
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: .
+          path: output/disk-export/
+      - name: Debug - List Files
+        run: ls -R output/
       - name: Run Bridge Schematization
         run: uv run python -m fis.cli bridge schematize
       - name: Upload Bridge Artifacts
@@ -313,12 +321,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: .
+          path: output/fis-export/
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: .
+          path: output/disk-export/
+      - name: Debug - List Files
+        run: ls -R output/
       - name: Run Integrated Dropins Schematization (Simplified)
         run: uv run python -m fis.cli dropins schematize --mode simplified --output-dir output/dropins-schematization-simplified
       - name: Upload Dropins Simplified Artifacts
@@ -349,12 +359,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: .
+          path: output/fis-export/
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: .
+          path: output/disk-export/
+      - name: Debug - List Files
+        run: ls -R output/
       - name: Run Integrated Dropins Schematization (Detailed)
         run: uv run python -m fis.cli dropins schematize --mode detailed --output-dir output/dropins-schematization-detailed
       - name: Upload Dropins Detailed Artifacts
@@ -385,12 +397,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: .
+          path: output/fis-export/
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: .
+          path: output/disk-export/
+      - name: Debug - List Files
+        run: ls -R output/
       - name: Run Integrated Dropins Schematization with Berths
         run: >
           uv run python -m fis.cli dropins schematize
@@ -424,7 +438,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-enriched
-          path: .
+          path: output/fis-enriched/
+      - name: Debug - List Files
+        run: ls -R output/
       - name: Generate FIS Validation Report
         run: >
           uv run python -m fis.cli graph validate
@@ -459,7 +475,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: merged-graph
-          path: .
+          path: output/merged-graph/
+      - name: Debug - List Files
+        run: ls -R output/
       - name: Generate Merged Validation Report
         run: >
           uv run python -m fis.cli graph validate
