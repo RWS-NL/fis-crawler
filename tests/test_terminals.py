@@ -6,7 +6,7 @@ from fis.dropins.core import (
     _map_dropins_to_sections,
 )
 from fis.dropins.splicing import splice_fairways
-from fis.dropins.graph import generate_terminal_graph_features
+from fis.dropins.terminals import generate_terminal_graph_features
 
 
 @pytest.fixture

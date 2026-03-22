@@ -5,11 +5,9 @@ from typing import List, Dict, Any
 from fis.dropins.io import load_and_group_dropins, export_graph
 from fis.dropins.embedded import identify_embedded_structures, inject_embedded_bridges
 from fis.dropins.splicing import splice_fairways
-from fis.dropins.graph import (
-    generate_terminal_graph_features,
-    generate_berth_graph_features,
-    generate_simplified_passages,
-)
+from fis.dropins.graph import generate_simplified_passages
+from fis.dropins.terminals import generate_terminal_graph_features
+from fis.dropins.berths import generate_berth_graph_features
 from fis.lock.graph import build_graph_features as lock_graph_features
 from fis.bridge.graph import build_graph_features as bridge_graph_features
 from fis import utils
@@ -17,6 +15,7 @@ from fis import utils
 logger = logging.getLogger(__name__)
 
 
+@utils.timer
 def build_integrated_dropins_graph(
     export_dir: pathlib.Path,
     disk_dir: pathlib.Path,
@@ -26,6 +25,7 @@ def build_integrated_dropins_graph(
     include_berths=False,
 ):
     """Main orchestrator to build the completely integrated Drop-ins graph."""
+
     (
         lock_complexes,
         bridge_complexes,
@@ -52,13 +52,9 @@ def build_integrated_dropins_graph(
 
     detailed_bridges = []
     simplified_bridges = []
-    embedded_ids = set(embedded_bridges.keys())
     for b in bridge_complexes:
-        # A bridge is embedded if any of its openings are in embedded_bridges
-        is_embedded = any(
-            str(op.get("id")) in embedded_ids for op in b.get("openings", [])
-        )
-        if mode == "detailed" and is_embedded:
+        # A bridge is detailed if mode is 'detailed' (regardless of embedding)
+        if mode == "detailed":
             detailed_bridges.append(b)
         else:
             simplified_bridges.append(b)

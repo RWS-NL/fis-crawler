@@ -152,6 +152,8 @@ uv run scrapy crawl euris -L INFO
 
 - [Graph Pipeline](fis/graph/README.md) - Network graph building and enrichment
 - [Lock Schematization](fis/lock/README.md) - Detailed lock feature generation
+- [Bridge Schematization](fis/bridge/README.md) - Bridge feature generation
+- [Integrated Drop-ins](fis/dropins/README.md) - Global integration of all structures
 
 ## Notebooks
 
@@ -159,18 +161,29 @@ Analysis notebooks in `notebooks/`:
 - Network analysis (`network.ipynb`)
 - EURIS data processing (`euris/*.ipynb`)
 - Data visualization and exploration
-
 ## Project Structure
 
 ```
 fis/
+├── bridge/         # Bridge schematization and graph features
+├── dropins/        # Integrated drop-ins (locks, bridges, terminals, berths)
+│   ├── core.py     # Coordination logic
+│   ├── graph.py    # Shared graph feature generation
+│   ├── embedded.py # Embedded structure matching
+│   ├── splicing.py # Fairway segment splicing
+│   ├── terminals.py # Terminal-specific features
+│   ├── berths.py    # Berth-specific features
+│   └── io.py       # Data loading and export
+├── graph/          # Core network graph building (FIS, EURIS, Merge)
+├── lock/           # Detailed lock schematization
+├── spiders/        # Scrapy crawlers (FIS, EURIS, DISK)
+├── splicer/        # General fairway splicing utilities
 ├── cli.py          # Main CLI entry point
-├── graph/          # Graph pipeline module
-├── lock/           # Lock schematization module
-├── spiders/        # Scrapy crawlers
-├── pipelines.py    # Data export pipelines
-└── settings.py     # Scrapy settings
+├── ris_index.py    # RIS Index mapping utilities
+├── utils.py        # Shared helper functions
+└── settings.py     # Scrapy configuration
 ```
+
 
 ## Testing
 

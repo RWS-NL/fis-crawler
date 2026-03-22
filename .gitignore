@@ -24,9 +24,6 @@ notebooks/data/*.geojson
 # merge conflicts
 *.orig
 
-# I don't like uv.lock in the repository
-uv.lock
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

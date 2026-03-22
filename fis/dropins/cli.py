@@ -39,7 +39,7 @@ def dropins_cli():
     "--mode",
     type=click.Choice(["detailed", "simplified"]),
     default="detailed",
-    help="Level of detail for the schematization. 'detailed' (default) preserves lock-associated subgraphs; 'simplified' represents all bridges and locks as single edges.",
+    help="Level of detail for the schematization. 'detailed' (default) preserves all structure-associated subgraphs; 'simplified' represents all bridges and locks as single edges.",
 )
 @click.option(
     "--include-berths/--no-berths",

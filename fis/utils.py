@@ -1,7 +1,9 @@
 import logging
 import pathlib
 import tomllib
-from typing import Dict, Any
+import time
+import functools
+from typing import Dict, Any, Callable
 
 import pandas as pd
 import numpy as np
@@ -13,6 +15,34 @@ from pyproj import Geod
 from fis import settings
 
 logger = logging.getLogger(__name__)
+
+
+def timer(func: Callable) -> Callable:
+    """Decorator to log the execution time of a function."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+        exc_raised = False
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except Exception:
+            exc_raised = True
+            raise
+        finally:
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            if exc_raised:
+                logger.exception(
+                    "Function '%s' failed after %.4f seconds", func.__name__, duration
+                )
+            else:
+                logger.info(
+                    "Function '%s' executed in %.4f seconds", func.__name__, duration
+                )
+
+    return wrapper
 
 
 def load_schema(

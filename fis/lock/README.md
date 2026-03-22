@@ -9,7 +9,7 @@ the corresponding fairway stretch in the routing network (FIS, EURIS, or merged)
 ## Use Cases
 
 ### Route Assignment (Traffic Modelling)
-Only the coarse structure is needed: a `before` edge, one edge per chamber, and an `after` edge,
+Only the simplified structure is needed: a `before` edge, one edge per chamber, and an `after` edge,
 together with their connecting nodes. The edge weight (delay) represents average lock processing time.
 Suitable for models such as **BIVAS** and **OpenTNSim**.
 

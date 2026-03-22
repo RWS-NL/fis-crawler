@@ -5,12 +5,12 @@ from typing import List, Dict, Tuple
 
 import pandas as pd
 import geopandas as gpd
-from shapely import wkt
-from shapely.geometry import shape
 
 from fis.lock.core import load_data as lock_load_data, group_complexes as group_locks
 from fis.bridge.core import group_bridge_complexes as group_bridges
 from fis import utils
+from fis.dropins.terminals import build_terminals_gdf
+from fis.dropins.berths import build_berths_gdf
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +156,8 @@ def export_graph(
 
 
 def _separate_features(all_features: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    from shapely.geometry import shape
+
     nodes_rows, edges_rows = [], []
     seen_nodes = set()
     for f in all_features:
@@ -216,8 +218,8 @@ def _export_dataframes(
         "lock_berths": build_lock_berths_gdf(lock_complexes),
         "bridges": build_bridges_gdf(bridge_complexes),
         "openings": build_openings_gdf(bridge_complexes),
-        "terminals": _build_terminals_gdf(terminals),
-        "berths": _build_berths_gdf(berths),
+        "terminals": build_terminals_gdf(terminals),
+        "berths": build_berths_gdf(berths),
     }
 
     schema = utils.load_schema()
@@ -233,35 +235,3 @@ def _export_dataframes(
             gdf.to_parquet(output_dir / f"{name}.geoparquet")
             gdf.to_file(output_dir / f"{name}.geojson", driver="GeoJSON")
             logger.info("Exported %s with %d rows", name, len(gdf))
-
-
-def _build_terminals_gdf(terminals: List[Dict]) -> gpd.GeoDataFrame:
-    """Builds a GeoDataFrame of terminals from the source dicts."""
-    if not terminals:
-        return None
-    rows = []
-    for term in terminals:
-        row = term.copy()
-        geom_wkt = row.get("geometry")
-        if geom_wkt:
-            row["geometry"] = (
-                wkt.loads(geom_wkt) if isinstance(geom_wkt, str) else geom_wkt
-            )
-        rows.append(row)
-    return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")
-
-
-def _build_berths_gdf(berths: List[Dict]) -> gpd.GeoDataFrame:
-    """Builds a GeoDataFrame of berths from the source dicts."""
-    if not berths:
-        return None
-    rows = []
-    for berth in berths:
-        row = berth.copy()
-        geom_wkt = row.get("geometry")
-        if geom_wkt:
-            row["geometry"] = (
-                wkt.loads(geom_wkt) if isinstance(geom_wkt, str) else geom_wkt
-            )
-        rows.append(row)
-    return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")
