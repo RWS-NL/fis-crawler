@@ -205,7 +205,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: merged-graph
-          path: output/merged-graph/
+          path: output/
+          include-hidden-files: true
           retention-days: 30
 
   schematize-lock:
@@ -246,7 +247,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lock-schematization
-          path: output/lock-schematization/
+          path: output/
+          include-hidden-files: true
           retention-days: 30
 
   schematize-bridge:
@@ -282,7 +284,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bridge-schematization
-          path: output/bridge-schematization/
+          path: output/
+          include-hidden-files: true
           retention-days: 30
 
   schematize-dropins-simplified:
@@ -318,7 +321,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integrated-schematization-simplified
-          path: output/dropins-schematization-simplified/
+          path: output/
+          include-hidden-files: true
           retention-days: 30
 
   schematize-dropins-detailed:
@@ -354,7 +358,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integrated-schematization-detailed
-          path: output/dropins-schematization-detailed/
+          path: output/
+          include-hidden-files: true
           retention-days: 30
 
   schematize-dropins-berths:
@@ -393,7 +398,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integrated-schematization-with-berths
-          path: output/integrated-schematization-with-berths/
+          path: output/
+          include-hidden-files: true
           retention-days: 30
 
   validate-fis:
