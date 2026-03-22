@@ -1,7 +1,7 @@
 import geopandas as gpd
 from shapely.geometry import Point
 from unittest.mock import patch
-from fis.dropins.core import _identify_embedded_structures
+from fis.dropins.embedded import identify_embedded_structures
 
 
 @patch("fis.lock.graph.build_chambers_gdf")
@@ -33,7 +33,7 @@ def test_identify_embedded_structures_one_to_one(
     mock_build_openings.return_value = openings_gdf
 
     # We need to mock the CRS transformation or just use the same CRS
-    # _identify_embedded_structures uses settings.PROJECTED_CRS
+    # identify_embedded_structures uses settings.PROJECTED_CRS
     from fis import settings
 
     chambers_gdf = chambers_gdf.to_crs(settings.PROJECTED_CRS)
@@ -41,7 +41,7 @@ def test_identify_embedded_structures_one_to_one(
     mock_build_chambers.return_value = chambers_gdf
     mock_build_openings.return_value = openings_gdf
 
-    matches = _identify_embedded_structures([], [])
+    matches = identify_embedded_structures([], [])
 
     # Should only have one match for ch1
     # Since op1 is closer, it should win
@@ -86,7 +86,7 @@ def test_identify_embedded_structures_global_greedy(
     mock_build_chambers.return_value = chambers_gdf.to_crs(settings.PROJECTED_CRS)
     mock_build_openings.return_value = openings_gdf.to_crs(settings.PROJECTED_CRS)
 
-    matches = _identify_embedded_structures([], [])
+    matches = identify_embedded_structures([], [])
 
     # op2 is closest to ch1 (dist 5). op1 is then forced to match with ch2 (dist 90)
     # OR if op1 matched ch1 (dist 10), op2 would have nothing.
@@ -127,7 +127,7 @@ def test_identify_embedded_structures_score_wins(
     mock_build_chambers.return_value = chambers_gdf.to_crs(settings.PROJECTED_CRS)
     mock_build_openings.return_value = openings_gdf.to_crs(settings.PROJECTED_CRS)
 
-    matches = _identify_embedded_structures([], [])
+    matches = identify_embedded_structures([], [])
 
     # 'oost' match gives +10 score.
     # Dist 10 to West gives score 5 - 10/100 = 4.9. Total 4.9.
