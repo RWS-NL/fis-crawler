@@ -7,6 +7,9 @@ on:
     - cron: '0 0 * * 0' # Weekly run on Sunday midnight
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   crawl-fis:
     runs-on: ubuntu-latest
@@ -18,7 +21,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -48,7 +51,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -78,7 +81,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -108,7 +111,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -143,7 +146,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -178,7 +181,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -214,7 +217,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -255,7 +258,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -291,7 +294,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -327,7 +330,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -363,7 +366,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -402,7 +405,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -437,7 +440,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
