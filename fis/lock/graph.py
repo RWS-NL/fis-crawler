@@ -477,41 +477,54 @@ def _find_best_section_id(line, sections):
     if not sections:
         return None
 
-    best_sid = None
-    max_overlap = -1.0
-
-    # 1. Try intersection length
+    # 1. Pre-parse geometries once
+    parsed_sections = []
     for s in sections:
         s_geom_wkt = s.get("geometry")
         if not s_geom_wkt:
             continue
         s_geom = wkt.loads(s_geom_wkt) if isinstance(s_geom_wkt, str) else s_geom_wkt
+        if s_geom:
+            parsed_sections.append((utils.stringify_id(s.get("id")), s_geom))
 
-        if s_geom and line.intersects(s_geom):
-            overlap = line.intersection(s_geom).length
-            if overlap > max_overlap:
-                max_overlap = overlap
-                best_sid = utils.stringify_id(s.get("id"))
+    if not parsed_sections:
+        return None
 
-    # 2. Fallback to nearest if no intersection
+    best_sid = None
+    max_overlap = -1.0
+
+    # 2. Try intersection length (in meters)
+    for sid, s_geom in parsed_sections:
+        if line.intersects(s_geom):
+            intersection = line.intersection(s_geom)
+            if not intersection.is_empty:
+                # Handle geometries that can return length (LineString/MultiLineString)
+                overlap = 0.0
+                if intersection.geom_type in ("LineString", "MultiLineString"):
+                    overlap = geod.geometry_length(intersection)
+                elif intersection.geom_type == "GeometryCollection":
+                    for part in intersection.geoms:
+                        if part.geom_type in ("LineString", "MultiLineString"):
+                            overlap += geod.geometry_length(part)
+
+                # Ignore point touches (overlap == 0) for the primary selection
+                if overlap > 1e-3 and overlap > max_overlap:
+                    max_overlap = overlap
+                    best_sid = sid
+
+    # 3. Fallback to proximity (using midpoint for robustness) if no significant overlap
     if best_sid is None:
+        midpoint = line.interpolate(0.5, normalized=True)
         min_dist = float("inf")
-        for s in sections:
-            s_geom_wkt = s.get("geometry")
-            if not s_geom_wkt:
-                continue
-            s_geom = (
-                wkt.loads(s_geom_wkt) if isinstance(s_geom_wkt, str) else s_geom_wkt
-            )
-            if s_geom:
-                dist = line.distance(s_geom)
-                if dist < min_dist:
-                    min_dist = dist
-                    best_sid = utils.stringify_id(s.get("id"))
+        for sid, s_geom in parsed_sections:
+            dist = midpoint.distance(s_geom)
+            if dist < min_dist:
+                min_dist = dist
+                best_sid = sid
 
-    # 3. Final fallback to the first section
-    if best_sid is None and sections:
-        best_sid = utils.stringify_id(sections[0].get("id"))
+    # 4. Final fallback to the first valid section
+    if best_sid is None:
+        best_sid = parsed_sections[0][0]
 
     return best_sid
 

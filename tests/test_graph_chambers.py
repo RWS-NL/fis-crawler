@@ -170,3 +170,122 @@ def test_lock_overlapping_multiple_sections():
 
     # Route segment should also be assigned to one of the overlapping sections
     assert route["properties"]["section_id"] in ("21084", "7849")
+
+
+def test_lock_section_fallback_proximity():
+    """
+    Verify that the midpoint-distance fallback is used when no sections
+    have a significant overlap (>1mm) with the segment.
+    """
+    from shapely.geometry import LineString, Polygon
+    from fis.lock.graph import build_graph_features
+
+    # Lock from x=0 to x=100
+    # Fairway is at y=0.
+    # We place two sections offset slightly in Y so they don't intersect,
+    # but "sec2" is closer to the midpoint (x=10, y=0) of the approach.
+    c = {
+        "id": "51064",
+        "geometry": Polygon([(0, -10), (100, -10), (100, 10), (0, 10), (0, -10)]).wkt,
+        "geometry_before_wkt": LineString([(-50, 0), (0, 0)]).wkt,
+        "geometry_after_wkt": LineString([(100, 0), (150, 0)]).wkt,
+        "fairway_id": "fw1",
+        "sections": [
+            {
+                "id": "sec1",
+                "geometry": LineString([(-10, 5), (110, 5)]).wkt,  # 5m away
+                "relation": "overlap",
+            },
+            {
+                "id": "sec2",
+                "geometry": LineString([(-10, 1), (110, 1)]).wkt,  # Only 1m away
+                "relation": "overlap",
+            },
+        ],
+        "locks": [
+            {
+                "id": "lock1",
+                "chambers": [
+                    {
+                        "id": "24969",
+                        "geometry": Polygon(
+                            [(20, -5), (80, -5), (80, 5), (20, 5), (20, -5)]
+                        ).wkt,
+                        "dim_length": 60,
+                        "dim_width": 10,
+                    }
+                ],
+            }
+        ],
+    }
+
+    features = build_graph_features([c])
+
+    # No section intersects the approach segment.
+    # The midpoint of approach should pick "sec2" (the closer one).
+    approach = next(
+        f
+        for f in features
+        if f.get("properties", {}).get("segment_type") == "chamber_approach"
+    )
+    assert approach["properties"]["section_id"] == "sec2"
+
+
+def test_lock_section_point_touch_ignored():
+    """
+    Verify that if one section touches only at a point (length 0),
+    and another section is closer to the midpoint, the midpoint selection wins.
+    """
+    from shapely.geometry import LineString, Polygon
+    from fis.lock.graph import build_graph_features
+
+    # Lock split point at (0,0).
+    # Approach segment from (0,0) to (10,0).
+    # sec1 touches at (0,0) exactly.
+    # sec2 is offset by 1m but covers the length.
+    c = {
+        "id": "51064",
+        "geometry": Polygon([(0, -10), (100, -10), (100, 10), (0, 10), (0, -10)]).wkt,
+        "geometry_before_wkt": LineString([(-50, 0), (0, 0)]).wkt,
+        "geometry_after_wkt": LineString([(100, 0), (150, 0)]).wkt,
+        "fairway_id": "fw1",
+        "sections": [
+            {
+                "id": "sec1",
+                "geometry": LineString([(-50, 0), (0, 0)]).wkt,  # Touches at (0,0)
+                "relation": "overlap",
+            },
+            {
+                "id": "sec2",
+                "geometry": LineString([(0, 1), (100, 1)]).wkt,  # Near midpoint
+                "relation": "overlap",
+            },
+        ],
+        "locks": [
+            {
+                "id": "lock1",
+                "chambers": [
+                    {
+                        "id": "24969",
+                        "geometry": Polygon(
+                            [(20, -5), (80, -5), (80, 5), (20, 5), (20, -5)]
+                        ).wkt,
+                        "dim_length": 60,
+                        "dim_width": 10,
+                    }
+                ],
+            }
+        ],
+    }
+
+    features = build_graph_features([c])
+
+    # The approach segment from (0,0) to door_start.
+    # It point-touches sec1 at (0,0). Intersection is a Point, length 0.
+    # It should pick sec2 because sec2 is closer to the midpoint (5,0) than sec1.
+    approach = next(
+        f
+        for f in features
+        if f.get("properties", {}).get("segment_type") == "chamber_approach"
+    )
+    assert approach["properties"]["section_id"] == "sec2"
