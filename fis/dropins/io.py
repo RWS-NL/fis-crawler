@@ -85,7 +85,7 @@ def load_and_group_dropins(
         for _, row in data["terminals"].iterrows():
             term_dict = row.to_dict()
             if "Id" in term_dict:
-                term_dict["id"] = term_dict["Id"]
+                term_dict["id"] = term_dict.pop("Id")
             if "geometry" in term_dict and hasattr(term_dict["geometry"], "wkt"):
                 term_dict["geometry"] = term_dict["geometry"].wkt
             terminals_list.append(term_dict)
@@ -96,7 +96,7 @@ def load_and_group_dropins(
         for _, row in data["berths"].iterrows():
             berth_dict = row.to_dict()
             if "Id" in berth_dict:
-                berth_dict["id"] = berth_dict["Id"]
+                berth_dict["id"] = berth_dict.pop("Id")
             if "geometry" in berth_dict and hasattr(berth_dict["geometry"], "wkt"):
                 berth_dict["geometry"] = berth_dict["geometry"].wkt
             berths_list.append(berth_dict)

@@ -19,7 +19,11 @@ def generate_terminal_graph_features(terminals: List[Dict]) -> List[Dict]:
     """
     features = []
     for term in terminals:
-        tid = utils.stringify_id(term["Id"])
+        raw_id = term.get("id", term.get("Id"))
+        if raw_id is None:
+            logger.warning("Skipping terminal without 'id'/'Id': %s", term)
+            continue
+        tid = utils.stringify_id(raw_id)
         conn_wkt = term.get("connection_geometry")
         if not conn_wkt:
             # Terminal was not mapped to a section or section was not spliced
@@ -95,7 +99,11 @@ def generate_berth_graph_features(berths: List[Dict]) -> List[Dict]:
     """
     features = []
     for berth in berths:
-        bid = utils.stringify_id(berth["Id"])
+        raw_id = berth.get("id", berth.get("Id"))
+        if raw_id is None:
+            logger.warning("Skipping berth without 'id'/'Id': %s", berth)
+            continue
+        bid = utils.stringify_id(raw_id)
         conn_wkt = berth.get("connection_geometry")
         if not conn_wkt:
             continue

@@ -88,7 +88,12 @@ def build_integrated_dropins_graph(
         )
 
     export_graph(
-        all_features, lock_complexes, bridge_complexes, terminals, berths, output_dir
+        all_features,
+        lock_complexes,
+        bridge_complexes,
+        terminals,
+        berths if include_berths else [],
+        output_dir,
     )
     logger.info("Done! Exported integrated dropins graph to %s", output_dir)
 
