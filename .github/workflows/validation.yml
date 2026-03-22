@@ -38,8 +38,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fis-export
-          path: output/
-          include-hidden-files: true
+          path: output/fis-export/
           retention-days: 1
 
   crawl-euris:
@@ -69,8 +68,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: euris-export
-          path: output/
-          include-hidden-files: true
+          path: output/euris-export/
           retention-days: 1
 
   crawl-disk:
@@ -100,8 +98,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: disk-export
-          path: output/
-          include-hidden-files: true
+          path: output/disk-export/
           retention-days: 1
 
   build-fis-graph:
@@ -134,8 +131,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fis-graphs
-          path: output/
-          include-hidden-files: true
+          path: |
+            output/fis-graph/
+            output/fis-enriched/
           retention-days: 7
 
   build-euris-graph:
@@ -168,8 +166,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: euris-graphs
-          path: output/
-          include-hidden-files: true
+          path: |
+            output/euris-graph/
+            output/euris-enriched/
           retention-days: 7
 
   merge-graphs:
@@ -193,20 +192,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-graphs
-          path: output/
+          path: .
       - name: Download EURIS Graphs
         uses: actions/download-artifact@v4
         with:
           name: euris-graphs
-          path: output/
+          path: .
       - name: Merge Graphs
         run: uv run python -m fis.cli graph merge
       - name: Upload Merged Graph
         uses: actions/upload-artifact@v4
         with:
           name: merged-graph
-          path: output/
-          include-hidden-files: true
+          path: output/merged-graph/
           retention-days: 30
 
   schematize-lock:
@@ -230,25 +228,24 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: output/fis-export/
+          path: .
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: output/disk-export/
+          path: .
       - name: Download FIS Graph
         uses: actions/download-artifact@v4
         with:
           name: fis-graphs
-          path: output/
+          path: .
       - name: Run Lock Schematization
         run: uv run python -m fis.cli lock schematize --fis-graph output/fis-graph/graph.pickle
       - name: Upload Lock Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: lock-schematization
-          path: output/
-          include-hidden-files: true
+          path: output/lock-schematization/
           retention-days: 30
 
   schematize-bridge:
@@ -272,20 +269,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: output/fis-export/
+          path: .
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: output/disk-export/
+          path: .
       - name: Run Bridge Schematization
         run: uv run python -m fis.cli bridge schematize
       - name: Upload Bridge Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: bridge-schematization
-          path: output/
-          include-hidden-files: true
+          path: output/bridge-schematization/
           retention-days: 30
 
   schematize-dropins-simplified:
@@ -309,20 +305,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: output/fis-export/
+          path: .
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: output/disk-export/
+          path: .
       - name: Run Integrated Dropins Schematization (Simplified)
         run: uv run python -m fis.cli dropins schematize --mode simplified --output-dir output/dropins-schematization-simplified
       - name: Upload Dropins Simplified Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: integrated-schematization-simplified
-          path: output/
-          include-hidden-files: true
+          path: output/dropins-schematization-simplified/
           retention-days: 30
 
   schematize-dropins-detailed:
@@ -346,20 +341,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: output/fis-export/
+          path: .
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: output/disk-export/
+          path: .
       - name: Run Integrated Dropins Schematization (Detailed)
         run: uv run python -m fis.cli dropins schematize --mode detailed --output-dir output/dropins-schematization-detailed
       - name: Upload Dropins Detailed Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: integrated-schematization-detailed
-          path: output/
-          include-hidden-files: true
+          path: output/dropins-schematization-detailed/
           retention-days: 30
 
   schematize-dropins-berths:
@@ -383,12 +377,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-export
-          path: output/fis-export/
+          path: .
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
-          path: output/disk-export/
+          path: .
       - name: Run Integrated Dropins Schematization with Berths
         run: >
           uv run python -m fis.cli dropins schematize
@@ -398,8 +392,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integrated-schematization-with-berths
-          path: output/
-          include-hidden-files: true
+          path: output/integrated-schematization-with-berths/
           retention-days: 30
 
   validate-fis:
@@ -423,7 +416,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-graphs
-          path: output/
+          path: .
       - name: Generate FIS Validation Report
         run: >
           uv run python -m fis.cli graph validate
@@ -458,7 +451,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: merged-graph
-          path: output/merged-graph/
+          path: .
       - name: Generate Merged Validation Report
         run: >
           uv run python -m fis.cli graph validate
