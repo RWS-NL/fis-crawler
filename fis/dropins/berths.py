@@ -92,7 +92,9 @@ def generate_berth_graph_features(berths: List[Dict]) -> List[Dict]:
 def build_berths_gdf(berths: List[Dict]) -> gpd.GeoDataFrame:
     """Builds a GeoDataFrame of berths from the source dicts."""
     if not berths:
-        return None
+        return gpd.GeoDataFrame(
+            columns=["geometry"], geometry="geometry", crs="EPSG:4326"
+        )
     rows = []
     for berth in berths:
         row = berth.copy()

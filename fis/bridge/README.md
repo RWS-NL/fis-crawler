@@ -14,7 +14,7 @@ uv run python -m fis.cli bridge schematize
 
 - **Opening Matching**: Detects individual openings and their constraints.
 - **Physical Geometry**: Replaces zero-length passage points with a 2-meter physical LineString oriented along the fairway.
-- **Constraint Aggregation**: In coarse mode, bridges are represented as single edges with the minimum navigable width and height across all openings.
+- **Constraint Aggregation**: Aggregates constraints across all openings to compute the minimum navigable width and height for each bridge representation (used when integrated in `simplified` mode).
 
 ## Module Structure
 

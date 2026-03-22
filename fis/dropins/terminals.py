@@ -94,7 +94,9 @@ def generate_terminal_graph_features(terminals: List[Dict]) -> List[Dict]:
 def build_terminals_gdf(terminals: List[Dict]) -> gpd.GeoDataFrame:
     """Builds a GeoDataFrame of terminals from the source dicts."""
     if not terminals:
-        return None
+        return gpd.GeoDataFrame(
+            columns=["geometry"], geometry="geometry", crs="EPSG:4326"
+        )
     rows = []
     for term in terminals:
         row = term.copy()
