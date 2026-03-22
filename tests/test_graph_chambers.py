@@ -170,3 +170,64 @@ def test_lock_overlapping_multiple_sections():
 
     # Route segment should also be assigned to one of the overlapping sections
     assert route["properties"]["section_id"] in ("21084", "7849")
+
+
+def test_lock_section_point_touch():
+    """
+    Verify that a point-touch (overlap length 0) is ignored by the overlap logic
+    and instead we pick the section closest to the midpoint of the segment.
+    """
+    from shapely.geometry import LineString, Polygon
+    from fis.lock.graph import build_graph_features
+
+    # Lock from x=0 to x=100
+    # Two sections:
+    #   "sec1" ends exactly at x=0 (the split point)
+    #   "sec2" covers the entire lock x=0 to x=100
+    c = {
+        "id": "51064",
+        "geometry": Polygon([(0, -10), (100, -10), (100, 10), (0, 10), (0, -10)]).wkt,
+        "geometry_before_wkt": LineString([(-50, 0), (0, 0)]).wkt,
+        "geometry_after_wkt": LineString([(100, 0), (150, 0)]).wkt,
+        "fairway_id": "fw1",
+        "sections": [
+            {
+                "id": "sec1",
+                "geometry": LineString(
+                    [(-50, 0), (0, 0)]
+                ).wkt,  # Touches only at endpoint
+                "relation": "overlap",
+            },
+            {
+                "id": "sec2",
+                "geometry": LineString([(0, 0), (100, 0)]).wkt,  # Actually overlaps
+                "relation": "overlap",
+            },
+        ],
+        "locks": [
+            {
+                "id": "lock1",
+                "chambers": [
+                    {
+                        "id": "24969",
+                        "geometry": Polygon(
+                            [(20, -5), (80, -5), (80, 5), (20, 5), (20, -5)]
+                        ).wkt,
+                        "dim_length": 60,
+                        "dim_width": 10,
+                    }
+                ],
+            }
+        ],
+    }
+
+    features = build_graph_features([c])
+
+    # The approach segment goes from (0,0) to door_start.
+    # It touches sec1 at (0,0) (length 0 overlap) but actually lies on sec2.
+    approach = next(
+        f
+        for f in features
+        if f.get("properties", {}).get("segment_type") == "chamber_approach"
+    )
+    assert approach["properties"]["section_id"] == "sec2"
