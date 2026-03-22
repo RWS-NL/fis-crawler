@@ -126,8 +126,6 @@ jobs:
         with:
           name: fis-export
           path: output/fis-export/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Build FIS Graph
 
         run: uv run python -m fis.cli graph fis
@@ -168,8 +166,6 @@ jobs:
         with:
           name: euris-export
           path: output/euris-export/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Build EURIS Graph
         run: uv run python -m fis.cli graph euris
       - name: Enrich EURIS Graph
@@ -214,8 +210,6 @@ jobs:
         with:
           name: euris-enriched
           path: output/euris-enriched/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Merge Graphs
         run: uv run python -m fis.cli graph merge
       - name: Upload Merged Graph
@@ -257,8 +251,6 @@ jobs:
         with:
           name: fis-graph
           path: output/fis-graph/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Run Lock Schematization
         run: uv run python -m fis.cli lock schematize --fis-graph output/fis-graph/graph.pickle
       - name: Upload Lock Artifacts
@@ -295,8 +287,6 @@ jobs:
         with:
           name: disk-export
           path: output/disk-export/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Run Bridge Schematization
         run: uv run python -m fis.cli bridge schematize
       - name: Upload Bridge Artifacts
@@ -333,8 +323,6 @@ jobs:
         with:
           name: disk-export
           path: output/disk-export/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Run Integrated Dropins Schematization (Simplified)
         run: uv run python -m fis.cli dropins schematize --mode simplified --output-dir output/dropins-schematization-simplified
       - name: Upload Dropins Simplified Artifacts
@@ -371,8 +359,6 @@ jobs:
         with:
           name: disk-export
           path: output/disk-export/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Run Integrated Dropins Schematization (Detailed)
         run: uv run python -m fis.cli dropins schematize --mode detailed --output-dir output/dropins-schematization-detailed
       - name: Upload Dropins Detailed Artifacts
@@ -409,8 +395,6 @@ jobs:
         with:
           name: disk-export
           path: output/disk-export/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Run Integrated Dropins Schematization with Berths
         run: >
           uv run python -m fis.cli dropins schematize
@@ -445,8 +429,6 @@ jobs:
         with:
           name: fis-enriched
           path: output/fis-enriched/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Generate FIS Validation Report
         run: >
           uv run python -m fis.cli graph validate
@@ -482,8 +464,6 @@ jobs:
         with:
           name: merged-graph
           path: output/merged-graph/
-      - name: Debug - Workspace Structure
-        run: find . -maxdepth 4 -not -path '*/.*'
       - name: Generate Merged Validation Report
         run: >
           uv run python -m fis.cli graph validate
