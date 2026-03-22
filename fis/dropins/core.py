@@ -5,11 +5,9 @@ from typing import List, Dict, Any
 from fis.dropins.io import load_and_group_dropins, export_graph
 from fis.dropins.embedded import identify_embedded_structures, inject_embedded_bridges
 from fis.dropins.splicing import splice_fairways
-from fis.dropins.graph import (
-    generate_terminal_graph_features,
-    generate_berth_graph_features,
-    generate_simplified_passages,
-)
+from fis.dropins.graph import generate_simplified_passages
+from fis.dropins.terminals import generate_terminal_graph_features
+from fis.dropins.berths import generate_berth_graph_features
 from fis.lock.graph import build_graph_features as lock_graph_features
 from fis.bridge.graph import build_graph_features as bridge_graph_features
 from fis import utils
