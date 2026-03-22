@@ -115,6 +115,9 @@ DETAILED_LOCK_SPLICING_BUFFER_M = 50.0
 # Fixed cut distance for bridge structures.
 BRIDGE_SPLICING_BUFFER_M = 10.0
 
+# Nominal length (meters) assigned to bridge passage edges for simulation compatibility.
+BRIDGE_PASSAGE_LENGTH_M = 2.0
+
 # Minimal buffer for locks in 'simplified' mode.
 # Prevents large lock complexes from "swallowing" nearby bridges or junctions.
 SIMPLIFIED_LOCK_SPLICING_BUFFER_M = 10.0

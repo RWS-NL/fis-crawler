@@ -4,7 +4,7 @@ from shapely.geometry import Point, LineString, mapping
 from pyproj import Geod
 import json
 import pandas as pd
-from fis import utils
+from fis import utils, settings
 
 geod = Geod(ellps="WGS84")
 CRS = "EPSG:4326"
@@ -187,6 +187,20 @@ def build_graph_features(complexes):
 
             op_geom = op_geom_raw
 
+            # Calculate orientation and offset points to give the passage a real length
+            azimuth = 0.0
+            if split_point and merge_point and not split_point.equals(merge_point):
+                azimuth, _, _ = geod.inv(
+                    split_point.x, split_point.y, merge_point.x, merge_point.y
+                )
+
+            # Offset 1m back and 1m forward along the azimuth
+            half_len = settings.BRIDGE_PASSAGE_LENGTH_M / 2.0
+            lon1, lat1, _ = geod.fwd(op_geom.x, op_geom.y, azimuth, -half_len)
+            lon2, lat2, _ = geod.fwd(op_geom.x, op_geom.y, azimuth, half_len)
+            op_start_geom = Point(lon1, lat1)
+            op_end_geom = Point(lon2, lat2)
+
             op_start_node = f"opening_{op_id}_start"
             op_end_node = f"opening_{op_id}_end"
 
@@ -205,7 +219,7 @@ def build_graph_features(complexes):
             features.append(
                 {
                     "type": "Feature",
-                    "geometry": mapping(op_geom),
+                    "geometry": mapping(op_start_geom),
                     "properties": {
                         "id": op_start_node,
                         "feature_type": "node",
@@ -219,7 +233,7 @@ def build_graph_features(complexes):
             features.append(
                 {
                     "type": "Feature",
-                    "geometry": mapping(op_geom),
+                    "geometry": mapping(op_end_geom),
                     "properties": {
                         "id": op_end_node,
                         "feature_type": "node",
@@ -233,8 +247,8 @@ def build_graph_features(complexes):
 
             if split_point:
                 approach_geom = (
-                    LineString([split_point, op_geom])
-                    if not split_point.equals(op_geom)
+                    LineString([split_point, op_start_geom])
+                    if not split_point.equals(op_start_geom)
                     else None
                 )
                 features.append(
@@ -259,7 +273,7 @@ def build_graph_features(complexes):
                     }
                 )
 
-            passage_geom = LineString([op_geom, op_geom])
+            passage_geom = LineString([op_start_geom, op_end_geom])
 
             # Serialize metadata and handle nominal length
             op_attrs = {}
@@ -289,15 +303,15 @@ def build_graph_features(complexes):
                         "section_id": best_sec_id,
                         "source_node": op_start_node,
                         "target_node": op_end_node,
-                        "length_m": 2.0,  # Nominal length for simulation compatibility
+                        "length_m": settings.BRIDGE_PASSAGE_LENGTH_M,  # Nominal length for simulation compatibility
                     },
                 }
             )
 
             if merge_point:
                 exit_geom = (
-                    LineString([op_geom, merge_point])
-                    if not op_geom.equals(merge_point)
+                    LineString([op_end_geom, merge_point])
+                    if not op_end_geom.equals(merge_point)
                     else None
                 )
                 features.append(
