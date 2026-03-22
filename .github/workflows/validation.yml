@@ -1,4 +1,4 @@
-name: Graph Validation Report
+name: Graph Generation and Validation
 
 on:
   release:
