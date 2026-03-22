@@ -472,6 +472,50 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
     return features
 
 
+def _find_best_section_id(line, sections):
+    """Find the section ID with the most overlap with the given line."""
+    if not sections:
+        return None
+
+    best_sid = None
+    max_overlap = -1.0
+
+    # 1. Try intersection length
+    for s in sections:
+        s_geom_wkt = s.get("geometry")
+        if not s_geom_wkt:
+            continue
+        s_geom = wkt.loads(s_geom_wkt) if isinstance(s_geom_wkt, str) else s_geom_wkt
+
+        if s_geom and line.intersects(s_geom):
+            overlap = line.intersection(s_geom).length
+            if overlap > max_overlap:
+                max_overlap = overlap
+                best_sid = utils.stringify_id(s.get("id"))
+
+    # 2. Fallback to nearest if no intersection
+    if best_sid is None:
+        min_dist = float("inf")
+        for s in sections:
+            s_geom_wkt = s.get("geometry")
+            if not s_geom_wkt:
+                continue
+            s_geom = (
+                wkt.loads(s_geom_wkt) if isinstance(s_geom_wkt, str) else s_geom_wkt
+            )
+            if s_geom:
+                dist = line.distance(s_geom)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_sid = utils.stringify_id(s.get("id"))
+
+    # 3. Final fallback to the first section
+    if best_sid is None and sections:
+        best_sid = utils.stringify_id(sections[0].get("id"))
+
+    return best_sid
+
+
 def _build_chamber_route_features(
     c,
     lock_id,
@@ -541,9 +585,9 @@ def _build_chamber_route_features(
                 "chamber_id": chamber_id,
                 "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": utils.stringify_id(c.get("sections", [{}])[0].get("id"))
-                if c.get("sections")
-                else None,
+                "section_id": _find_best_section_id(
+                    approach_line, c.get("sections", [])
+                ),
                 "source_node": split_node_id,
                 "target_node": chamber_node_start_id,
                 "length_m": geod.geometry_length(approach_line),
@@ -567,9 +611,9 @@ def _build_chamber_route_features(
                 "chamber_id": chamber_id,
                 "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": utils.stringify_id(c.get("sections", [{}])[0].get("id"))
-                if c.get("sections")
-                else None,
+                "section_id": _find_best_section_id(
+                    chamber_line, c.get("sections", [])
+                ),
                 "dim_length": chamber.get("dim_length"),
                 "dim_width": chamber.get("dim_width"),
                 "source_node": chamber_node_start_id,
@@ -595,9 +639,7 @@ def _build_chamber_route_features(
                 "chamber_id": chamber_id,
                 "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": utils.stringify_id(c.get("sections", [{}])[0].get("id"))
-                if c.get("sections")
-                else None,
+                "section_id": _find_best_section_id(exit_line, c.get("sections", [])),
                 "source_node": chamber_node_end_id,
                 "target_node": merge_node_id,
                 "length_m": geod.geometry_length(exit_line),
