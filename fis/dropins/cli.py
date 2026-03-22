@@ -41,7 +41,12 @@ def dropins_cli():
     default="detailed",
     help="Level of detail for the schematization. 'detailed' (default) preserves lock-associated subgraphs; 'simplified' represents all bridges and locks as single edges.",
 )
-def schematize(export_dir, disk_dir, output_dir, bbox, mode):
+@click.option(
+    "--include-berths/--no-berths",
+    default=False,
+    help="Include berths as nodes and access edges in the graph. Caution: This adds many extra edges.",
+)
+def schematize(export_dir, disk_dir, output_dir, bbox, mode, include_berths):
     """Integrate locks and bridges into fairways globally."""
     bbox_tuple = None
     if bbox:
@@ -53,5 +58,10 @@ def schematize(export_dir, disk_dir, output_dir, bbox, mode):
             raise click.BadParameter("BBox must be 'minx,miny,maxx,maxy'")
 
     build_integrated_dropins_graph(
-        export_dir, disk_dir, output_dir, bbox=bbox_tuple, mode=mode
+        export_dir,
+        disk_dir,
+        output_dir,
+        bbox=bbox_tuple,
+        mode=mode,
+        include_berths=include_berths,
     )

@@ -1,0 +1,267 @@
+import logging
+import pathlib
+import pickle
+from typing import List, Dict, Tuple
+
+import pandas as pd
+import geopandas as gpd
+from shapely import wkt
+from shapely.geometry import shape
+
+from fis.lock.core import load_data as lock_load_data, group_complexes as group_locks
+from fis.bridge.core import group_bridge_complexes as group_bridges
+from fis import utils
+
+logger = logging.getLogger(__name__)
+
+
+def load_and_group_dropins(
+    export_dir: pathlib.Path, disk_dir: pathlib.Path, bbox=None
+) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict], pd.DataFrame, pd.DataFrame]:
+    """Loads all parquet files and delegates to the grouped domain builders."""
+    data = lock_load_data(export_dir, disk_dir)
+
+    terminal_path = export_dir / "terminal.geoparquet"
+    if not terminal_path.exists():
+        terminal_path = export_dir / "terminal.parquet"
+
+    if terminal_path.exists():
+        try:
+            terminals = gpd.read_parquet(terminal_path)
+            data["terminals"] = terminals
+        except Exception as e:
+            logger.warning("Could not load terminals from %s: %s", terminal_path, e)
+            data["terminals"] = None
+    else:
+        data["terminals"] = None
+
+    berth_path = export_dir / "berth.geoparquet"
+    if not berth_path.exists():
+        berth_path = export_dir / "berth.parquet"
+
+    if berth_path.exists():
+        try:
+            berths = gpd.read_parquet(berth_path)
+            data["berths"] = berths
+        except Exception as e:
+            logger.warning("Could not load berths from %s: %s", berth_path, e)
+            data["berths"] = None
+    else:
+        data["berths"] = None
+
+    if bbox:
+        import shapely.geometry
+
+        bbox_poly = shapely.geometry.box(*bbox)
+
+        def filter_df(df, name):
+            if df is None or df.empty or "geometry" not in df.columns:
+                return df
+            if df["geometry"].dtype == "object":
+                is_str = df["geometry"].apply(lambda x: isinstance(x, str))
+                if is_str.any():
+                    df = df.copy()
+                    df.loc[is_str, "geometry"] = gpd.GeoSeries.from_wkt(
+                        df.loc[is_str, "geometry"]
+                    )
+            mask = gpd.GeoSeries(df["geometry"], crs="EPSG:4326").intersects(bbox_poly)
+            return df[mask].copy()
+
+        data["locks"] = filter_df(data.get("locks"), "locks")
+        data["bridges"] = filter_df(data.get("bridges"), "bridges")
+        data["sections"] = filter_df(data.get("sections"), "sections")
+        data["terminals"] = filter_df(data.get("terminals"), "terminals")
+        data["berths"] = filter_df(data.get("berths"), "berths")
+
+    logger.info("Grouping Locks...")
+    lock_complexes = group_locks(data)
+
+    logger.info("Grouping Bridges...")
+    bridge_complexes = group_bridges(data)
+
+    logger.info("Preparing Terminals...")
+    terminals_list = []
+    if data.get("terminals") is not None:
+        for _, row in data["terminals"].iterrows():
+            term_dict = row.to_dict()
+            if "Id" in term_dict:
+                term_dict["id"] = term_dict["Id"]
+            if "geometry" in term_dict and hasattr(term_dict["geometry"], "wkt"):
+                term_dict["geometry"] = term_dict["geometry"].wkt
+            terminals_list.append(term_dict)
+
+    logger.info("Preparing Berths...")
+    berths_list = []
+    if data.get("berths") is not None:
+        for _, row in data["berths"].iterrows():
+            berth_dict = row.to_dict()
+            if "Id" in berth_dict:
+                berth_dict["id"] = berth_dict["Id"]
+            if "geometry" in berth_dict and hasattr(berth_dict["geometry"], "wkt"):
+                berth_dict["geometry"] = berth_dict["geometry"].wkt
+            berths_list.append(berth_dict)
+
+    return (
+        lock_complexes,
+        bridge_complexes,
+        terminals_list,
+        berths_list,
+        data.get("sections"),
+        data.get("openings"),
+    )
+
+
+def export_graph(
+    all_features: List[Dict],
+    lock_complexes: List[Dict],
+    bridge_complexes: List[Dict],
+    terminals: List[Dict],
+    berths: List[Dict],
+    output_dir: pathlib.Path,
+):
+    """Exports the generated graph features to GeoJSON/GeoParquet."""
+    import networkx as nx
+
+    logger.info("Exporting drop-ins network graph and components...")
+    nodes_rows, edges_rows = _separate_features(all_features)
+
+    if not nodes_rows or not edges_rows:
+        raise ValueError("Cannot export graph: Nodes or Edges list is empty.")
+
+    nodes_gdf = gpd.GeoDataFrame(nodes_rows, geometry="geometry", crs="EPSG:4326")
+    edges_gdf = gpd.GeoDataFrame(edges_rows, geometry="geometry", crs="EPSG:4326")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    G = nx.MultiGraph()
+    _populate_graph(G, nodes_gdf, edges_gdf)
+
+    with open(output_dir / "graph.pickle", "wb") as f:
+        pickle.dump(G, f)
+
+    logger.info(
+        "Generated graph with %d nodes and %d edges",
+        G.number_of_nodes(),
+        G.number_of_edges(),
+    )
+    _export_dataframes(
+        lock_complexes,
+        bridge_complexes,
+        terminals,
+        berths,
+        nodes_gdf,
+        edges_gdf,
+        output_dir,
+    )
+
+
+def _separate_features(all_features: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    nodes_rows, edges_rows = [], []
+    seen_nodes = set()
+    for f in all_features:
+        props = f["properties"]
+        geom = shape(f["geometry"]) if f["geometry"] else None
+        if not geom:
+            continue
+        ftype = props.get("feature_type")
+        if ftype == "node":
+            if props["id"] not in seen_nodes:
+                seen_nodes.add(props["id"])
+                nodes_rows.append(props | {"geometry": geom})
+        elif ftype == "fairway_segment":
+            edges_rows.append(props | {"geometry": geom})
+    return nodes_rows, edges_rows
+
+
+def _populate_graph(G, nodes_gdf: gpd.GeoDataFrame, edges_gdf: gpd.GeoDataFrame):
+    for _, row in nodes_gdf.iterrows():
+        node_attr = {k: v for k, v in row.items() if k != "geometry"}
+        node_attr["geometry_wkt"] = row.geometry.wkt
+        G.add_node(row["id"], **node_attr)
+    for _, row in edges_gdf.iterrows():
+        if pd.isna(row.get("source_node")) or pd.isna(row.get("target_node")):
+            continue
+        edge_attr = {
+            k: v
+            for k, v in row.items()
+            if k not in ["source_node", "target_node", "geometry"]
+        }
+        edge_attr["geometry_wkt"] = row.geometry.wkt
+        G.add_edge(row["source_node"], row["target_node"], **edge_attr)
+
+
+def _export_dataframes(
+    lock_complexes,
+    bridge_complexes,
+    terminals,
+    berths,
+    nodes_gdf,
+    edges_gdf,
+    output_dir,
+):
+    from fis.lock.graph import (
+        build_locks_gdf,
+        build_chambers_gdf,
+        build_subchambers_gdf,
+        build_berths_gdf as build_lock_berths_gdf,
+    )
+    from fis.bridge.graph import build_bridges_gdf, build_openings_gdf
+
+    gdfs = {
+        "nodes": nodes_gdf,
+        "edges": edges_gdf,
+        "locks": build_locks_gdf(lock_complexes),
+        "chambers": build_chambers_gdf(lock_complexes),
+        "subchambers": build_subchambers_gdf(lock_complexes),
+        "lock_berths": build_lock_berths_gdf(lock_complexes),
+        "bridges": build_bridges_gdf(bridge_complexes),
+        "openings": build_openings_gdf(bridge_complexes),
+        "terminals": _build_terminals_gdf(terminals),
+        "berths": _build_berths_gdf(berths),
+    }
+
+    schema = utils.load_schema()
+    id_cols = schema.get("identifiers", {}).get("columns", [])
+
+    for name, gdf in gdfs.items():
+        if gdf is not None and not gdf.empty:
+            gdf = gdf.copy()
+            for col in id_cols:
+                if col in gdf.columns:
+                    gdf[col] = gdf[col].apply(utils.stringify_id)
+
+            gdf.to_parquet(output_dir / f"{name}.geoparquet")
+            gdf.to_file(output_dir / f"{name}.geojson", driver="GeoJSON")
+            logger.info("Exported %s with %d rows", name, len(gdf))
+
+
+def _build_terminals_gdf(terminals: List[Dict]) -> gpd.GeoDataFrame:
+    """Builds a GeoDataFrame of terminals from the source dicts."""
+    if not terminals:
+        return None
+    rows = []
+    for term in terminals:
+        row = term.copy()
+        geom_wkt = row.get("geometry")
+        if geom_wkt:
+            row["geometry"] = (
+                wkt.loads(geom_wkt) if isinstance(geom_wkt, str) else geom_wkt
+            )
+        rows.append(row)
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")
+
+
+def _build_berths_gdf(berths: List[Dict]) -> gpd.GeoDataFrame:
+    """Builds a GeoDataFrame of berths from the source dicts."""
+    if not berths:
+        return None
+    rows = []
+    for berth in berths:
+        row = berth.copy()
+        geom_wkt = row.get("geometry")
+        if geom_wkt:
+            row["geometry"] = (
+                wkt.loads(geom_wkt) if isinstance(geom_wkt, str) else geom_wkt
+            )
+        rows.append(row)
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:4326")

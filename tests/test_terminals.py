@@ -4,9 +4,9 @@ import geopandas as gpd
 from shapely.geometry import LineString, Point
 from fis.dropins.core import (
     _map_dropins_to_sections,
-    _splice_fairways,
-    _generate_terminal_graph_features,
 )
+from fis.dropins.splicing import splice_fairways
+from fis.dropins.graph import generate_terminal_graph_features
 
 
 @pytest.fixture
@@ -72,7 +72,7 @@ def test_terminal_integration_flow(sample_data):
 
     # 2. Splice fairways
     # This should split the section at two points
-    _splice_fairways(sections_df, dropins_by_section, {})
+    splice_fairways(sections_df, dropins_by_section, {})
 
     # Since both terminals are at the same projected distance (500m),
     # the splicer logic might handle them as one or very close.
@@ -84,7 +84,7 @@ def test_terminal_integration_flow(sample_data):
     assert "connection_geometry" in terminals[1]
 
     # 3. Generate terminal specific features
-    terminal_features = _generate_terminal_graph_features(terminals)
+    terminal_features = generate_terminal_graph_features(terminals)
 
     # Expect for EACH terminal: 1 connection node, 1 terminal node, 1 access edge = 6 total
     assert len(terminal_features) == 6
@@ -126,8 +126,8 @@ def test_terminal_missing_section_id(sample_data):
     assert "sec_1" in dropins_by_section
     assert len(dropins_by_section["sec_1"]) == 1  # Only term_far
 
-    _splice_fairways(sections_df, dropins_by_section, {})
-    terminal_features = _generate_terminal_graph_features(terminals)
+    splice_fairways(sections_df, dropins_by_section, {})
+    terminal_features = generate_terminal_graph_features(terminals)
 
     # term_close should have no connection_geometry and thus no features
     assert "connection_geometry" not in terminals[0]

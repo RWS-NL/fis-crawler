@@ -149,6 +149,13 @@ jobs:
         run: uv run python -m fis.cli dropins schematize
         continue-on-error: true
 
+      - name: Run Integrated Dropins Schematization with Berths
+        run: >
+          uv run python -m fis.cli dropins schematize
+          --include-berths
+          --output-dir output/integrated-schematization-with-berths
+        continue-on-error: true
+
       - name: Generate FIS Validation Report
         run: >
           uv run python -m fis.cli graph validate
@@ -183,4 +190,6 @@ jobs:
             output/bridge-schematization/*.json
             output/integrated-schematization/*.geoparquet
             output/integrated-schematization/*.json
+            output/integrated-schematization-with-berths/*.geoparquet
+            output/integrated-schematization-with-berths/*.json
           retention-days: 30
