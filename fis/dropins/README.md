@@ -1,6 +1,6 @@
 # Integrated Drop-ins
 
-This module handles the global integration of locks, bridges, terminals, and berths into the fairway network. It uses a `FairwaySplicer` to modify the base fairway segments and inject detailed (or coarse) subgraphs.
+This module handles the global integration of locks, bridges, terminals, and berths into the fairway network. It uses a `FairwaySplicer` to modify the base fairway segments and inject detailed (or simplified) subgraphs.
 
 ## Features
 
