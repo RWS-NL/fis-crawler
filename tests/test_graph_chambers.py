@@ -82,3 +82,91 @@ def test_build_chamber_route_features():
     assert exit_seg["properties"]["source_node"] == chamber_node_end_id
     assert exit_seg["properties"]["target_node"] == merge_node_id
     assert exit_seg["properties"]["length_m"] > 0
+
+
+def test_lock_overlapping_multiple_sections():
+    """
+    Test that when a lock overlaps two fairway sections meeting in the middle,
+    the approach and exit segments get the correct section IDs based on geometry,
+    rather than just the first section in the list.
+    """
+    from shapely.geometry import LineString, Polygon
+    from fis.lock.graph import build_graph_features
+
+    # Construct a lock complex spanning from x=0 to x=100
+    # Two sections:
+    #   "21084" from x=-50 to x=50 (intersecting the start/approach)
+    #   "7849" from x=50 to x=150 (intersecting the end/exit)
+    # The lock chamber goes from x=20 to x=80
+
+    c = {
+        "id": "51064",
+        "geometry": Polygon([(0, -10), (100, -10), (100, 10), (0, 10), (0, -10)]).wkt,
+        "geometry_before_wkt": LineString(
+            [(-50, 0), (0, 0)]
+        ).wkt,  # split point at (0, 0)
+        "geometry_after_wkt": LineString(
+            [(100, 0), (150, 0)]
+        ).wkt,  # merge point at (100, 0)
+        "fairway_id": "fw1",
+        "sections": [
+            {
+                "id": "21084",
+                "geometry": LineString([(-50, 0), (50, 0)]).wkt,
+                "relation": "overlap",
+            },
+            {
+                "id": "7849",
+                "geometry": LineString([(50, 0), (150, 0)]).wkt,
+                "relation": "overlap",
+            },
+        ],
+        "locks": [
+            {
+                "id": "lock1",
+                "chambers": [
+                    {
+                        "id": "24969",
+                        "geometry": Polygon(
+                            [(20, -5), (80, -5), (80, 5), (20, 5), (20, -5)]
+                        ).wkt,
+                        "dim_length": 60,
+                        "dim_width": 10,
+                    }
+                ],
+            }
+        ],
+    }
+
+    # Generate graph features
+    features = build_graph_features([c])
+
+    # Extract the approach, route and exit segments
+    approach = next(
+        f
+        for f in features
+        if f.get("properties", {}).get("segment_type") == "chamber_approach"
+    )
+    route = next(
+        f
+        for f in features
+        if f.get("properties", {}).get("segment_type") == "chamber_route"
+    )
+    exit_seg = next(
+        f
+        for f in features
+        if f.get("properties", {}).get("segment_type") == "chamber_exit"
+    )
+
+    # Verify the approach segment gets section 21084
+    assert approach["properties"]["section_id"] == "21084", (
+        "Approach segment should match the start section"
+    )
+
+    # Verify the exit segment gets section 7849
+    assert exit_seg["properties"]["section_id"] == "7849", (
+        "Exit segment should match the end section"
+    )
+
+    # Route segment should also be assigned to one of the overlapping sections
+    assert route["properties"]["section_id"] in ("21084", "7849")
