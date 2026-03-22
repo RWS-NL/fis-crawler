@@ -264,11 +264,6 @@ def enrich_euris(
     default="output/euris-enriched",
 )
 @click.option(
-    "--export-dir",
-    type=click.Path(exists=True, path_type=pathlib.Path),
-    default="output/fis-export",
-)
-@click.option(
     "--output-dir",
     type=click.Path(path_type=pathlib.Path),
     default="output/merged-graph",
@@ -276,7 +271,6 @@ def enrich_euris(
 def merge(
     fis_enriched: pathlib.Path,
     euris_enriched: pathlib.Path,
-    export_dir: pathlib.Path,
     output_dir: pathlib.Path,
 ) -> None:
     """Merge FIS and EURIS graphs via border nodes."""
