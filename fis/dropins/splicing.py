@@ -232,7 +232,7 @@ def _generate_structure_cuts(
                         if ch.get("length"):
                             max_len = max(max_len, float(ch["length"]))
                 buffer_dist = (
-                    settings.SIMPLIFIED_LOCK_SPLICING_BUFFER_M
+                    settings.COARSE_LOCK_SPLICING_BUFFER_M
                     if mode == "simplified"
                     else (max_len / 2.0) + settings.DETAILED_LOCK_SPLICING_BUFFER_M
                 )

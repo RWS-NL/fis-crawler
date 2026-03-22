@@ -25,8 +25,6 @@ def build_integrated_dropins_graph(
     include_berths=False,
 ):
     """Main orchestrator to build the completely integrated Drop-ins graph."""
-    if mode == "coarse":
-        mode = "simplified"
 
     (
         lock_complexes,
@@ -54,13 +52,9 @@ def build_integrated_dropins_graph(
 
     detailed_bridges = []
     simplified_bridges = []
-    embedded_ids = set(embedded_bridges.keys())
     for b in bridge_complexes:
-        # A bridge is embedded if any of its openings are in embedded_bridges
-        is_embedded = any(
-            str(op.get("id")) in embedded_ids for op in b.get("openings", [])
-        )
-        if mode == "detailed" and is_embedded:
+        # A bridge is detailed if mode is 'detailed' (regardless of embedding)
+        if mode == "detailed":
             detailed_bridges.append(b)
         else:
             simplified_bridges.append(b)

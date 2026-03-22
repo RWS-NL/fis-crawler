@@ -23,7 +23,7 @@ def split_test_graph(tmp_path_factory):
         export_dir=export_dir,
         disk_dir=disk_dir,
         output_dir=output_dir,
-        mode="coarse",
+        mode="simplified",
     )
 
     edges = gpd.read_parquet(output_dir / "edges.geoparquet")

@@ -152,6 +152,8 @@ uv run scrapy crawl euris -L INFO
 
 - [Graph Pipeline](fis/graph/README.md) - Network graph building and enrichment
 - [Lock Schematization](fis/lock/README.md) - Detailed lock feature generation
+- [Bridge Schematization](fis/bridge/README.md) - Bridge feature generation
+- [Integrated Drop-ins](fis/dropins/README.md) - Global integration of all structures
 
 ## Notebooks
 

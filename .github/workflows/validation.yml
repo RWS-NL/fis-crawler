@@ -281,7 +281,7 @@ jobs:
           path: output/bridge-schematization/
           retention-days: 30
 
-  schematize-dropins-coarse:
+  schematize-dropins-simplified:
     needs: [crawl-fis, crawl-disk]
     runs-on: ubuntu-latest
     steps:
@@ -308,13 +308,13 @@ jobs:
         with:
           name: disk-export
           path: output/disk-export/
-      - name: Run Integrated Dropins Schematization (Coarse)
-        run: uv run python -m fis.cli dropins schematize --mode coarse --output-dir output/dropins-schematization-coarse
-      - name: Upload Dropins Coarse Artifacts
+      - name: Run Integrated Dropins Schematization (Simplified)
+        run: uv run python -m fis.cli dropins schematize --mode simplified --output-dir output/dropins-schematization-simplified
+      - name: Upload Dropins Simplified Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: integrated-schematization-coarse
-          path: output/dropins-schematization-coarse/
+          name: integrated-schematization-simplified
+          path: output/dropins-schematization-simplified/
           retention-days: 30
 
   schematize-dropins-detailed:
