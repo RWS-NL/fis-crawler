@@ -159,18 +159,27 @@ Analysis notebooks in `notebooks/`:
 - Network analysis (`network.ipynb`)
 - EURIS data processing (`euris/*.ipynb`)
 - Data visualization and exploration
-
 ## Project Structure
 
 ```
 fis/
+├── bridge/         # Bridge schematization and graph features
+├── dropins/        # Integrated drop-ins (locks, bridges, terminals, berths)
+│   ├── core.py     # Coordination logic
+│   ├── graph.py    # Graph feature generation
+│   ├── embedded.py # Embedded structure matching
+│   ├── splicing.py # Fairway segment splicing
+│   └── io.py       # Data loading and export
+├── graph/          # Core network graph building (FIS, EURIS, Merge)
+├── lock/           # Detailed lock schematization
+├── spiders/        # Scrapy crawlers (FIS, EURIS, DISK)
+├── splicer/        # General fairway splicing utilities
 ├── cli.py          # Main CLI entry point
-├── graph/          # Graph pipeline module
-├── lock/           # Lock schematization module
-├── spiders/        # Scrapy crawlers
-├── pipelines.py    # Data export pipelines
-└── settings.py     # Scrapy settings
+├── ris_index.py    # RIS Index mapping utilities
+├── utils.py        # Shared helper functions
+└── settings.py     # Scrapy configuration
 ```
+
 
 ## Testing
 

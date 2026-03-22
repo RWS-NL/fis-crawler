@@ -17,6 +17,7 @@ from fis import utils
 logger = logging.getLogger(__name__)
 
 
+@utils.timer
 def build_integrated_dropins_graph(
     export_dir: pathlib.Path,
     disk_dir: pathlib.Path,
@@ -26,6 +27,9 @@ def build_integrated_dropins_graph(
     include_berths=False,
 ):
     """Main orchestrator to build the completely integrated Drop-ins graph."""
+    if mode == "coarse":
+        mode = "simplified"
+
     (
         lock_complexes,
         bridge_complexes,

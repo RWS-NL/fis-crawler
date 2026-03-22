@@ -18,6 +18,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          cache-dependency-glob: "uv.lock"
           
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -47,6 +48,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          cache-dependency-glob: "uv.lock"
           
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -66,7 +68,6 @@ jobs:
           path: output/euris-export/
           retention-days: 1
 
-
   crawl-disk:
     runs-on: ubuntu-latest
     steps:
@@ -77,6 +78,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          cache-dependency-glob: "uv.lock"
           
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -96,100 +98,366 @@ jobs:
           path: output/disk-export/
           retention-days: 1
 
-  validate-graph:
-    needs: [crawl-fis, crawl-euris, crawl-disk]
+  build-fis-graph:
+    needs: [crawl-fis]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          
+          cache-dependency-glob: "uv.lock"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version-file: "pyproject.toml"
-
       - name: Install dependencies
         run: uv sync --all-groups
-
       - name: Download FIS Export
         uses: actions/download-artifact@v4
         with:
           name: fis-export
           path: output/fis-export/
+      - name: Build FIS Graph
+        run: uv run python -m fis.cli graph fis
+      - name: Enrich FIS Graph
+        run: uv run python -m fis.cli graph enrich-fis
+      - name: Upload FIS Graphs
+        uses: actions/upload-artifact@v4
+        with:
+          name: fis-graphs
+          path: |
+            output/fis-graph/
+            output/fis-enriched/
+          retention-days: 7
 
+  build-euris-graph:
+    needs: [crawl-euris]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
       - name: Download EURIS Export
         uses: actions/download-artifact@v4
         with:
           name: euris-export
           path: output/euris-export/
+      - name: Build EURIS Graph
+        run: uv run python -m fis.cli graph euris
+      - name: Enrich EURIS Graph
+        run: uv run python -m fis.cli graph enrich-euris
+      - name: Upload EURIS Graphs
+        uses: actions/upload-artifact@v4
+        with:
+          name: euris-graphs
+          path: |
+            output/euris-graph/
+            output/euris-enriched/
+          retention-days: 7
 
+  merge-graphs:
+    needs: [build-fis-graph, build-euris-graph]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Download FIS Enriched
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-graphs
+          path: output/
+      - name: Download EURIS Enriched
+        uses: actions/download-artifact@v4
+        with:
+          name: euris-graphs
+          path: output/
+      - name: Merge Graphs
+        run: uv run python -m fis.cli graph merge
+      - name: Upload Merged Graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: merged-graph
+          path: output/merged-graph/
+          retention-days: 30
+
+  schematize-lock:
+    needs: [crawl-fis, crawl-disk, build-fis-graph]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Download FIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-export
+          path: output/fis-export/
       - name: Download DISK Export
         uses: actions/download-artifact@v4
         with:
           name: disk-export
           path: output/disk-export/
-
-      - name: Build and enrich graphs
-        run: uv run python -m fis.cli graph all
-
+      - name: Download FIS Graph
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-graphs
+          path: output/
       - name: Run Lock Schematization
-        run: uv run python -m fis.cli lock schematize
-        continue-on-error: true
+        run: uv run python -m fis.cli lock schematize --fis-graph output/fis-graph/graph.pickle
+      - name: Upload Lock Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lock-schematization
+          path: output/lock-schematization/
+          retention-days: 30
 
+  schematize-bridge:
+    needs: [crawl-fis, crawl-disk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Download FIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-export
+          path: output/fis-export/
+      - name: Download DISK Export
+        uses: actions/download-artifact@v4
+        with:
+          name: disk-export
+          path: output/disk-export/
       - name: Run Bridge Schematization
         run: uv run python -m fis.cli bridge schematize
-        continue-on-error: true
+      - name: Upload Bridge Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-schematization
+          path: output/bridge-schematization/
+          retention-days: 30
 
-      - name: Run Integrated Dropins Schematization
-        run: uv run python -m fis.cli dropins schematize
-        continue-on-error: true
+  schematize-dropins-coarse:
+    needs: [crawl-fis, crawl-disk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Download FIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-export
+          path: output/fis-export/
+      - name: Download DISK Export
+        uses: actions/download-artifact@v4
+        with:
+          name: disk-export
+          path: output/disk-export/
+      - name: Run Integrated Dropins Schematization (Coarse)
+        run: uv run python -m fis.cli dropins schematize --mode coarse --output-dir output/dropins-schematization-coarse
+      - name: Upload Dropins Coarse Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: integrated-schematization-coarse
+          path: output/dropins-schematization-coarse/
+          retention-days: 30
 
+  schematize-dropins-detailed:
+    needs: [crawl-fis, crawl-disk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Download FIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-export
+          path: output/fis-export/
+      - name: Download DISK Export
+        uses: actions/download-artifact@v4
+        with:
+          name: disk-export
+          path: output/disk-export/
+      - name: Run Integrated Dropins Schematization (Detailed)
+        run: uv run python -m fis.cli dropins schematize --mode detailed --output-dir output/dropins-schematization-detailed
+      - name: Upload Dropins Detailed Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: integrated-schematization-detailed
+          path: output/dropins-schematization-detailed/
+          retention-days: 30
+
+  schematize-dropins-berths:
+    needs: [crawl-fis, crawl-disk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Download FIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-export
+          path: output/fis-export/
+      - name: Download DISK Export
+        uses: actions/download-artifact@v4
+        with:
+          name: disk-export
+          path: output/disk-export/
       - name: Run Integrated Dropins Schematization with Berths
         run: >
           uv run python -m fis.cli dropins schematize
           --include-berths
           --output-dir output/integrated-schematization-with-berths
-        continue-on-error: true
+      - name: Upload Dropins Berths Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: integrated-schematization-with-berths
+          path: output/integrated-schematization-with-berths/
+          retention-days: 30
 
+  validate-fis:
+    needs: [build-fis-graph]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Download FIS Graphs
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-graphs
+          path: output/
       - name: Generate FIS Validation Report
         run: >
           uv run python -m fis.cli graph validate
           --graph output/fis-enriched/graph.pickle
           --schema config/schema.toml
           --output-file output/fis_validation_report.md
+      - name: Upload FIS Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: fis-validation-report
+          path: output/fis_validation_report.md
+          retention-days: 30
 
+  validate-merged:
+    needs: [merge-graphs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Download Merged Graph
+        uses: actions/download-artifact@v4
+        with:
+          name: merged-graph
+          path: output/merged-graph/
       - name: Generate Merged Validation Report
         run: >
           uv run python -m fis.cli graph validate
           --graph output/merged-graph/graph.pickle
           --schema config/schema.toml
           --output-file output/merged_validation_report.md
-
-      - name: Upload Artifacts
+      - name: Upload Merged Report
         uses: actions/upload-artifact@v4
         with:
-          name: fis-pipeline-artifacts
-          path: |
-            output/fis_validation_report.md
-            output/merged_validation_report.md
-            output/fis-graph/*.pickle
-            output/fis-graph/*.geoparquet
-            output/euris-graph/*.pickle
-            output/euris-graph/*.geoparquet
-            output/euris-graph/*.gpkg
-            output/merged-graph/*.pickle
-            output/merged-graph/*.geoparquet
-            output/lock-schematization/*.geoparquet
-            output/lock-schematization/*.json
-            output/bridge-schematization/*.geoparquet
-            output/bridge-schematization/*.json
-            output/integrated-schematization/*.geoparquet
-            output/integrated-schematization/*.json
-            output/integrated-schematization-with-berths/*.geoparquet
-            output/integrated-schematization-with-berths/*.json
+          name: merged-validation-report
+          path: output/merged_validation_report.md
           retention-days: 30

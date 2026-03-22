@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  lint-and-test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -30,14 +30,51 @@ jobs:
       - name: Run Ruff Linter
         run: uvx ruff check fis/ tests/
         
-      - name: Print Ruff Formatter Diff
-        run: uvx ruff format --diff fis/ tests/
-
       - name: Run Ruff Formatter Check
         run: uvx ruff format --check fis/ tests/
-        
+
+  test-dropins-schematization:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          
+      - name: Install dependencies
+        run: uv sync --all-groups
+
       - name: Run Integrated Dropins Schematization (subset)
         run: uv run python -m fis.cli dropins schematize --export-dir tests/data/fis-export --disk-dir tests/data/disk-export --output-dir output/dropins-schematization
+
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          
+      - name: Install dependencies
+        run: uv sync --all-groups
 
       - name: Run Pytest
         run: uv run pytest tests/
