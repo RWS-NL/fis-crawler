@@ -38,7 +38,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fis-export
-          path: output/fis-export/
+          path: output/
+          include-hidden-files: true
           retention-days: 1
 
   crawl-euris:
@@ -68,7 +69,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: euris-export
-          path: output/euris-export/
+          path: output/
+          include-hidden-files: true
           retention-days: 1
 
   crawl-disk:
@@ -98,7 +100,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: disk-export
-          path: output/disk-export/
+          path: output/
+          include-hidden-files: true
           retention-days: 1
 
   build-fis-graph:
@@ -131,9 +134,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fis-graphs
-          path: |
-            output/fis-graph/
-            output/fis-enriched/
+          path: output/
+          include-hidden-files: true
           retention-days: 7
 
   build-euris-graph:
@@ -166,9 +168,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: euris-graphs
-          path: |
-            output/euris-graph/
-            output/euris-enriched/
+          path: output/
+          include-hidden-files: true
           retention-days: 7
 
   merge-graphs:
@@ -188,12 +189,12 @@ jobs:
           python-version-file: "pyproject.toml"
       - name: Install dependencies
         run: uv sync --all-groups
-      - name: Download FIS Enriched
+      - name: Download FIS Graphs
         uses: actions/download-artifact@v4
         with:
           name: fis-graphs
           path: output/
-      - name: Download EURIS Enriched
+      - name: Download EURIS Graphs
         uses: actions/download-artifact@v4
         with:
           name: euris-graphs

@@ -148,9 +148,20 @@ def schematize(
         return
 
     def save_gdf(gdf: gpd.GeoDataFrame, name: str) -> None:
-        if gdf.empty:
+        if gdf is None or gdf.empty:
             logger.warning("No features for %s, skipping.", name)
             return
+
+        # Ensure ID columns are strings to avoid Arrow conversion errors (mixed types)
+        from fis.utils import load_schema, stringify_id
+
+        schema = load_schema()
+        id_cols = schema.get("identifiers", {}).get("columns", [])
+        gdf = gdf.copy()
+        for col in id_cols:
+            if col in gdf.columns:
+                gdf[col] = gdf[col].apply(stringify_id)
+
         gdf.to_file(output_dir / f"{name}.geojson", driver="GeoJSON")
         gdf.to_parquet(output_dir / f"{name}.geoparquet")
         logger.info("Saved %d %s features to %s", len(gdf), name, output_dir)

@@ -307,6 +307,10 @@ def merge(
     # Export nodes as geoparquet and geojson
     node_data = []
     skip_cols = {"euris_nodes"}  # Non-serializable columns to skip
+    # Type cleanup for known columns
+    schema = load_schema(pathlib.Path("config/schema.toml"))
+    id_cols = schema.get("identifiers", {}).get("columns", [])
+
     for node_id, attrs in merged.nodes(data=True):
         row = {"node_id": node_id}
         for k, v in attrs.items():
@@ -319,6 +323,13 @@ def merge(
                 row["geometry"] = wkt.loads(v)
             else:
                 row[k] = v
+
+        # Standardize IDs
+        for col in id_cols:
+            if col in row:
+                from fis.utils import stringify_id
+
+                row[col] = stringify_id(row[col])
 
         # Type cleanup for known columns
         if "vplnpoint" in row and row["vplnpoint"] is not None:
@@ -344,6 +355,14 @@ def merge(
             row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
         elif "geometry" in row and isinstance(row["geometry"], str):
             row["geometry"] = wkt.loads(row["geometry"])
+
+        # Standardize IDs
+        for col in id_cols:
+            if col in row:
+                from fis.utils import stringify_id
+
+                row[col] = stringify_id(row[col])
+
         edge_data.append(row)
     if edge_data:
         edges_gdf = gpd.GeoDataFrame(edge_data, crs="EPSG:4326")
