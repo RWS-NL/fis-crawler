@@ -189,12 +189,12 @@ def _identify_embedded_structures(
 
     openings_rd = openings_gdf.to_crs(settings.PROJECTED_CRS)
     chambers_rd = chambers_gdf.to_crs(settings.PROJECTED_CRS)
-    matches = {}
+
+    all_candidates = []
 
     for _, op_row in openings_rd.iterrows():
         op_id = str(op_row["id"])
         op_name = str(op_row.get("name", op_row.get("Name", ""))).lower()
-        candidates = []
         for _, ch_row in chambers_rd.iterrows():
             ch_id = str(ch_row["id"])
             ch_name = str(ch_row.get("name", ch_row.get("Name", ""))).lower()
@@ -202,13 +202,18 @@ def _identify_embedded_structures(
             if dist > settings.EMBEDDED_STRUCTURE_MAX_DIST_M:
                 continue
             score = _calculate_semantic_spatial_score(op_name, ch_name, dist)
-            candidates.append((score, dist, ch_id, ch_row))
+            if score > 1.0:
+                all_candidates.append((score, dist, op_id, ch_id, ch_row))
 
-        if candidates:
-            candidates.sort(key=lambda x: (-x[0], x[1]))
-            best_score, best_dist, best_ch_id, best_ch_row = candidates[0]
-            if best_score > 1.0:
-                matches[op_id] = {"ch_id": best_ch_id, "ch_row": best_ch_row}
+    all_candidates.sort(key=lambda x: (-x[0], x[1]))
+
+    matches = {}
+    matched_chs = set()
+
+    for score, dist, op_id, ch_id, ch_row in all_candidates:
+        if op_id not in matches and ch_id not in matched_chs:
+            matches[op_id] = {"ch_id": ch_id, "ch_row": ch_row}
+            matched_chs.add(ch_id)
 
     return matches
 
@@ -887,7 +892,7 @@ def _export_graph(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    G = nx.MultiDiGraph()
+    G = nx.MultiGraph()
     _populate_graph(G, nodes_gdf, edges_gdf)
 
     with open(output_dir / "graph.pickle", "wb") as f:
@@ -922,7 +927,7 @@ def _separate_features(all_features: List[Dict]) -> Tuple[List[Dict], List[Dict]
 
 
 def _populate_graph(
-    G: nx.MultiDiGraph, nodes_gdf: gpd.GeoDataFrame, edges_gdf: gpd.GeoDataFrame
+    G: nx.MultiGraph, nodes_gdf: gpd.GeoDataFrame, edges_gdf: gpd.GeoDataFrame
 ):
     for _, row in nodes_gdf.iterrows():
         node_attr = {k: v for k, v in row.items() if k != "geometry"}

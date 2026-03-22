@@ -82,7 +82,32 @@
 - **Bridge Openings Integrated**: {{ "Yes" if dropins.openings_present else "No" }}
 - **Total Spliced Edges**: {{ dropins.total_splices }}
 
-## 6. Suggested Improvements
+## 6. Edge Geometry Consistency
+- **Status**: {% if edge_geometry.status == "PASS" %}✅{% else %}⚠️{% endif %} {{ edge_geometry.status }}
+- **Zero-length Edges**: {{ edge_geometry.zero_length_count }}
+- **Mismatched Lengths (>1m)**: {{ edge_geometry.mismatched_length_count }}
+- **Max Length Mismatch**: {{ "%.2f"|format(edge_geometry.max_mismatch_meters) }} m
+- **Avg Length Mismatch**: {{ "%.2f"|format(edge_geometry.avg_mismatch_meters) }} m
+
+{% if edge_geometry.zero_length_count > 0 %}
+### Zero-length Edge Examples
+| Edge ID | Source Node | Target Node | Actual Len |
+|---------|-------------|-------------|------------|
+{% for e in edge_geometry.zero_length_examples %}
+| {{ e.id }} | {{ e.u }} | {{ e.v }} | {{ "%.4f"|format(e.actual_len) }} |
+{% endfor %}
+{% endif %}
+
+{% if edge_geometry.mismatched_length_count > 0 %}
+### Mismatched Length Examples (Top 10)
+| Edge ID | length_m | geometry length | Difference |
+|---------|----------|-----------------|------------|
+{% for e in edge_geometry.mismatched_length_examples %}
+| {{ e.id }} | {{ "%.2f"|format(e.length_m) }} | {{ "%.2f"|format(e.actual_len) }} | {{ "%.2f"|format(e.diff) }} |
+{% endfor %}
+{% endif %}
+
+## 7. Suggested Improvements
 - **Attribute Cleanup**: Investigate attributes with high missing/null counts (>50%) and determine if they are required or can be dropped.
 - **Graph Connectivity**: There are multiple disjoint subgraphs. Investigate whether the top 2-10 subgraphs are legitimately disconnected waterways or missing logical connections.
 - **Legacy Attributes**: If non-standard legacy attributes are flagged, ensure they are added to `schema.toml` `attributes.edges` or `attributes.nodes` to map to canonical names.

@@ -29,7 +29,87 @@ class GraphValidator:
             "schema_compliance": {},
             "critical_connections": {},
             "dropins": {},
+            "edge_geometry": {},
         }
+
+    def check_edge_geometry(self) -> Dict[str, Any]:
+        """Check edge geometry consistency (length_m vs actual length, non-zero length)."""
+        logger.info("Checking edge geometry consistency...")
+        from pyproj import Geod
+        from shapely import wkt
+        from shapely.geometry import LineString
+
+        geod = Geod(ellps="WGS84")
+
+        zero_length_edges = []
+        mismatched_length_edges = []
+        total_mismatch_error = 0.0
+        max_mismatch_error = 0.0
+
+        for u, v, d in self.graph.edges(data=True):
+            geom = d.get("geometry")
+            if not geom:
+                continue
+
+            if isinstance(geom, str):
+                line = wkt.loads(geom)
+            else:
+                # Assuming it's already a shapely object or mapping
+                from shapely.geometry import shape
+
+                line = shape(geom)
+
+            if not isinstance(line, LineString):
+                continue
+
+            actual_len = geod.geometry_length(line)
+            length_m = d.get("length_m")
+
+            if actual_len < 0.001:  # 1mm threshold for "zero"
+                zero_length_edges.append(
+                    {
+                        "id": d.get("id", f"{u}->{v}"),
+                        "u": u,
+                        "v": v,
+                        "actual_len": actual_len,
+                    }
+                )
+
+            if length_m is not None:
+                diff = abs(actual_len - length_m)
+                if diff > 1.0:  # 1 meter threshold for mismatch
+                    mismatched_length_edges.append(
+                        {
+                            "id": d.get("id", f"{u}->{v}"),
+                            "u": u,
+                            "v": v,
+                            "length_m": length_m,
+                            "actual_len": actual_len,
+                            "diff": diff,
+                        }
+                    )
+                total_mismatch_error += diff
+                if diff > max_mismatch_error:
+                    max_mismatch_error = diff
+
+        edge_geometry = {
+            "zero_length_count": len(zero_length_edges),
+            "zero_length_examples": zero_length_edges[:10],
+            "mismatched_length_count": len(mismatched_length_edges),
+            "mismatched_length_examples": sorted(
+                mismatched_length_edges, key=lambda x: x["diff"], reverse=True
+            )[:10],
+            "max_mismatch_meters": max_mismatch_error,
+            "avg_mismatch_meters": total_mismatch_error / self.graph.number_of_edges()
+            if self.graph.number_of_edges() > 0
+            else 0.0,
+            "status": "PASS"
+            if not zero_length_edges
+            and len(mismatched_length_edges) < (self.graph.number_of_edges() * 0.05)
+            else "WARNING",
+        }
+        self.results["edge_geometry"] = edge_geometry
+        return edge_geometry
 
     def check_statistics(self) -> Dict[str, Any]:
         """Calculate graph statistics."""
@@ -295,6 +375,7 @@ class GraphValidator:
         schema = self.results["schema_compliance"]
         critical = self.results["critical_connections"]
         dropins = self.results.get("dropins", {})
+        edge_geometry = self.results.get("edge_geometry", {})
 
         # Calculate sources for table
         sources = set(
@@ -313,5 +394,6 @@ class GraphValidator:
             schema=schema,
             critical=critical,
             dropins=dropins,
+            edge_geometry=edge_geometry,
             sources=list(sources),
         )
