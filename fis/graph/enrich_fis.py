@@ -6,6 +6,7 @@ fairwaydepth, fairwaytype, and tidalarea to FIS graph edges.
 
 import logging
 import pathlib
+from typing import Optional
 
 import geopandas as gpd
 import networkx as nx
@@ -64,7 +65,7 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
 
 def match_by_geometry(
     sections: gpd.GeoDataFrame,
-    data: gpd.GeoDataFrame,
+    data: Optional[gpd.GeoDataFrame],
     columns: list[str],
     prefix: str,
 ) -> pd.DataFrame:
@@ -72,7 +73,7 @@ def match_by_geometry(
 
     Args:
         sections: Sections GeoDataFrame with Id column.
-        data: Data GeoDataFrame to match.
+        data: Optional Data GeoDataFrame to match.
         columns: Columns to extract from data.
         prefix: Prefix to add to column names.
 
@@ -116,7 +117,7 @@ def match_by_geometry(
 
 def match_by_route_km(
     sections: gpd.GeoDataFrame,
-    data: gpd.GeoDataFrame,
+    data: Optional[gpd.GeoDataFrame],
     columns: list[str],
     prefix: str,
 ) -> pd.DataFrame:
@@ -127,7 +128,7 @@ def match_by_route_km(
 
     Args:
         sections: Sections with RouteId, RouteKmBegin, RouteKmEnd.
-        data: Data with same columns.
+        data: Optional Data with same columns.
         columns: Columns to extract.
         prefix: Prefix for output columns.
 
@@ -298,11 +299,12 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
     )
 
     # Fairway number (join by FairwayId)
-    if "fairway" in datasets:
+    fairway = datasets.get("fairway")
+    if fairway is not None and {"Id", "FairwayNumber"}.issubset(fairway.columns):
         fairway_df = (
             sections[["Id", "FairwayId"]]
             .merge(
-                datasets["fairway"][["Id", "FairwayNumber"]].rename(
+                fairway[["Id", "FairwayNumber"]].rename(
                     columns={"Id": "FairwayId", "FairwayNumber": "fairway_number"}
                 ),
                 on="FairwayId",

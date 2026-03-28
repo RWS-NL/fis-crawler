@@ -50,6 +50,8 @@ def sample_maxdim(sample_sections):
             "Id": [101, 102],
             "GeneralDepth": [3.5, 2.0],
             "GeneralWidth": [40.0, 25.0],
+            "WidePushedWidth": [15.0, 10.0],
+            "Note": ["Some Note", None],
             "geometry": [
                 sample_sections.iloc[0].geometry,  # Matches section 1
                 sample_sections.iloc[2].geometry,  # Matches section 3
@@ -85,6 +87,7 @@ def sample_speed():
             "RouteKmEnd": [4.0, 10.0],
             "Speed": [12.0, 8.0],
             "MaxSpeedUp": [15.0, 10.0],
+            "MaxSpeedConvoyUp": [10.0, 6.0],
             "geometry": [
                 LineString([(0, 0), (0.5, 0)]),
                 LineString([(0.5, 0), (1, 0)]),
@@ -306,6 +309,16 @@ class TestBuildSectionEnrichment:
         # Check speed (canonical)
         assert "maxspeed" in result.columns
         assert result.loc[1, "maxspeed"] == 12.0
+        assert "maxspeed_convoy_up" in result.columns
+        assert result.loc[1, "maxspeed_convoy_up"] == 10.0
+
+        # Check wide pushed (canonical)
+        assert "dim_wide_pushed_width" in result.columns
+        assert result.loc[1, "dim_wide_pushed_width"] == 15.0
+
+        # Check note (canonical)
+        assert "dim_note" in result.columns
+        assert result.loc[1, "dim_note"] == "Some Note"
 
         # Check status (canonical)
         assert "status_description" in result.columns
