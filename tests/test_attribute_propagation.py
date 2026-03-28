@@ -1,4 +1,5 @@
 import pandas as pd
+import geopandas as gpd
 from shapely.geometry import Point
 from fis import utils
 from fis.core import group_complexes
@@ -48,7 +49,19 @@ def test_group_complexes_preserves_extra_attributes():
     """Integration-style test to ensure group_complexes propagates extra attributes."""
     # Use real geometry objects as GeoDataFrame expects them
     locks = pd.DataFrame(
-        [{"Id": 1, "Name": "Lock 1", "ExtraLockAttr": "Extra", "Geometry": Point(0, 0)}]
+        [
+            {
+                "Id": 1,
+                "Name": "Lock 1",
+                "ExtraLockAttr": "Extra",
+                "Geometry": Point(0, 0),
+                "IsrsId": None,
+                "FairwayId": None,
+                "SectionId": None,
+                "RelatedBuildingComplexName": None,
+                "OperatingTimesId": None,
+            }
+        ]
     )
     chambers = pd.DataFrame(
         [
@@ -60,16 +73,25 @@ def test_group_complexes_preserves_extra_attributes():
                 "Length": 100.0,
                 "Width": 12.0,
                 "Geometry": Point(0, 0),
+                "OperatingTimesId": None,
             }
         ]
     )
 
     # Mock other inputs
-    isrs = None
-    ris_df = None
-    fairways = None
-    berths = None
-    sections = None
+    isrs = gpd.GeoDataFrame(
+        columns=["id", "geometry", "code"], crs="EPSG:4326", geometry="geometry"
+    )
+    ris_df = pd.DataFrame(columns=["isrs_code", "name", "function"])
+    fairways = gpd.GeoDataFrame(
+        columns=["id", "geometry", "name"], crs="EPSG:4326", geometry="geometry"
+    )
+    berths = gpd.GeoDataFrame(
+        columns=["id", "geometry", "name"], crs="EPSG:4326", geometry="geometry"
+    )
+    sections = gpd.GeoDataFrame(
+        columns=["id", "geometry", "fairway_id"], crs="EPSG:4326", geometry="geometry"
+    )
 
     complexes = group_complexes(
         locks, chambers, isrs, ris_df, fairways, berths, sections

@@ -61,7 +61,8 @@ def splice_fairways(
 def _is_embedded(dropin: Dict, embedded_ids: Set[str]) -> bool:
     if dropin["type"] != "bridge":
         return False
-    for op in dropin["obj"].get("openings", []):
+    # If it's a bridge, we expect it to have openings
+    for op in dropin["obj"]["openings"]:
         if str(op["id"]) in embedded_ids:
             return True
     return False
@@ -215,7 +216,9 @@ def _generate_structure_cuts(
         obj = dropin["obj"]
         geom_wkt = obj.get("geometry")
         if not geom_wkt:
-            continue
+            raise ValueError(
+                f"Drop-in {dropin['type']} {obj.get('id', obj.get('Id'))} has no geometry. Cannot calculate splicing position."
+            )
 
         geom = wkt.loads(geom_wkt)
         geom_rd = gpd.GeoSeries([geom], crs="EPSG:4326").to_crs(utm_crs).iloc[0]

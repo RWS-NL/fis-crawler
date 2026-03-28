@@ -134,7 +134,9 @@ def inject_embedded_bridges(
                         best_line_geom = line_geom
 
         if not best_edge:
-            continue
+            raise ValueError(
+                f"Could not find a suitable lock chamber edge to splice embedded opening {op_id} into Chamber {ch_id}"
+            )
 
         items_to_remove.add(best_edge["properties"]["id"])
 

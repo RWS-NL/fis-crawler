@@ -21,17 +21,21 @@ def generate_berth_graph_features(berths: List[Dict]) -> List[Dict]:
     for berth in berths:
         raw_id = berth.get("id", berth.get("Id"))
         if raw_id is None:
-            logger.warning("Skipping berth without 'id'/'Id': %s", berth)
-            continue
+            raise ValueError(f"Berth missing 'id'/'Id': {berth}")
         bid = utils.stringify_id(raw_id)
+
         conn_wkt = berth.get("connection_geometry")
         if not conn_wkt:
+            logger.warning(
+                "Berth %s missing 'connection_geometry'. It was not matched to a fairway section or the section was not found in the export. Skipping.",
+                bid,
+            )
             continue
 
         conn_pt = wkt.loads(conn_wkt)
         berth_geom = berth.get("geometry")
         if not berth_geom:
-            continue
+            raise ValueError(f"Berth {bid} missing 'geometry'.")
         berth_pt = wkt.loads(berth_geom) if isinstance(berth_geom, str) else berth_geom
         if berth_pt.geom_type != "Point":
             berth_pt = berth_pt.centroid

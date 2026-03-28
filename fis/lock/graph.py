@@ -1,13 +1,14 @@
+import logging
 import pandas as pd
 import geopandas as gpd
 import json
 from shapely import wkt
-from shapely.geometry import Point, mapping
+from shapely.geometry import Point, mapping, LineString, shape
 from pyproj import Geod
 from fis.lock.utils import find_chamber_doors
 from fis import utils
-from shapely.geometry import LineString
-from shapely.geometry import shape
+
+logger = logging.getLogger(__name__)
 
 geod = Geod(ellps="WGS84")
 
@@ -412,6 +413,11 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                 )
 
             else:
+                logger.warning(
+                    "Could not find entry/exit doors for chamber %s (Lock %s). Falling back to centroid node.",
+                    chamber_id,
+                    lock_id,
+                )
                 # Fallback to centroid if doors not found or points missing
                 chamber_node_id = f"chamber_{chamber_id}"
                 centroid = c_geom.centroid if c_geom else None
@@ -472,10 +478,14 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
     return features
 
 
-def _find_best_section_id(line, sections):
-    """Find the section ID with the most overlap with the given line."""
+def _find_best_section_id(line, sections, context=""):
+    """Find the section ID with the most overlap with the given line.
+    Raises ValueError if no valid section can be associated.
+    """
     if not sections:
-        return None
+        raise ValueError(
+            f"No sections provided to find best match for geometry {context}"
+        )
 
     # 1. Pre-parse geometries once
     parsed_sections = []
@@ -488,7 +498,9 @@ def _find_best_section_id(line, sections):
             parsed_sections.append((utils.stringify_id(s.get("id")), s_geom))
 
     if not parsed_sections:
-        return None
+        raise ValueError(
+            f"Sections provided but none had valid geometries for matching {context}"
+        )
 
     best_sid = None
     max_overlap = -1.0
@@ -599,7 +611,9 @@ def _build_chamber_route_features(
                 "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
                 "section_id": _find_best_section_id(
-                    approach_line, c.get("sections", [])
+                    approach_line,
+                    c.get("sections", []),
+                    context=f"Approach for Chamber {chamber_id} (Lock {lock_id})",
                 ),
                 "source_node": split_node_id,
                 "target_node": chamber_node_start_id,
@@ -625,7 +639,9 @@ def _build_chamber_route_features(
                 "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
                 "section_id": _find_best_section_id(
-                    chamber_line, c.get("sections", [])
+                    chamber_line,
+                    c.get("sections", []),
+                    context=f"Route for Chamber {chamber_id} (Lock {lock_id})",
                 ),
                 "dim_length": chamber.get("dim_length"),
                 "dim_width": chamber.get("dim_width"),
@@ -652,7 +668,11 @@ def _build_chamber_route_features(
                 "chamber_id": chamber_id,
                 "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": _find_best_section_id(exit_line, c.get("sections", [])),
+                "section_id": _find_best_section_id(
+                    exit_line,
+                    c.get("sections", []),
+                    context=f"Exit for Chamber {chamber_id} (Lock {lock_id})",
+                ),
                 "source_node": chamber_node_end_id,
                 "target_node": merge_node_id,
                 "length_m": geod.geometry_length(exit_line),

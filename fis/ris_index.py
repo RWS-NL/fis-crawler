@@ -10,20 +10,11 @@ def load_ris_index(path: pathlib.Path) -> pd.DataFrame:
         path: Path to the RisIndexNL.xlsx file
 
     Returns:
-        pd.DataFrame: DataFrame with columns ['isrs_code', 'name', 'function']
+        DataFrame with standardized columns [isrs_code, name, function].
     """
-    # Load the Excel file, strictly assuming header is on row 2 (index 1)
-    # The file has a complex header structure, row 1 contains the actual column names
+    # The RIS Index from vaarweginformatie.nl has header info in row 0
+    # Data starts at row 1 (header) and actual records at row 2
     df = pd.read_excel(path, sheet_name="RIS Index", header=1)
-
-    # Clean column names: replace newlines with spaces and strip whitespace
-    df.columns = [str(c).replace("\n", " ").strip() for c in df.columns]
-
-    # Map original column names to our internal schema
-    # Based on inspection:
-    # 'ISRS Location Code' -> isrs_code
-    # 'Object name' -> name
-    # 'Function' -> function
 
     column_map = {
         "ISRS Location Code": "isrs_code",
@@ -57,23 +48,6 @@ def load_ris_index(path: pathlib.Path) -> pd.DataFrame:
         # Filter for codes that look like valid ISRS (e.g. 20 chars, distinct from 'auto')
         # A simple check is length > 10.
         df = df[df["isrs_code"].str.len() > 10]
-        # Also could check if it starts with valid country codes if we wanted to be strict
-        # df = df[df['isrs_code'].str.match(r'^[A-Z]{2}')]
-
-    # Ensure isrs_code is unique if needed, but for now just unique index
-    # df = df.drop_duplicates(subset=['isrs_code'])
 
     # Return relevant columns
     return df[list(column_map.values())]
-
-
-if __name__ == "__main__":
-    # Test execution
-    base_dir = pathlib.Path(__file__).parent.parent
-    path = base_dir / "fis-export" / "RisIndexNL.xlsx"
-    if path.exists():
-        df = load_ris_index(path)
-        print(f"Loaded {len(df)} records")
-        print(df.head())
-    else:
-        print(f"File not found at {path}")

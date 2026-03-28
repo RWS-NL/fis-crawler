@@ -96,32 +96,92 @@ class EurisFilesPipeline(FilesPipeline):
         data_dir = pathlib.Path(self.store.basedir)
         excel_files = list(data_dir.glob("RisIndex*.xlsx"))
         spider.logger.info(f"Found {len(excel_files)} RIS Excel files to process.")
-        ris_gdfs = []
+
+        ris_dfs = []
         for excel_file in tqdm(excel_files, desc="Processing RIS Excel files"):
             spider.logger.info(f"Reading {excel_file}")
-            ris_df = pd.read_excel(excel_file)
-            # Adjust column names as needed
-            ris_df_geoms = gpd.points_from_xy(
-                x=ris_df.get("long_", ris_df.columns[0]),
-                y=ris_df.get("Lat", ris_df.columns[1]),
+            # Use calamine engine for much faster excel reading if available
+            try:
+                df = pd.read_excel(excel_file, engine="calamine")
+            except Exception as e:
+                spider.logger.warning(
+                    f"Calamine engine failed for {excel_file}, falling back: {e}"
+                )
+                df = pd.read_excel(excel_file)
+
+            if df.empty:
+                continue
+
+            # Standardize essential columns for efficient concatenation
+            # 1. Coordinates
+            lon_col = (
+                "long_"
+                if "long_" in df.columns
+                else (df.columns[0] if len(df.columns) > 0 else None)
+            )
+            lat_col = (
+                "Lat"
+                if "Lat" in df.columns
+                else (df.columns[1] if len(df.columns) > 1 else None)
+            )
+
+            if lon_col and lat_col:
+                df = df.rename(columns={lon_col: "_longitude", lat_col: "_latitude"})
+
+            # 2. Country Code (if exists)
+            cc_col = next((c for c in df.columns if c.lower() == "countrycode"), None)
+            if cc_col:
+                df = df.rename(columns={cc_col: "_country_code"})
+
+            # Filter out entirely empty rows/columns before adding to list
+            df = df.dropna(axis=0, how="all")
+            # Drop columns that are 100% NaN to keep concatenation lean
+            df = df.dropna(axis=1, how="all")
+
+            df["_source_path"] = excel_file.name
+            ris_dfs.append(df)
+
+        if ris_dfs:
+            spider.logger.info("Concatenating %d DataFrames...", len(ris_dfs))
+            # Concatenate plain DataFrames (much faster than GeoDataFrames)
+            combined_df = pd.concat(ris_dfs, ignore_index=True, sort=False)
+
+            # Final filtering
+            if (
+                "_longitude" in combined_df.columns
+                and "_latitude" in combined_df.columns
+            ):
+                combined_df = combined_df.dropna(subset=["_longitude", "_latitude"])
+
+            if combined_df.empty:
+                spider.logger.info("No valid records remain after filtering.")
+                return
+
+            spider.logger.info(
+                "Creating GeoDataFrame with %d records...", len(combined_df)
+            )
+            # Convert to GeoDataFrame ONCE at the end
+            geometry = gpd.points_from_xy(
+                x=combined_df["_longitude"],
+                y=combined_df["_latitude"],
                 crs="EPSG:4326",
             )
-            ris_gdf = gpd.GeoDataFrame(ris_df, geometry=ris_df_geoms)
-            ris_gdf["path"] = excel_file.name
-            ris_gdfs.append(ris_gdf)
-        if ris_gdfs:
-            ris_gdf = pd.concat(ris_gdfs)
+            ris_gdf = gpd.GeoDataFrame(combined_df, geometry=geometry)
 
             out_dir = data_dir / version
             out_dir.mkdir(exist_ok=True)
             out_path = out_dir / f"ris_index_{version}.gpkg"
-            spider.logger.info(
-                f"Saving RIS GeoDataFrame with {len(ris_gdf)} records to {out_path}"
-            )
-            ris_gdf.to_file(out_path)
+
+            spider.logger.info(f"Saving RIS GeoDataFrame to {out_path}")
+            # Use engine='pyogrio' if available for faster writing
+            try:
+                ris_gdf.to_file(out_path, engine="pyogrio")
+            except Exception:
+                ris_gdf.to_file(out_path)
+
             spider.logger.info(f"Saved RIS GeoDataFrame to {out_path}")
         else:
-            spider.logger.info("No RIS GeoDataFrames were created.")
+            spider.logger.info("No RIS Excel files were successfully read.")
 
 
 # concat_network and generate_graph functions moved to fis/graph/euris.py

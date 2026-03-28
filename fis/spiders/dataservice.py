@@ -29,6 +29,9 @@ class DataserviceSpider(scrapy.Spider):
     wadl_url = f"{base_url}/application.wadl"
     namespaces = {"wadl": "http://wadl.dev.java.net/2009/02"}
 
+    downloads_url = "https://www.vaarweginformatie.nl/frp/api/webcontent/downloads?pageId=infra/downloads"
+    file_download_url = "https://www.vaarweginformatie.nl/fdd/main/wicket/resource/org.apache.wicket.Application/downloadfileResource?fileId={file_id}"
+
     @property
     def data_dir(self):
         data_dir = pathlib.Path(self.settings.get("FIS_EXPORT_DIR", "fis-export"))
@@ -47,6 +50,30 @@ class DataserviceSpider(scrapy.Spider):
 
     async def start(self):
         yield scrapy.Request(url=self.wadl_url, callback=self.parse_waml)
+        yield scrapy.Request(url=self.downloads_url, callback=self.parse_downloads)
+
+    def parse_downloads(self, response):
+        """Parse downloads metadata and trigger RIS Index download."""
+        data = response.json()
+        for item in data:
+            if item.get("name") == "RIS-index NL":
+                file_id = item.get("fileId")
+                if file_id:
+                    self.logger.info("Found RIS-index NL with fileId: %s", file_id)
+                    download_url = self.file_download_url.format(file_id=file_id)
+                    yield scrapy.Request(
+                        url=download_url,
+                        callback=self.save_ris_index,
+                        dont_filter=True,
+                    )
+                break
+
+    def save_ris_index(self, response):
+        """Save the downloaded RIS Index file."""
+        output_path = self.data_dir / "RisIndexNL.xlsx"
+        self.logger.info("Saving RIS Index to %s", output_path)
+        with open(output_path, "wb") as f:
+            f.write(response.body)
 
     def parse_waml(self, response):
         versions = response.xpath(

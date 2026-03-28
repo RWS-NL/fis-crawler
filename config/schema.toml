@@ -80,6 +80,7 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "Name" = "name"
 "FairwaySectionId" = "section_id"
 "FairwayId" = "fairway_id"
+"OperatingTimesId" = "operating_times_id"
 
 [attributes.chambers]
 # FIS → Canonical mappings
@@ -90,6 +91,7 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "Width" = "dim_width"
 "ThresholdUpperLevel" = "dim_threshold_upper"
 "ThresholdLowerLevel" = "dim_threshold_lower"
+"OperatingTimesId" = "operating_times_id"
 
 [attributes.subchambers]
 "Id" = "id"
@@ -135,6 +137,7 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "Id" = "id"
 "Name" = "name"
 "ParentId" = "parent_id"
+"RelatedBuildingComplexName" = "related_building_complex_name"
 "GeneralWidth" = "dim_width"
 "GeneralHeight" = "dim_height"
 "ClearanceHeightClosed" = "dim_height"
@@ -142,6 +145,9 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "PushedWidth" = "dim_pushed_width"
 "PushedHeight" = "dim_pushed_height"
 "OperatingTimesId" = "operating_times_id"
+
+[attributes.operatingtimes]
+"Id" = "id"
 
 [attributes.nodes]
 # Node attributes are mostly preserved as-is

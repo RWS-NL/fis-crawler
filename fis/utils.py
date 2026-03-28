@@ -161,7 +161,7 @@ def normalize_attributes(
     Returns:
         DataFrame with renamed columns.
     """
-    if df is None or df.empty:
+    if df.empty:
         return df
 
     if schema is None:
@@ -177,27 +177,45 @@ def normalize_attributes(
         if k in df.columns:
             rename_map[k] = v
 
-    if rename_map:
-        logger.info("Normalizing columns for %s", schema_section)
-        # Avoid duplicate columns by dropping existing columns that will be overwritten by a rename
-        new_df = df.copy()
-        for old_col, new_col in rename_map.items():
-            if old_col != new_col and new_col in new_df.columns:
-                new_df = new_df.drop(columns=[new_col])
-        # Perform rename
-        new_df = new_df.rename(columns=rename_map)
+    # 2a. Standard global renames (FIS-specific but general)
+    # These ensure consistency even if not explicitly in a schema section
+    global_renames = {"Id": "id", "Geometry": "geometry"}
+    for k, v in global_renames.items():
+        if k in df.columns and k not in rename_map:
+            rename_map[k] = v
 
-        # 3. Standardize common ID columns as STRINGS
-        # Load list from identifiers section in schema.toml
-        id_cols = schema.get("identifiers", {}).get("columns", [])
+    logger.info("Normalizing columns for %s", schema_section)
+    # Avoid duplicate columns by dropping existing columns that will be overwritten by a rename
+    new_df = df.copy()
+    for old_col, new_col in rename_map.items():
+        if old_col != new_col and new_col in new_df.columns:
+            new_df = new_df.drop(columns=[new_col])
+    # Perform rename
+    new_df = new_df.rename(columns=rename_map)
 
-        for col in id_cols:
-            if col in new_df.columns:
-                new_df[col] = new_df[col].apply(stringify_id)
+    # 2b. Ensure all target columns from explicit mappings exist
+    # Use reindex for efficiency instead of a loop
+    target_cols = list(set(mappings.values()))
+    missing_target_cols = [c for c in target_cols if c not in new_df.columns]
+    if missing_target_cols:
+        # Add missing columns as NaN efficiently
+        new_df = pd.concat(
+            [
+                new_df,
+                pd.DataFrame(np.nan, index=new_df.index, columns=missing_target_cols),
+            ],
+            axis=1,
+        )
 
-        return new_df
+    # 3. Standardize common ID columns as STRINGS
+    # Load list from identifiers section in schema.toml
+    id_cols = schema.get("identifiers", {}).get("columns", [])
 
-    return df
+    for col in id_cols:
+        if col in new_df.columns:
+            new_df[col] = new_df[col].apply(stringify_id)
+
+    return new_df
 
 
 def process_fairway_geometry(fw_row, lock_row, buffer_dist=0, openings_data=None):
@@ -315,14 +333,35 @@ def find_nearby_berths(
             | candidates["category"].isin(allowed_categories)
         ]
 
-    # Filter by allowed FairwayIDs (normalized)
+    # Filter by allowed FairwayIDs (normalized to strings for robust matching)
     if allowed_fairways and "fairway_id" in candidates.columns:
-        candidates = candidates[candidates["fairway_id"].isin(allowed_fairways)]
+        allowed_fairways_str = [stringify_id(f) for f in allowed_fairways]
+        candidates = candidates[
+            candidates["fairway_id"].apply(stringify_id).isin(allowed_fairways_str)
+        ]
 
     if candidates.empty:
         return nearby
 
     lock_geom = lock_row.geometry if hasattr(lock_row, "geometry") else None
+    if not lock_geom:
+        return nearby
+    lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
+
+    # 1. Spatial pre-filter using spatial index (if available)
+    # Buffer in degrees (approximate) for the spatial query
+    # 1000m is roughly 0.01 degrees at the equator, but more at higher latitudes
+    if candidates.sindex is not None:
+        # Use 80000 instead of 111000 to be more generous at higher latitudes (like NL)
+        buffer_deg = max_dist_m / 80000.0
+        possible_matches_index = candidates.sindex.query(
+            lg.buffer(buffer_deg), predicate="intersects"
+        )
+        candidates = candidates.iloc[possible_matches_index]
+
+    if candidates.empty:
+        return nearby
+
     geod = Geod(ellps="WGS84")
 
     # Handle disallowed sections (inside lock)
@@ -359,23 +398,24 @@ def find_nearby_berths(
         is_nearby = False
         dist_m = None
 
-        if disallowed_mask and berth.geometry:
+        if not berth.geometry:
+            continue
+
+        if disallowed_mask:
             if disallowed_mask.intersects(berth.geometry):
                 continue
 
-        # Calculate spatial distance
-        if lock_geom and berth.geometry:
-            lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
-            bg = (
-                berth.geometry
-                if isinstance(berth.geometry, Point)
-                else berth.geometry.centroid
-            )
+        lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
+        bg = (
+            berth.geometry
+            if isinstance(berth.geometry, Point)
+            else berth.geometry.centroid
+        )
 
-            if lg and bg:
-                _, _, dist_m = geod.inv(lg.x, lg.y, bg.x, bg.y)
-                if dist_m <= max_dist_m:
-                    is_nearby = True
+        if lg and bg:
+            _, _, dist_m = geod.inv(lg.x, lg.y, bg.x, bg.y)
+            if dist_m <= max_dist_m:
+                is_nearby = True
 
         if not is_nearby:
             continue

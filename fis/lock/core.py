@@ -8,8 +8,9 @@ from tqdm import tqdm
 
 from shapely.geometry import Point, LineString
 from shapely.ops import unary_union
-from fis.utils import to_python, sanitize_attrs
+from fis.utils import to_python, sanitize_attrs, stringify_id
 from fis import settings, utils
+from fis.ris_index import load_ris_index
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,12 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     def read_geo_or_parquet(dir_path, stem):
         gpq = dir_path / f"{stem}.geoparquet"
         pq = dir_path / f"{stem}.parquet"
+
+        if not gpq.exists() and not pq.exists():
+            raise FileNotFoundError(
+                f"Missing essential data: neither {gpq} nor {pq} exist."
+            )
+
         if gpq.exists():
             gdf = gpd.read_parquet(gpq)
             # Standardize on lowercase 'geometry'
@@ -31,27 +38,26 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
                 # If both exist, drop the uppercase one and ensure lowercase is active
                 gdf = gdf.drop(columns=["Geometry"]).set_geometry("geometry")
             return gdf
-        if pq.exists():
-            df = pd.read_parquet(pq)
-            # Standardize geometry column
-            if "Geometry" in df.columns:
-                geoms = df["Geometry"].apply(
+
+        df = pd.read_parquet(pq)
+        # Standardize geometry column
+        if "Geometry" in df.columns:
+            geoms = df["Geometry"].apply(
+                lambda x: wkt.loads(x) if isinstance(x, str) else x
+            )
+            df = df.drop(columns=["Geometry"])
+            # If 'geometry' also exists (e.g. as string), overwrite it with parsed geoms
+            if "geometry" in df.columns:
+                df = df.drop(columns=["geometry"])
+            return gpd.GeoDataFrame(df, geometry=geoms, crs="EPSG:4326")
+        elif "geometry" in df.columns:
+            # Standardize existing 'geometry' column (if it's WKT)
+            if df["geometry"].dtype == "object":
+                df["geometry"] = df["geometry"].apply(
                     lambda x: wkt.loads(x) if isinstance(x, str) else x
                 )
-                df = df.drop(columns=["Geometry"])
-                # If 'geometry' also exists (e.g. as string), overwrite it with parsed geoms
-                if "geometry" in df.columns:
-                    df = df.drop(columns=["geometry"])
-                return gpd.GeoDataFrame(df, geometry=geoms, crs="EPSG:4326")
-            elif "geometry" in df.columns:
-                # Standardize existing 'geometry' column (if it's WKT)
-                if df["geometry"].dtype == "object":
-                    df["geometry"] = df["geometry"].apply(
-                        lambda x: wkt.loads(x) if isinstance(x, str) else x
-                    )
-                return gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
-            return df
-        return None
+            return gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+        return df
 
     locks = read_geo_or_parquet(export_dir, "lock")
     chambers = read_geo_or_parquet(export_dir, "chamber")
@@ -60,9 +66,6 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     fairways = read_geo_or_parquet(export_dir, "fairway")
     berths = read_geo_or_parquet(export_dir, "berth")
     sections = read_geo_or_parquet(export_dir, "section")
-
-    if locks is None or chambers is None:
-        raise FileNotFoundError("Missing essential lock/chamber data.")
 
     # Load and normalize structures
     schema = utils.load_schema()
@@ -79,31 +82,27 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     brug_beweegbaar = read_geo_or_parquet(disk_dir, "brug_beweegbaar")
 
     # Combine bridges
-    bridges = []
-    if brug_vast is not None:
-        bridges.append(brug_vast)
-    if brug_beweegbaar is not None:
-        bridges.append(brug_beweegbaar)
-    disk_bridges = None
-    if bridges:
-        disk_bridges = pd.concat(bridges, ignore_index=True)
-        if isinstance(bridges[0], gpd.GeoDataFrame):
-            disk_bridges = gpd.GeoDataFrame(
-                disk_bridges, geometry="geometry", crs=bridges[0].crs
-            )
-
-    if disk_locks is None or disk_bridges is None:
-        raise FileNotFoundError("Missing essential DISK data (schutsluis or bridges).")
+    bridges_list = [brug_vast, brug_beweegbaar]
+    disk_bridges = pd.concat(bridges_list, ignore_index=True)
+    if isinstance(bridges_list[0], gpd.GeoDataFrame):
+        disk_bridges = gpd.GeoDataFrame(
+            disk_bridges, geometry="geometry", crs=bridges_list[0].crs
+        )
 
     operatingtimes = read_geo_or_parquet(export_dir, "operatingtimes")
     bridges = read_geo_or_parquet(export_dir, "bridge")
     openings = read_geo_or_parquet(export_dir, "opening")
 
-    # Normalize bridges/openings if present
-    if bridges is not None:
-        bridges = utils.normalize_attributes(bridges, "bridges", schema)
-    if openings is not None:
-        openings = utils.normalize_attributes(openings, "openings", schema)
+    # Normalize bridges/openings/operatingtimes
+    operatingtimes = utils.normalize_attributes(
+        operatingtimes, "operatingtimes", schema
+    )
+    bridges = utils.normalize_attributes(bridges, "bridges", schema)
+    openings = utils.normalize_attributes(openings, "openings", schema)
+
+    # Load RIS Index
+    ris_path = export_dir / "RisIndexNL.xlsx"
+    ris_df = load_ris_index(ris_path)
 
     return {
         "locks": locks,
@@ -118,6 +117,7 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
         "operatingtimes": operatingtimes,
         "bridges": bridges,
         "openings": openings,
+        "ris_df": ris_df,
     }
 
 
@@ -138,7 +138,7 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
         complex_geoms_rd.append(lock_geom_rd)
 
     chamber_geoms_rd = []
-    if "geometry" in lock_chambers.columns:
+    if not lock_chambers.empty and "geometry" in lock_chambers.columns:
         for _, c_row in lock_chambers.iterrows():
             if pd.notna(c_row["geometry"]):
                 c_geom = (
@@ -160,28 +160,31 @@ def match_disk_objects(lock, lock_chambers, disk_locks_rd, disk_bridges_rd):
         complex_buffered_rd = complex_union_rd.buffer(settings.DISK_MATCH_BUFFER_LOCK_M)
 
         # Match DISK Bridges
-        if disk_bridges_rd is not None:
-            bridge_mask = disk_bridges_rd.intersects(complex_buffered_rd)
-            for _, b in disk_bridges_rd[bridge_mask].iterrows():
-                matched_disk_bridges.append(sanitize_attrs(b))
+        bridge_mask = disk_bridges_rd.intersects(complex_buffered_rd)
+        for _, b in disk_bridges_rd[bridge_mask].iterrows():
+            matched_disk_bridges.append(sanitize_attrs(b))
 
         # Match DISK Locks
-        if disk_locks_rd is not None:
-            # 1. Try strict chamber intersection first
-            chamber_union_rd = (
-                unary_union(chamber_geoms_rd) if chamber_geoms_rd else None
-            )
-            if chamber_union_rd:
-                lock_mask_strict = disk_locks_rd.intersects(chamber_union_rd)
-                for _, lock_row in disk_locks_rd[lock_mask_strict].iterrows():
-                    matched_disk_locks.append(sanitize_attrs(lock_row))
+        # 1. Try strict chamber intersection first
+        chamber_union_rd = unary_union(chamber_geoms_rd) if chamber_geoms_rd else None
+        if chamber_union_rd:
+            lock_mask_strict = disk_locks_rd.intersects(chamber_union_rd)
+            for _, lock_row in disk_locks_rd[lock_mask_strict].iterrows():
+                matched_disk_locks.append(sanitize_attrs(lock_row))
 
-            # 2. If NO locks matched via chambers, fallback to settings buffer
-            if not matched_disk_locks and lock_geom_rd:
-                lock_buffer_rd = lock_geom_rd.buffer(settings.DISK_MATCH_BUFFER_LOCK_M)
-                lock_mask_loose = disk_locks_rd.intersects(lock_buffer_rd)
-                for _, lock_row in disk_locks_rd[lock_mask_loose].iterrows():
-                    matched_disk_locks.append(sanitize_attrs(lock_row))
+        # 2. If NO locks matched via chambers, fallback to settings buffer
+        if not matched_disk_locks and lock_geom_rd:
+            lock_buffer_rd = lock_geom_rd.buffer(settings.DISK_MATCH_BUFFER_LOCK_M)
+            lock_mask_loose = disk_locks_rd.intersects(lock_buffer_rd)
+            for _, lock_row in disk_locks_rd[lock_mask_loose].iterrows():
+                matched_disk_locks.append(sanitize_attrs(lock_row))
+
+    if not matched_disk_locks:
+        logger.debug(
+            "No matching DISK objects (schutsluis) found for Lock %s (%s). Using FIS data as complex representative.",
+            lock["id"],
+            lock["name"],
+        )
 
     return matched_disk_locks, matched_disk_bridges
 
@@ -193,41 +196,38 @@ def find_fairway_junctions(sections_gdf, fairway_id):
     start_junction = None
     end_junction = None
 
-    if sections_gdf is None:
-        return start_junction, end_junction
-
-    fw_sections = sections_gdf[sections_gdf["fairway_id"] == int(fairway_id)]
+    fw_sections = sections_gdf[sections_gdf["fairway_id"] == fairway_id]
     if fw_sections.empty:
         return start_junction, end_junction
 
     fw_sections = fw_sections.sort_values("route_km_begin")
 
     if pd.notna(fw_sections.iloc[0]["start_junction_id"]):
-        start_junction = int(fw_sections.iloc[0]["start_junction_id"])
+        start_junction = stringify_id(fw_sections.iloc[0]["start_junction_id"])
 
     if pd.notna(fw_sections.iloc[-1]["end_junction_id"]):
-        end_junction = int(fw_sections.iloc[-1]["end_junction_id"])
+        end_junction = stringify_id(fw_sections.iloc[-1]["end_junction_id"])
 
     return start_junction, end_junction
 
 
 def _resolve_isrs_code(lock, isrs):
-    if pd.notna(lock.get("isrs_id")) and isrs is not None:
+    if pd.notna(lock["isrs_id"]):
         isrs_row = isrs[isrs["id"] == lock["isrs_id"]]
-        if not isrs_row.empty:
-            return isrs_row.iloc[0]["code"]
+        if isrs_row.empty:
+            raise ValueError(f"ISRS {lock['isrs_id']} not found.")
+        return isrs_row.iloc[0]["code"]
     return None
 
 
 def _resolve_ris_info(lock_isrs_code, ris_df):
     ris_info = {}
-    if lock_isrs_code and ris_df is not None:
-        match = ris_df[ris_df["isrs_code"] == lock_isrs_code]
-        if not match.empty:
-            ris_info = {
-                "ris_name": match.iloc[0]["name"],
-                "ris_function": match.iloc[0]["function"],
-            }
+    if lock_isrs_code and lock_isrs_code in ris_df.index:
+        match = ris_df.loc[[lock_isrs_code]]
+        ris_info = {
+            "ris_name": match.iloc[0]["name"],
+            "ris_function": match.iloc[0]["function"],
+        }
     return ris_info
 
 
@@ -236,30 +236,39 @@ def _resolve_fairway_data(
 ):
     fairway_data = {}
     chamber_routes = {}
-    if fairways is not None and pd.notna(lock.get("fairway_id")):
+    if pd.notna(lock["fairway_id"]):
         fw_row = fairways[fairways["id"] == lock["fairway_id"]]
-        if not fw_row.empty:
-            fw_obj = fw_row.iloc[0]
-            fairway_data = {
-                "fairway_name": fw_obj["name"],
-                "fairway_id": int(fw_obj["id"]),
-            }
-            max_length = 0
-            if "dim_length" in lock_chambers.columns:
-                max_length = lock_chambers["dim_length"].max()
-            if pd.isna(max_length):
-                max_length = 0
-
-            buffer_dist = (max_length / 2) + 50
-            geom_data = utils.process_fairway_geometry(
-                fw_obj, lock, buffer_dist=buffer_dist, openings_data=openings_data
+        if fw_row.empty:
+            logger.warning(
+                "Fairway %s not found for Lock %s (%s). Skipping fairway-specific enrichment.",
+                lock["fairway_id"],
+                lock["id"],
+                lock["name"],
             )
-            fairway_data.update(geom_data)
+            return fairway_data, chamber_routes
 
-            if sections_gdf is not None:
-                s_junc, e_junc = find_fairway_junctions(sections_gdf, int(fw_obj["id"]))
-                fairway_data["start_junction_id"] = s_junc
-                fairway_data["end_junction_id"] = e_junc
+        fw_obj = fw_row.iloc[0]
+        fairway_data = {
+            "fairway_name": fw_obj["name"],
+            "fairway_id": stringify_id(fw_obj["id"]),
+        }
+        max_length = 0
+        if not lock_chambers.empty and "dim_length" in lock_chambers.columns:
+            max_length = lock_chambers["dim_length"].max()
+        if pd.isna(max_length):
+            max_length = 0
+
+        buffer_dist = (max_length / 2) + 50
+        geom_data = utils.process_fairway_geometry(
+            fw_obj, lock, buffer_dist=buffer_dist, openings_data=openings_data
+        )
+        fairway_data.update(geom_data)
+
+        s_junc, e_junc = find_fairway_junctions(
+            sections_gdf, stringify_id(fw_obj["id"])
+        )
+        fairway_data["start_junction_id"] = s_junc
+        fairway_data["end_junction_id"] = e_junc
 
     if "geometry_before_wkt" in fairway_data and "geometry_after_wkt" in fairway_data:
         bwkt = fairway_data["geometry_before_wkt"]
@@ -275,158 +284,49 @@ def _resolve_fairway_data(
     return fairway_data, chamber_routes
 
 
-def _find_connected_sections(
-    lock, lock_chambers, sections_gdf, fairway_data, network_graph
+def _resolve_openings_optimized(
+    lock, lock_chambers, bridges_by_complex, openings_by_parent, op_times_map
 ):
-    sections_data = []
-    internal_sections = set()
-    connected_fairways = set()
-    matched_section_ids = set()
-
-    if fairway_data.get("fairway_id"):
-        connected_fairways.add(fairway_data["fairway_id"])
-
-    # 1. Attribute-based matching (section_id, fairway_id)
-    if sections_gdf is not None:
-        fsid = lock.get("section_id")
-        if pd.notna(fsid):
-            matches = sections_gdf[sections_gdf["id"] == int(fsid)]
-            for _, s_row in matches.iterrows():
-                sid = int(s_row["id"])
-                if sid not in matched_section_ids:
-                    fid = (
-                        int(s_row["fairway_id"])
-                        if pd.notna(s_row.get("fairway_id"))
-                        else None
-                    )
-                    internal_sections.add(sid)
-                    if fid:
-                        connected_fairways.add(fid)
-                    sections_data.append(
-                        {
-                            "id": sid,
-                            "name": s_row["name"],
-                            "fairway_id": fid,
-                            "length": float(s_row["dim_length"])
-                            if pd.notna(s_row.get("dim_length"))
-                            else None,
-                            "geometry": s_row.geometry.wkt
-                            if hasattr(s_row, "geometry") and s_row.geometry
-                            else None,
-                            "relation": "direct",
-                        }
-                    )
-                    matched_section_ids.add(sid)
-
-    if network_graph:
-        for j_id in [
-            fairway_data.get("start_junction_id"),
-            fairway_data.get("end_junction_id"),
-        ]:
-            if j_id and network_graph.has_node(j_id):
-                for nbr in network_graph.neighbors(j_id):
-                    edge_data = network_graph.get_edge_data(j_id, nbr)
-                    if edge_data and "FairwayId" in edge_data:
-                        connected_fairways.add(int(edge_data["fairway_id"]))
-
-    if sections_gdf is not None:
-        complex_geoms = (
-            [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
-        )
-        if "geometry" in lock_chambers.columns:
-            for _, c_row in lock_chambers.iterrows():
-                if pd.notna(c_row["geometry"]):
-                    c_geom = (
-                        wkt.loads(c_row["geometry"])
-                        if isinstance(c_row["geometry"], str)
-                        else c_row["geometry"]
-                    )
-                    complex_geoms.append(c_geom)
-
-        if complex_geoms:
-            complex_union = unary_union([g for g in complex_geoms if g])
-            if complex_union:
-                buffered_union = complex_union.buffer(
-                    settings.LOCK_SECTION_MATCH_BUFFER_DEG
-                )
-                intersecting = sections_gdf[sections_gdf.intersects(buffered_union)]
-
-                for _, s_row in intersecting.iterrows():
-                    sid = int(s_row["id"])
-                    if sid in matched_section_ids:
-                        continue
-
-                    fid = (
-                        int(s_row["fairway_id"])
-                        if pd.notna(s_row.get("fairway_id"))
-                        else None
-                    )
-
-                    internal_sections.add(sid)
-                    if fid:
-                        connected_fairways.add(fid)
-
-                    sections_data.append(
-                        {
-                            "id": sid,
-                            "name": s_row["name"],
-                            "fairway_id": fid,
-                            "length": float(s_row["dim_length"])
-                            if pd.notna(s_row.get("dim_length"))
-                            else None,
-                            "geometry": s_row.geometry.wkt
-                            if hasattr(s_row, "geometry") and s_row.geometry
-                            else None,
-                            "relation": "overlap",
-                        }
-                    )
-                    matched_section_ids.add(sid)
-    return sections_data, internal_sections, connected_fairways
-
-
-def _resolve_openings(lock, lock_chambers, bridges, openings, op_times_map):
-    """
-    Find openings associated with a lock. This checks:
-    1. Openings directly parented to the Lock (parent_id = lock "id").
-    2. Openings directly parented to any of the Lock's chambers.
-    3. Openings parented to a Bridge that shares the lock's RelatedBuildingComplexName.
-    """
+    """Optimized version of _resolve_openings using pre-grouped maps."""
     openings_data = []
-    if openings is None or openings.empty:
-        return openings_data
 
     # Find relevant Parent Ids
-    parent_ids = {int(lock["id"])}
-    if "id" in lock_chambers.columns:
+    parent_ids = {stringify_id(lock["id"])}
+    if not lock_chambers.empty and "id" in lock_chambers.columns:
         for cid in lock_chambers["id"].dropna():
-            parent_ids.add(int(cid))
+            parent_ids.add(stringify_id(cid))
 
-    if bridges is not None and not bridges.empty:
-        lock_complex_name = lock.get("RelatedBuildingComplexName")
-        if pd.notna(lock_complex_name):
-            # Find bridges belonging to the same complex
-            matching_bridges = bridges[
-                bridges["RelatedBuildingComplexName"] == lock_complex_name
-            ]
+    lock_complex_name = lock.get("related_building_complex_name")
+    if pd.notna(lock_complex_name):
+        matching_bridges = bridges_by_complex.get(lock_complex_name, pd.DataFrame())
+        if not matching_bridges.empty:
             for bid in matching_bridges["id"].dropna():
-                parent_ids.add(int(bid))
+                parent_ids.add(stringify_id(bid))
 
-    # Filter openings mapped to any of these parents
-    matched_openings = openings[openings["parent_id"].isin(parent_ids)]
+    # Use pre-grouped openings_by_parent for O(1) per-parent lookup
+    matched_rows = []
+    for pid in parent_ids:
+        if pid in openings_by_parent:
+            matched_rows.append(openings_by_parent[pid])
+
+    if not matched_rows:
+        return openings_data
+
+    matched_openings = pd.concat(matched_rows)
     for _, opening_row in matched_openings.iterrows():
         op_attrs = sanitize_attrs(opening_row)
-        op_id = int(opening_row["id"])
+        op_id = stringify_id(opening_row["id"])
 
         # Attach operating times to the opening
         operating_times = None
-        if pd.notna(opening_row.get("OperatingTimesId")):
-            ot_id = int(opening_row["OperatingTimesId"])
+        if pd.notna(opening_row["operating_times_id"]):
+            ot_id = stringify_id(opening_row["operating_times_id"])
             operating_times = op_times_map.get(ot_id)
 
         op_attrs.update(
             {
                 "id": op_id,
-                "name": opening_row.get("name"),
+                "name": opening_row["name"],
                 "operating_times": operating_times,
             }
         )
@@ -435,8 +335,14 @@ def _resolve_openings(lock, lock_chambers, bridges, openings, op_times_map):
     return openings_data
 
 
-def _build_chamber_objects(lock_chambers, chamber_routes, subchambers, op_times_map):
+def _build_chamber_objects_optimized(
+    lock_chambers, chamber_routes, subchambers_by_parent, op_times_map
+):
+    """Optimized chamber builder."""
     chambers_list = []
+    if lock_chambers.empty:
+        return chambers_list
+
     for _, chamber in lock_chambers.iterrows():
         route_wkt = None
         if "split_point" in chamber_routes and "merge_point" in chamber_routes:
@@ -458,10 +364,10 @@ def _build_chamber_objects(lock_chambers, chamber_routes, subchambers, op_times_
 
         chamber_attrs = sanitize_attrs(chamber)
 
-        chamber_id = int(chamber["id"])
+        chamber_id = stringify_id(chamber["id"])
         chamber_op_times = None
-        if pd.notna(chamber.get("OperatingTimesId")):
-            op_id = int(chamber["OperatingTimesId"])
+        if pd.notna(chamber["operating_times_id"]):
+            op_id = stringify_id(chamber["operating_times_id"])
             chamber_op_times = op_times_map.get(op_id)
 
         c_obj = {
@@ -478,34 +384,148 @@ def _build_chamber_objects(lock_chambers, chamber_routes, subchambers, op_times_
             "operating_times": chamber_op_times,
         }
 
-        if subchambers is not None:
-            chamber_subchambers = subchambers[subchambers["parent_id"] == chamber["id"]]
+        if chamber_id in subchambers_by_parent:
+            chamber_subchambers = subchambers_by_parent[chamber_id]
             c_obj["subchambers"] = []
             for _, sc in chamber_subchambers.iterrows():
                 sc_obj = sanitize_attrs(sc)
                 c_obj["subchambers"].append(sc_obj)
+        else:
+            c_obj["subchambers"] = []
 
         chambers_list.append(c_obj)
     return chambers_list
+
+
+def _find_connected_sections_optimized(
+    lock, lock_chambers, sections_gdf, sections_rd, fairway_data, network_graph
+):
+    """Optimized connected sections finder using spatial index."""
+    sections_data = []
+    internal_sections = set()
+    connected_fairways = set()
+    matched_section_ids = set()
+
+    if fairway_data.get("fairway_id"):
+        connected_fairways.add(fairway_data["fairway_id"])
+
+    # 1. Attribute-based matching
+    fsid = lock["section_id"]
+    if pd.notna(fsid):
+        matches = sections_gdf[sections_gdf["id"] == fsid]
+
+        for _, s_row in matches.iterrows():
+            sid = stringify_id(s_row["id"])
+            if sid not in matched_section_ids:
+                fid = stringify_id(s_row.get("fairway_id"))
+                internal_sections.add(sid)
+                if fid:
+                    connected_fairways.add(fid)
+                sections_data.append(
+                    {
+                        "id": sid,
+                        "name": s_row["name"],
+                        "fairway_id": fid,
+                        "length": float(s_row["dim_length"])
+                        if pd.notna(s_row.get("dim_length"))
+                        else None,
+                        "geometry": s_row.geometry.wkt
+                        if hasattr(s_row, "geometry") and s_row.geometry
+                        else None,
+                        "relation": "direct",
+                    }
+                )
+                matched_section_ids.add(sid)
+
+    # 2. Graph neighbors
+    if network_graph:
+        for j_id in [
+            fairway_data.get("start_junction_id"),
+            fairway_data.get("end_junction_id"),
+        ]:
+            if j_id and network_graph.has_node(j_id):
+                for nbr in network_graph.neighbors(j_id):
+                    edge_data = network_graph.get_edge_data(j_id, nbr)
+                    if edge_data:
+                        # Support both CamelCase (original FIS) and snake_case (schema-mapped)
+                        fid_val = edge_data.get(
+                            "fairway_id", edge_data.get("FairwayId")
+                        )
+                        if fid_val is not None:
+                            connected_fairways.add(stringify_id(fid_val))
+
+    # 3. Spatial matching using pre-built spatial index
+    complex_geoms = (
+        [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
+    )
+    if not lock_chambers.empty and "geometry" in lock_chambers.columns:
+        for _, c_row in lock_chambers.iterrows():
+            if pd.notna(c_row["geometry"]):
+                c_geom = (
+                    wkt.loads(c_row["geometry"])
+                    if isinstance(c_row["geometry"], str)
+                    else c_row["geometry"]
+                )
+                complex_geoms.append(c_geom)
+
+    if complex_geoms:
+        complex_union = unary_union([g for g in complex_geoms if g])
+        if complex_union:
+            buffered_union = complex_union.buffer(
+                settings.LOCK_SECTION_MATCH_BUFFER_DEG
+            )
+            # Use spatial index query for performance
+            possible_matches_index = sections_gdf.sindex.query(
+                buffered_union, predicate="intersects"
+            )
+            intersecting = sections_gdf.iloc[possible_matches_index]
+
+            for _, s_row in intersecting.iterrows():
+                sid = stringify_id(s_row["id"])
+                if sid in matched_section_ids:
+                    continue
+
+                fid = stringify_id(s_row.get("fairway_id"))
+
+                internal_sections.add(sid)
+                if fid:
+                    connected_fairways.add(fid)
+
+                sections_data.append(
+                    {
+                        "id": sid,
+                        "name": s_row["name"],
+                        "fairway_id": fid,
+                        "length": float(s_row["dim_length"])
+                        if pd.notna(s_row.get("dim_length"))
+                        else None,
+                        "geometry": s_row.geometry.wkt
+                        if hasattr(s_row, "geometry") and s_row.geometry
+                        else None,
+                        "relation": "overlap",
+                    }
+                )
+                matched_section_ids.add(sid)
+    return sections_data, internal_sections, connected_fairways
 
 
 def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     """
     Group locks into complexes and enrich with ISRS, RIS, Fairway, Berth, Section, and DISK data.
     """
-    locks = data.get("locks")
-    chambers = data.get("chambers")
-    subchambers = data.get("subchambers")
-    isrs = data.get("isrs")
-    ris_df = data.get("ris_df")
-    fairways = data.get("fairways")
-    berths = data.get("berths")
-    sections = data.get("sections")
-    disk_locks = data.get("disk_locks")
-    disk_bridges = data.get("disk_bridges")
-    operatingtimes = data.get("operatingtimes")
-    bridges = data.get("bridges")
-    openings = data.get("openings")
+    locks = data["locks"]
+    chambers = data["chambers"]
+    subchambers = data["subchambers"]
+    isrs = data["isrs"]
+    ris_df = data["ris_df"]
+    fairways = data["fairways"]
+    berths = data["berths"]
+    sections = data["sections"]
+    disk_locks = data["disk_locks"]
+    disk_bridges = data["disk_bridges"]
+    operatingtimes = data["operatingtimes"]
+    bridges = data["bridges"]
+    openings = data["openings"]
     complexes = []
 
     # Expect GeoDataFrames at this stage
@@ -513,38 +533,44 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     berths_gdf = berths
     sections_gdf = sections
 
-    # Create spatial index for sections if not already present
-    if sections_gdf is not None:
-        pass
+    # Ensure RIS Index is indexed for fast lookup
+    if "isrs_code" in ris_df.columns:
+        ris_df = ris_df.drop_duplicates(subset=["isrs_code"]).set_index("isrs_code")
+
+    # Pre-group components for O(1) loop lookup
+    def get_parent_map(df):
+        p_map = {}
+        if "parent_id" in df.columns:
+            for pid, group in df.groupby("parent_id"):
+                p_map[stringify_id(pid)] = group
+        return p_map
+
+    chambers_by_parent = get_parent_map(chambers)
+    subchambers_by_parent = get_parent_map(subchambers)
+    openings_by_parent = get_parent_map(openings)
+
+    bridges_by_complex = {}
+    if "related_building_complex_name" in bridges.columns:
+        for name, group in bridges.groupby("related_building_complex_name"):
+            bridges_by_complex[name] = group
 
     # Pre-project DISK datasets for spatial joining
-    disk_locks_rd = None
-    if (
-        disk_locks is not None
-        and not disk_locks.empty
-        and "geometry" in disk_locks.columns
-    ):
-        disk_locks_rd = disk_locks.to_crs(settings.PROJECTED_CRS)
+    disk_locks_rd = disk_locks.to_crs(settings.PROJECTED_CRS)
+    disk_bridges_rd = disk_bridges.to_crs(settings.PROJECTED_CRS)
 
-    disk_bridges_rd = None
-    if (
-        disk_bridges is not None
-        and not disk_bridges.empty
-        and "geometry" in disk_bridges.columns
-    ):
-        disk_bridges_rd = disk_bridges.to_crs(settings.PROJECTED_CRS)
+    # Pre-project sections for spatial matching
+    sections_rd = sections_gdf.to_crs(settings.PROJECTED_CRS)
 
     # Pre-process operating times
     op_times_map = {}
-    if operatingtimes is not None and not operatingtimes.empty:
+    if not operatingtimes.empty:
         for _, row in operatingtimes.iterrows():
-            if pd.notna(row.get("id")):
-                op_id = int(row["id"])
+            if pd.notna(row["id"]):
+                op_id = stringify_id(row["id"])
                 op_times_map[op_id] = {
-                    "NormalSchedules": to_python(row.get("NormalSchedules")) or [],
-                    "HolidaySchedules": to_python(row.get("HolidaySchedules")) or [],
-                    "ExceptionSchedules": to_python(row.get("ExceptionSchedules"))
-                    or [],
+                    "normal_schedules": to_python(row["normal_schedules"]) or [],
+                    "holiday_schedules": to_python(row["holiday_schedules"]) or [],
+                    "exception_schedules": to_python(row["exception_schedules"]) or [],
                 }
 
     for idx, lock in tqdm(
@@ -553,13 +579,17 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
         desc="Processing locks",
         mininterval=2.0,
     ):
-        lock_chambers = chambers[chambers["parent_id"] == lock["id"]]
+        lock_id_str = stringify_id(lock["id"])
+        lock_chambers = chambers_by_parent.get(
+            lock_id_str, pd.DataFrame(columns=chambers.columns)
+        )
+
         lock_isrs_code = _resolve_isrs_code(lock, isrs)
         ris_info = _resolve_ris_info(lock_isrs_code, ris_df)
 
         # Resolve associated bridge openings FIRST to allow dynamic buffer calculation
-        openings_data = _resolve_openings(
-            lock, lock_chambers, bridges, openings, op_times_map
+        openings_data = _resolve_openings_optimized(
+            lock, lock_chambers, bridges_by_complex, openings_by_parent, op_times_map
         )
 
         fairway_data, chamber_routes = _resolve_fairway_data(
@@ -567,24 +597,29 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
         )
 
         logger.debug("  Checking connected fairways and sections...")
-        sections_data, internal_sections, connected_fairways = _find_connected_sections(
-            lock, lock_chambers, sections_gdf, fairway_data, network_graph
+        sections_data, internal_sections, connected_fairways = (
+            _find_connected_sections_optimized(
+                lock,
+                lock_chambers,
+                sections_gdf,
+                sections_rd,
+                fairway_data,
+                network_graph,
+            )
         )
 
         logger.debug(
             "  Finding nearby berths (allowed fairways: %s)...", connected_fairways
         )
-        berths_data = []
-        if berths_gdf is not None:
-            berths_data = utils.find_nearby_berths(
-                lock,
-                berths_gdf,
-                fairway_data.get("geometry_before_wkt"),
-                fairway_data.get("geometry_after_wkt"),
-                allowed_fairways=list(connected_fairways),
-                disallowed_sections=list(internal_sections),
-                sections_gdf=sections_gdf,
-            )
+        berths_data = utils.find_nearby_berths(
+            lock,
+            berths_gdf,
+            fairway_data.get("geometry_before_wkt"),
+            fairway_data.get("geometry_after_wkt"),
+            allowed_fairways=list(connected_fairways),
+            disallowed_sections=list(internal_sections),
+            sections_gdf=sections_gdf,
+        )
         logger.debug("  Found %d berths.", len(berths_data))
 
         matched_disk_locks, matched_disk_bridges = match_disk_objects(
@@ -603,10 +638,10 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
 
         # openings_data resolved earlier for fairway buffer calculation
 
-        lock_id = int(lock["id"])
+        lock_id = stringify_id(lock["id"])
         lock_op_times = None
-        if pd.notna(lock.get("OperatingTimesId")):
-            op_id = int(lock["OperatingTimesId"])
+        if pd.notna(lock["operating_times_id"]):
+            op_id = stringify_id(lock["operating_times_id"])
             lock_op_times = op_times_map.get(op_id)
 
         complex_obj = {
@@ -630,8 +665,11 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
                     "name": lock["name"],
                     **lock_attrs,
                     "operating_times": lock_op_times,
-                    "chambers": _build_chamber_objects(
-                        lock_chambers, chamber_routes, subchambers, op_times_map
+                    "chambers": _build_chamber_objects_optimized(
+                        lock_chambers,
+                        chamber_routes,
+                        subchambers_by_parent,
+                        op_times_map,
                     ),
                 }
             ],

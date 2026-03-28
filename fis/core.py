@@ -18,17 +18,19 @@ def load_data(export_dir: pathlib.Path):
     def read_geo_or_parquet(stem):
         gpq = export_dir / f"{stem}.geoparquet"
         pq = export_dir / f"{stem}.parquet"
+        if not gpq.exists() and not pq.exists():
+            raise FileNotFoundError(
+                f"Missing essential data: neither {gpq} nor {pq} exist."
+            )
+
         if gpq.exists():
             return gpd.read_parquet(gpq)
-        if pq.exists():
-            df = pd.read_parquet(pq)
-            if "Geometry" in df.columns and df["Geometry"].dtype == "object":
-                df["geometry"] = df["Geometry"].apply(
-                    lambda x: wkt.loads(x) if x else None
-                )
-                return gpd.GeoDataFrame(df, geometry="geometry")
-            return df
-        return None
+
+        df = pd.read_parquet(pq)
+        if "Geometry" in df.columns and df["Geometry"].dtype == "object":
+            df["geometry"] = df["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
+            return gpd.GeoDataFrame(df, geometry="geometry")
+        return pd.DataFrame(df)
 
     locks = read_geo_or_parquet("lock")
     chambers = read_geo_or_parquet("chamber")
@@ -36,9 +38,6 @@ def load_data(export_dir: pathlib.Path):
     fairways = read_geo_or_parquet("fairway")
     berths = read_geo_or_parquet("berth")
     sections = read_geo_or_parquet("section")
-
-    if locks is None or chambers is None:
-        raise FileNotFoundError("Missing essential lock/chamber data.")
 
     return locks, chambers, isrs, fairways, berths, sections
 
@@ -53,14 +52,10 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
     schema = utils.load_schema()
     locks = utils.normalize_attributes(locks, "locks", schema)
     chambers = utils.normalize_attributes(chambers, "chambers", schema)
-    if isrs is not None:
-        isrs = utils.normalize_attributes(isrs, "isrs", schema)
-    if fairways is not None:
-        fairways = utils.normalize_attributes(fairways, "fairways", schema)
-    if berths is not None:
-        berths = utils.normalize_attributes(berths, "berths", schema)
-    if sections is not None:
-        sections = utils.normalize_attributes(sections, "sections", schema)
+    isrs = utils.normalize_attributes(isrs, "isrs", schema)
+    fairways = utils.normalize_attributes(fairways, "fairways", schema)
+    berths = utils.normalize_attributes(berths, "berths", schema)
+    sections = utils.normalize_attributes(sections, "sections", schema)
 
     complexes = []
 
@@ -73,45 +68,47 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
         # Get chambers for this lock
         lock_chambers = chambers[chambers["parent_id"] == lock["id"]]
 
-        # Resolve ISRS
         lock_isrs_code = None
-        if pd.notna(lock.get("isrs_id")) and isrs is not None:
+        if pd.notna(lock["isrs_id"]):
             isrs_row = isrs[isrs["id"] == lock["isrs_id"]]
-            if not isrs_row.empty:
-                lock_isrs_code = isrs_row.iloc[0]["code"]
+            if isrs_row.empty:
+                raise ValueError(f"ISRS {lock['isrs_id']} not found.")
+            lock_isrs_code = isrs_row.iloc[0]["code"]
 
         # RIS Enrichment
         ris_info = {}
-        if lock_isrs_code and ris_df is not None:
+        if lock_isrs_code:
             match = ris_df[ris_df["isrs_code"] == lock_isrs_code]
-            if not match.empty:
+            if match.empty:
+                logger.warning(f"RIS Index matching failed for {lock_isrs_code}")
+            else:
                 ris_info = {
                     "ris_name": match.iloc[0]["name"],
                     "ris_function": match.iloc[0]["function"],
                 }
 
-        # Fairway Mapping
         fairway_data = {}
         fw_obj = None  # Keep reference for processing
-        if fairways is not None and pd.notna(lock.get("fairway_id")):
+        if pd.notna(lock["fairway_id"]):
             fw_row = fairways[fairways["id"] == lock["fairway_id"]]
-            if not fw_row.empty:
-                fw_obj = fw_row.iloc[0]
-                fairway_data = {
-                    "fairway_name": fw_obj["name"],
-                    "fairway_id": fw_obj["id"],
-                }
-                # Delegate complexity to helper function
-                geom_data = process_fairway_geometry(fw_obj, lock)
-                fairway_data.update(geom_data)
+            if fw_row.empty:
+                raise ValueError(f"Fairway {lock['fairway_id']} not found.")
+            fw_obj = fw_row.iloc[0]
+            fairway_data = {
+                "fairway_name": fw_obj["name"],
+                "fairway_id": fw_obj["id"],
+            }
+            # Delegate complexity to helper function
+            geom_data = process_fairway_geometry(fw_obj, lock)
+            fairway_data.update(geom_data)
 
-                # Junction Identification
-                start_junction, end_junction = find_fairway_junctions(
-                    sections_gdf, fw_obj["id"]
-                )
+            # Junction Identification
+            start_junction, end_junction = find_fairway_junctions(
+                sections_gdf, fw_obj["id"]
+            )
 
-                fairway_data["start_junction_id"] = start_junction
-                fairway_data["end_junction_id"] = end_junction
+            fairway_data["start_junction_id"] = start_junction
+            fairway_data["end_junction_id"] = end_junction
 
         # Chamber Route Generation (Virtual Fairways)
         chamber_routes = {}
@@ -126,55 +123,52 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
             chamber_routes["merge_point"] = Point(g_after.coords[0])
 
         # Berth Identification
-        berths_data = []
-        if berths_gdf is not None:
-            berths_data = find_nearby_berths(
-                lock,
-                berths_gdf,
-                fairway_data.get("geometry_before_wkt"),
-                fairway_data.get("geometry_after_wkt"),
-            )
+        berths_data = find_nearby_berths(
+            lock,
+            berths_gdf,
+            fairway_data.get("geometry_before_wkt"),
+            fairway_data.get("geometry_after_wkt"),
+        )
 
         # Section Overlap Identification
         sections_data = []
-        if sections_gdf is not None:
-            # Define complex geometry: Union of lock + chambers
-            # Start with lock geometry
-            complex_geoms = (
-                [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
-            )
+        # Define complex geometry: Union of lock + chambers
+        # Start with lock geometry
+        complex_geoms = (
+            [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
+        )
 
-            # Add chamber geometries
-            if "geometry" in lock_chambers.columns:
-                for _, c_row in lock_chambers.iterrows():
-                    if pd.isna(c_row["geometry"]):
-                        continue
-                    c_geom = (
-                        wkt.loads(c_row["geometry"])
-                        if isinstance(c_row["geometry"], str)
-                        else c_row["geometry"]
+        # Add chamber geometries
+        if "geometry" in lock_chambers.columns:
+            for _, c_row in lock_chambers.iterrows():
+                if pd.isna(c_row["geometry"]):
+                    continue
+                c_geom = (
+                    wkt.loads(c_row["geometry"])
+                    if isinstance(c_row["geometry"], str)
+                    else c_row["geometry"]
+                )
+                complex_geoms.append(c_geom)
+
+        if complex_geoms:
+            complex_union = unary_union([g for g in complex_geoms if g])
+            if complex_union:
+                intersecting = sections_gdf[sections_gdf.intersects(complex_union)]
+
+                for _, s_row in intersecting.iterrows():
+                    s_attrs = sanitize_attrs(s_row)
+                    s_attrs.update(
+                        {
+                            "id": s_row["id"],
+                            "name": s_row["name"],
+                            "fairway_id": s_row.get("fairway_id"),
+                            "dim_length": float(s_row["length"])
+                            if pd.notna(s_row.get("length"))
+                            else None,
+                            "relation": "overlap",
+                        }
                     )
-                    complex_geoms.append(c_geom)
-
-            if complex_geoms:
-                complex_union = unary_union([g for g in complex_geoms if g])
-                if complex_union:
-                    intersecting = sections_gdf[sections_gdf.intersects(complex_union)]
-
-                    for _, s_row in intersecting.iterrows():
-                        s_attrs = sanitize_attrs(s_row)
-                        s_attrs.update(
-                            {
-                                "id": s_row["id"],
-                                "name": s_row["name"],
-                                "fairway_id": s_row.get("fairway_id"),
-                                "dim_length": float(s_row["length"])
-                                if pd.notna(s_row.get("length"))
-                                else None,
-                                "relation": "overlap",
-                            }
-                        )
-                        sections_data.append(s_attrs)
+                    sections_data.append(s_attrs)
 
         lock_attrs = sanitize_attrs(lock)
         complex_obj = {

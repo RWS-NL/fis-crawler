@@ -21,18 +21,21 @@ def generate_terminal_graph_features(terminals: List[Dict]) -> List[Dict]:
     for term in terminals:
         raw_id = term.get("id", term.get("Id"))
         if raw_id is None:
-            logger.warning("Skipping terminal without 'id'/'Id': %s", term)
-            continue
+            raise ValueError(f"Terminal missing 'id'/'Id': {term}")
         tid = utils.stringify_id(raw_id)
+
         conn_wkt = term.get("connection_geometry")
         if not conn_wkt:
-            # Terminal was not mapped to a section or section was not spliced
+            logger.warning(
+                "Terminal %s missing 'connection_geometry'. It was not matched to a fairway section or the section was not found in the export. Skipping.",
+                tid,
+            )
             continue
 
         conn_pt = wkt.loads(conn_wkt)
         term_geom = term.get("geometry")
         if not term_geom:
-            continue
+            raise ValueError(f"Terminal {tid} missing 'geometry'.")
         term_pt = wkt.loads(term_geom) if isinstance(term_geom, str) else term_geom
         if term_pt.geom_type != "Point":
             term_pt = term_pt.centroid

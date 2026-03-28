@@ -16,8 +16,11 @@ logging.basicConfig(
 
 
 @click.group()
-def cli():
+@click.option("--debug", is_flag=True, help="Enable debug logging.")
+def cli(debug):
     """FIS data processing pipeline."""
+    if debug:
+        logging.getLogger().setLevel(logging.DEBUG)
     pass
 
 

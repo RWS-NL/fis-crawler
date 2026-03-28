@@ -21,33 +21,42 @@ def load_and_group_dropins(
     """Loads all parquet files and delegates to the grouped domain builders."""
     data = lock_load_data(export_dir, disk_dir)
 
-    terminal_path = export_dir / "terminal.geoparquet"
-    if not terminal_path.exists():
-        terminal_path = export_dir / "terminal.parquet"
+    def read_geo_or_parquet(stem):
+        gpq = export_dir / f"{stem}.geoparquet"
+        pq = export_dir / f"{stem}.parquet"
+        if not gpq.exists() and not pq.exists():
+            raise FileNotFoundError(
+                f"Missing essential data: neither {gpq} nor {pq} exist."
+            )
+        if gpq.exists():
+            df = gpd.read_parquet(gpq)
+        else:
+            df = pd.read_parquet(pq)
 
-    if terminal_path.exists():
-        try:
-            terminals = gpd.read_parquet(terminal_path)
-            data["terminals"] = terminals
-        except Exception as e:
-            logger.warning("Could not load terminals from %s: %s", terminal_path, e)
-            data["terminals"] = None
-    else:
-        data["terminals"] = None
+        # Normalize geometry column: handle uppercase "Geometry" WKT and ensure GeoDataFrame.
+        if "geometry" not in df.columns and "Geometry" in df.columns:
+            geom_series = df["Geometry"]
+            # If the geometry is stored as WKT strings, parse to geometries.
+            if geom_series.dtype == "object":
+                try:
+                    # from_wkt handles a lot of the boilerplate
+                    geom = gpd.GeoSeries.from_wkt(geom_series)
+                except Exception:
+                    # If parsing fails, fall back to the original series.
+                    geom = geom_series
+            else:
+                geom = geom_series
+            df = df.copy()
+            df["geometry"] = geom
 
-    berth_path = export_dir / "berth.geoparquet"
-    if not berth_path.exists():
-        berth_path = export_dir / "berth.parquet"
+        # Ensure we return a GeoDataFrame when a geometry column is present.
+        if "geometry" in df.columns and not isinstance(df, gpd.GeoDataFrame):
+            df = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
 
-    if berth_path.exists():
-        try:
-            berths = gpd.read_parquet(berth_path)
-            data["berths"] = berths
-        except Exception as e:
-            logger.warning("Could not load berths from %s: %s", berth_path, e)
-            data["berths"] = None
-    else:
-        data["berths"] = None
+        return df
+
+    data["terminals"] = read_geo_or_parquet("terminal")
+    data["berths"] = read_geo_or_parquet("berth")
 
     if bbox:
         import shapely.geometry
@@ -55,7 +64,7 @@ def load_and_group_dropins(
         bbox_poly = shapely.geometry.box(*bbox)
 
         def filter_df(df, name):
-            if df is None or df.empty or "geometry" not in df.columns:
+            if df.empty or "geometry" not in df.columns:
                 return df
             if df["geometry"].dtype == "object":
                 is_str = df["geometry"].apply(lambda x: isinstance(x, str))
@@ -67,11 +76,11 @@ def load_and_group_dropins(
             mask = gpd.GeoSeries(df["geometry"], crs="EPSG:4326").intersects(bbox_poly)
             return df[mask].copy()
 
-        data["locks"] = filter_df(data.get("locks"), "locks")
-        data["bridges"] = filter_df(data.get("bridges"), "bridges")
-        data["sections"] = filter_df(data.get("sections"), "sections")
-        data["terminals"] = filter_df(data.get("terminals"), "terminals")
-        data["berths"] = filter_df(data.get("berths"), "berths")
+        data["locks"] = filter_df(data["locks"], "locks")
+        data["bridges"] = filter_df(data["bridges"], "bridges")
+        data["sections"] = filter_df(data["sections"], "sections")
+        data["terminals"] = filter_df(data["terminals"], "terminals")
+        data["berths"] = filter_df(data["berths"], "berths")
 
     logger.info("Grouping Locks...")
     lock_complexes = group_locks(data)
@@ -81,33 +90,31 @@ def load_and_group_dropins(
 
     logger.info("Preparing Terminals...")
     terminals_list = []
-    if data.get("terminals") is not None:
-        for _, row in data["terminals"].iterrows():
-            term_dict = row.to_dict()
-            if "Id" in term_dict:
-                term_dict["id"] = term_dict.pop("Id")
-            if "geometry" in term_dict and hasattr(term_dict["geometry"], "wkt"):
-                term_dict["geometry"] = term_dict["geometry"].wkt
-            terminals_list.append(term_dict)
+    for _, row in data["terminals"].iterrows():
+        term_dict = row.to_dict()
+        if "Id" in term_dict:
+            term_dict["id"] = term_dict.pop("Id")
+        if "geometry" in term_dict and hasattr(term_dict["geometry"], "wkt"):
+            term_dict["geometry"] = term_dict["geometry"].wkt
+        terminals_list.append(term_dict)
 
     logger.info("Preparing Berths...")
     berths_list = []
-    if data.get("berths") is not None:
-        for _, row in data["berths"].iterrows():
-            berth_dict = row.to_dict()
-            if "Id" in berth_dict:
-                berth_dict["id"] = berth_dict.pop("Id")
-            if "geometry" in berth_dict and hasattr(berth_dict["geometry"], "wkt"):
-                berth_dict["geometry"] = berth_dict["geometry"].wkt
-            berths_list.append(berth_dict)
+    for _, row in data["berths"].iterrows():
+        berth_dict = row.to_dict()
+        if "Id" in berth_dict:
+            berth_dict["id"] = berth_dict.pop("Id")
+        if "geometry" in berth_dict and hasattr(berth_dict["geometry"], "wkt"):
+            berth_dict["geometry"] = berth_dict["geometry"].wkt
+        berths_list.append(berth_dict)
 
     return (
         lock_complexes,
         bridge_complexes,
         terminals_list,
         berths_list,
-        data.get("sections"),
-        data.get("openings"),
+        data["sections"],
+        data["openings"],
     )
 
 

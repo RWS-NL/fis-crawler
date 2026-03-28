@@ -1,4 +1,4 @@
-from shapely.geometry import Point
+from shapely.geometry import Point, LineString
 from fis.lock.graph import _build_chamber_route_features
 
 
@@ -8,7 +8,7 @@ def test_build_chamber_route_features():
         "id": 100,
         "fairway_id": 200,
         "fairway_name": "Test Fairway",
-        "sections": [{"id": 300}],
+        "sections": [{"id": 300, "geometry": LineString([(0, 10), (0, -10)]).wkt}],
     }
     chamber_id = 999
     chamber_node_start_id = f"chamber_{chamber_id}_start"

@@ -12,38 +12,30 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
     Groups FIS Bridges with their Openings, Sections, and Operating Times.
     Also spatially matches them to DISK physical bridge structures.
     """
-    bridges_df = data.get("bridges")
-    openings_df = data.get("openings")
-    sections_gdf = data.get("sections")
-    disk_bridges = data.get("disk_bridges")
-    operatingtimes = data.get("operatingtimes")
+    bridges_df = data["bridges"]
+    openings_df = data["openings"]
+    sections_gdf = data["sections"]
+    disk_bridges = data["disk_bridges"]
+    operatingtimes = data["operatingtimes"]
     complexes = []
 
     # Map operating times
     op_times_map = {}
-    if operatingtimes is not None and not operatingtimes.empty:
+    if not operatingtimes.empty:
         for _, row in operatingtimes.iterrows():
-            if pd.notna(row.get("id")):
+            if pd.notna(row["id"]):
                 op_id = row["id"]
                 op_times_map[op_id] = {
-                    "NormalSchedules": row.get("NormalSchedules", []),
-                    "HolidaySchedules": row.get("HolidaySchedules", []),
-                    "ExceptionSchedules": row.get("ExceptionSchedules", []),
+                    "normal_schedules": row["normal_schedules"],
+                    "holiday_schedules": row["holiday_schedules"],
+                    "exception_schedules": row["exception_schedules"],
                 }
 
     # Pre-project DISK bridges for spatial intersection matching
-    disk_bridges_rd = None
-    if (
-        disk_bridges is not None
-        and not disk_bridges.empty
-        and "geometry" in disk_bridges.columns
-    ):
-        disk_bridges_rd = disk_bridges.to_crs(settings.PROJECTED_CRS)
+    disk_bridges_rd = disk_bridges.to_crs(settings.PROJECTED_CRS)
 
     # Pre-project sections for spatial matching
-    sections_rd = None
-    if sections_gdf is not None and not sections_gdf.empty:
-        sections_rd = sections_gdf.to_crs(settings.PROJECTED_CRS)
+    sections_rd = sections_gdf.to_crs(settings.PROJECTED_CRS)
 
     # Expect GeoDataFrames at this stage
     bridges_gdf = bridges_df
@@ -62,27 +54,26 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
 
         # Related openings
         bridge_openings = []
-        if openings_df is not None and not openings_df.empty:
-            openings_match = openings_df[openings_df["parent_id"] == bridge_id]
-            for _, op in openings_match.iterrows():
-                op_data = sanitize_attrs(op)
-                op_data["id"] = op["id"]
+        openings_match = openings_df[openings_df["parent_id"] == bridge_id]
+        for _, op in openings_match.iterrows():
+            op_data = sanitize_attrs(op)
+            op_data["id"] = op["id"]
 
-                # Restore opening geometry (stripped by sanitize_attrs)
-                geom_val = op.get("geometry", op.get("Geometry"))
-                if pd.notna(geom_val):
-                    if hasattr(geom_val, "wkt"):
-                        op_data["geometry"] = geom_val.wkt
-                    elif isinstance(geom_val, str):
-                        op_data["geometry"] = geom_val
+            # Restore opening geometry (stripped by sanitize_attrs)
+            geom_val = op.get("geometry")
+            if pd.notna(geom_val):
+                if hasattr(geom_val, "wkt"):
+                    op_data["geometry"] = geom_val.wkt
+                elif isinstance(geom_val, str):
+                    op_data["geometry"] = geom_val
 
-                # Operating times for this opening
-                if pd.notna(op.get("operating_times_id")):
-                    op_time_id = op["operating_times_id"]
-                    if op_time_id in op_times_map:
-                        op_data["operating_times"] = op_times_map[op_time_id]
+            # Operating times for this opening
+            if pd.notna(op["operating_times_id"]):
+                op_time_id = op["operating_times_id"]
+                if op_time_id in op_times_map:
+                    op_data["operating_times"] = op_times_map[op_time_id]
 
-                bridge_openings.append(op_data)
+            bridge_openings.append(op_data)
         bridge_data["openings"] = bridge_openings
 
         # Match sections
@@ -90,32 +81,31 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
         matched_section_ids = set()
 
         # 1. Attribute-based matching (section_id, fairway_id)
-        if sections_gdf is not None:
-            # Match directly by section_id
-            fsid = bridge.get("section_id")
-            if pd.notna(fsid):
-                matches = sections_gdf[sections_gdf["id"] == fsid]
-                for _, sec in matches.iterrows():
-                    sid = sec["id"]
-                    if sid not in matched_section_ids:
-                        s_data = sanitize_attrs(sec)
-                        s_data["id"] = sid
-                        s_data["relation"] = "direct"
-                        intersecting_sections.append(s_data)
-                        matched_section_ids.add(sid)
+        # Match directly by section_id
+        fsid = bridge["section_id"]
+        if pd.notna(fsid):
+            matches = sections_gdf[sections_gdf["id"] == fsid]
+            for _, sec in matches.iterrows():
+                sid = sec["id"]
+                if sid not in matched_section_ids:
+                    s_data = sanitize_attrs(sec)
+                    s_data["id"] = sid
+                    s_data["relation"] = "direct"
+                    intersecting_sections.append(s_data)
+                    matched_section_ids.add(sid)
 
-            # Match by fairway_id (as context)
-            fid = bridge.get("fairway_id")
-            if pd.notna(fid):
-                matches = sections_gdf[sections_gdf["fairway_id"] == fid]
-                for _, sec in matches.iterrows():
-                    sid = sec["id"]
-                    # We don't automatically add all fairway sections,
-                    # but we keep this for context if needed.
-                    pass
+        # Match by fairway_id (as context)
+        fid = bridge["fairway_id"]
+        if pd.notna(fid):
+            matches = sections_gdf[sections_gdf["fairway_id"] == fid]
+            for _, sec in matches.iterrows():
+                sid = sec["id"]
+                # We don't automatically add all fairway sections,
+                # but we keep this for context if needed.
+                pass
 
         # 2. Spatial match (using settings buffer for robustness)
-        if sections_rd is not None and bridge.geometry:
+        if bridge.geometry:
             bridge_geom_rd = (
                 gpd.GeoSeries([bridge.geometry], crs="EPSG:4326")
                 .to_crs(settings.PROJECTED_CRS)
@@ -137,7 +127,7 @@ def group_bridge_complexes(data: Dict[str, Any]) -> List[Dict]:
 
         # Spatially match DISK structures (using settings buffer)
         matched_disk = []
-        if disk_bridges_rd is not None and bridge.geometry:
+        if bridge.geometry:
             bridge_geom_rd = (
                 gpd.GeoSeries([bridge.geometry], crs="EPSG:4326")
                 .to_crs(settings.PROJECTED_CRS)
