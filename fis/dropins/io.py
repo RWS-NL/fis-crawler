@@ -29,8 +29,31 @@ def load_and_group_dropins(
                 f"Missing essential data: neither {gpq} nor {pq} exist."
             )
         if gpq.exists():
-            return gpd.read_parquet(gpq)
-        return pd.read_parquet(pq)
+            df = gpd.read_parquet(gpq)
+        else:
+            df = pd.read_parquet(pq)
+
+        # Normalize geometry column: handle uppercase "Geometry" WKT and ensure GeoDataFrame.
+        if "geometry" not in df.columns and "Geometry" in df.columns:
+            geom_series = df["Geometry"]
+            # If the geometry is stored as WKT strings, parse to geometries.
+            if geom_series.dtype == "object":
+                try:
+                    # from_wkt handles a lot of the boilerplate
+                    geom = gpd.GeoSeries.from_wkt(geom_series)
+                except Exception:
+                    # If parsing fails, fall back to the original series.
+                    geom = geom_series
+            else:
+                geom = geom_series
+            df = df.copy()
+            df["geometry"] = geom
+
+        # Ensure we return a GeoDataFrame when a geometry column is present.
+        if "geometry" in df.columns and not isinstance(df, gpd.GeoDataFrame):
+            df = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+
+        return df
 
     data["terminals"] = read_geo_or_parquet("terminal")
     data["berths"] = read_geo_or_parquet("berth")

@@ -3,26 +3,41 @@
 import json
 import logging
 import pathlib
+import pickle
 
 import click
 import geopandas as gpd
 
-from fis.lock.core import load_data, group_complexes
-
-import pickle
+from fis import utils
+from fis.lock.core import group_complexes, load_data
 from fis.lock.graph import (
-    build_nodes_gdf,
-    build_edges_gdf,
     build_berths_gdf,
-    build_locks_gdf,
     build_chambers_gdf,
+    build_edges_gdf,
+    build_locks_gdf,
+    build_nodes_gdf,
     build_subchambers_gdf,
 )
-
-from fis import utils
 from fis.utils import load_schema
 
 logger = logging.getLogger(__name__)
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom encoder for numpy types."""
+
+    def default(self, obj):
+        import numpy as np
+
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        return super().default(obj)
 
 
 @click.group()
@@ -67,7 +82,7 @@ def schematize(
 
     # Load Network Graph for fairway connectivity
     network_graph = None
-    if fis_graph:
+    if fis_graph and fis_graph.exists():
         with open(fis_graph, "rb") as f:
             network_graph = pickle.load(f)
         logger.info(
@@ -83,7 +98,7 @@ def schematize(
     # Summary JSON (per-lock metadata)
     output_json = output_dir / "summary.json"
     with open(output_json, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+        json.dump(result, f, indent=2, cls=NumpyEncoder)
     logger.info("Saved summary to %s", output_json)
 
     if not result:

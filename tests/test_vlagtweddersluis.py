@@ -21,7 +21,7 @@ def test_vlagtweddersluis_complex_grouping():
                 "FairwayId": "3749",
                 "FairwaySectionId": "33795",
                 "IsrsId": "1001",
-                "Geometry": Point(7.1393, 53.0241),
+                "geometry": Point(7.1393, 53.0241),
                 "OperatingTimesId": "5001",
             }
         ]
@@ -36,7 +36,7 @@ def test_vlagtweddersluis_complex_grouping():
                 "Name": "Vlagtweddersluis",
                 "Length": 65.0,
                 "Width": 7.5,
-                "Geometry": Point(7.1393, 53.0241),
+                "geometry": Point(7.1393, 53.0241),
                 "OperatingTimesId": "5001",
             }
         ]
@@ -49,7 +49,7 @@ def test_vlagtweddersluis_complex_grouping():
                 "Id": "26743",
                 "Name": "Vlagtwedderbrug",
                 "RelatedBuildingComplexName": "Vlagtweddersluis",
-                "Geometry": Point(7.1393, 53.0242),
+                "geometry": Point(7.1393, 53.0242),
             }
         ]
     )
@@ -66,7 +66,7 @@ def test_vlagtweddersluis_complex_grouping():
         ]
     )
 
-    # 5. Other required datasets (using strings for IDs to match normalization)
+    # 5. Other required datasets
     isrs = gpd.GeoDataFrame(
         [
             {
@@ -76,38 +76,43 @@ def test_vlagtweddersluis_complex_grouping():
             }
         ],
         crs="EPSG:4326",
+        geometry="geometry",
     )
 
     sections = gpd.GeoDataFrame(
         [
             {
-                "id": "33795",
-                "name": "Vaarwegvak Vlagtwedde",
-                "fairway_id": "3749",
+                "Id": "33795",
+                "Name": "Vaarwegvak Vlagtwedde",
+                "FairwayId": "3749",
+                "RouteKmBegin": 15.0,
+                "RouteKmEnd": 21.0,
                 "geometry": LineString([(7.1393, 53.0200), (7.1393, 53.0300)]),
             }
         ],
         crs="EPSG:4326",
+        geometry="geometry",
     )
 
     fairways = gpd.GeoDataFrame(
         [
             {
-                "id": "3749",
-                "name": "Ruiten Aa Kanaal",
+                "Id": "3749",
+                "Name": "Ruiten Aa Kanaal",
                 "geometry": LineString([(7.1393, 53.0000), (7.1393, 53.1000)]),
             }
         ],
         crs="EPSG:4326",
+        geometry="geometry",
     )
 
     operatingtimes = pd.DataFrame(
         [
             {
-                "id": "5001",
-                "normal_schedules": [],
-                "holiday_schedules": [],
-                "exception_schedules": [],
+                "Id": "5001",
+                "NormalSchedules": [],
+                "HolidaySchedules": [],
+                "ExceptionSchedules": [],
             }
         ]
     )
@@ -136,6 +141,8 @@ def test_vlagtweddersluis_complex_grouping():
     operatingtimes = utils.normalize_attributes(
         operatingtimes, "operatingtimes", schema
     )
+    sections = utils.normalize_attributes(sections, "sections", schema)
+    fairways = utils.normalize_attributes(fairways, "fairways", schema)
 
     data = {
         "locks": locks,
@@ -167,11 +174,11 @@ def test_vlagtweddersluis_complex_grouping():
     # Check linked components
     assert len(c["locks"]) == 1
     assert len(c["locks"][0]["chambers"]) == 1
-    assert c["locks"][0]["chambers"][0]["id"] == 18542
+    assert c["locks"][0]["chambers"][0]["id"] == "18542"
 
     # Check openings linked via bridge complex name
     assert len(c["openings"]) == 1
-    assert c["openings"][0]["id"] == 99001
+    assert c["openings"][0]["id"] == "99001"
 
     # Verify it handled DISK absence gracefully
     assert len(c["disk_locks"]) == 0

@@ -119,7 +119,7 @@ def test_find_nearby_berths_geometric_position():
     # Setup lock with fairway geoms
     lock_geom = Point(5.0, 52.0)
     lock_row = pd.Series(
-        {"id": 1, "route_km": 10.0, "fairway_id": 100, "geometry": lock_geom}
+        {"id": "1", "route_km": 10.0, "fairway_id": "100", "geometry": lock_geom}
     )
 
     # Fairway segment before: (4.9, 52.0) -> (5.0, 52.0)
@@ -129,15 +129,15 @@ def test_find_nearby_berths_geometric_position():
 
     berths_data = [
         {
-            "id": 10,
+            "id": "10",
             "route_km": 9.9,
-            "fairway_id": 100,
+            "fairway_id": "100",
             "geometry": Point(4.95, 52.001),
         },  # BEFORE
         {
-            "id": 20,
+            "id": "20",
             "route_km": 10.1,
-            "fairway_id": 100,
+            "fairway_id": "100",
             "geometry": Point(5.05, 52.001),
         },  # AFTER
     ]
@@ -150,8 +150,8 @@ def test_find_nearby_berths_geometric_position():
 
     assert len(nearby) == 2
     mapping = {n["id"]: n["relation"] for n in nearby}
-    assert mapping[10] == "before"
-    assert mapping[20] == "after"
+    assert mapping["10"] == "before"
+    assert mapping["20"] == "after"
 
 
 def test_sanitize_attrs():

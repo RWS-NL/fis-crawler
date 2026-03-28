@@ -333,14 +333,35 @@ def find_nearby_berths(
             | candidates["category"].isin(allowed_categories)
         ]
 
-    # Filter by allowed FairwayIDs (normalized)
+    # Filter by allowed FairwayIDs (normalized to strings for robust matching)
     if allowed_fairways and "fairway_id" in candidates.columns:
-        candidates = candidates[candidates["fairway_id"].isin(allowed_fairways)]
+        allowed_fairways_str = [stringify_id(f) for f in allowed_fairways]
+        candidates = candidates[
+            candidates["fairway_id"].apply(stringify_id).isin(allowed_fairways_str)
+        ]
 
     if candidates.empty:
         return nearby
 
     lock_geom = lock_row.geometry if hasattr(lock_row, "geometry") else None
+    if not lock_geom:
+        return nearby
+    lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
+
+    # 1. Spatial pre-filter using spatial index (if available)
+    # Buffer in degrees (approximate) for the spatial query
+    # 1000m is roughly 0.01 degrees at the equator, but more at higher latitudes
+    if candidates.sindex is not None:
+        # Use 80000 instead of 111000 to be more generous at higher latitudes (like NL)
+        buffer_deg = max_dist_m / 80000.0
+        possible_matches_index = candidates.sindex.query(
+            lg.buffer(buffer_deg), predicate="intersects"
+        )
+        candidates = candidates.iloc[possible_matches_index]
+
+    if candidates.empty:
+        return nearby
+
     geod = Geod(ellps="WGS84")
 
     # Handle disallowed sections (inside lock)
@@ -377,23 +398,24 @@ def find_nearby_berths(
         is_nearby = False
         dist_m = None
 
-        if disallowed_mask and berth.geometry:
+        if not berth.geometry:
+            continue
+
+        if disallowed_mask:
             if disallowed_mask.intersects(berth.geometry):
                 continue
 
-        # Calculate spatial distance
-        if lock_geom and berth.geometry:
-            lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
-            bg = (
-                berth.geometry
-                if isinstance(berth.geometry, Point)
-                else berth.geometry.centroid
-            )
+        lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
+        bg = (
+            berth.geometry
+            if isinstance(berth.geometry, Point)
+            else berth.geometry.centroid
+        )
 
-            if lg and bg:
-                _, _, dist_m = geod.inv(lg.x, lg.y, bg.x, bg.y)
-                if dist_m <= max_dist_m:
-                    is_nearby = True
+        if lg and bg:
+            _, _, dist_m = geod.inv(lg.x, lg.y, bg.x, bg.y)
+            if dist_m <= max_dist_m:
+                is_nearby = True
 
         if not is_nearby:
             continue
