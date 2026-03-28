@@ -178,6 +178,12 @@ class TestMatchByGeometry:
         ):
             match_by_geometry(sample_sections, empty_gdf, ["SomeCol"], "test_")
 
+    def test_handles_missing_data(self, sample_sections):
+        """Should return empty DataFrame for missing (None) input data."""
+        result = match_by_geometry(sample_sections, None, ["SomeCol"], "test_")
+        assert len(result) == len(sample_sections)
+        assert len(result.columns) == 0
+
     def test_handles_missing_columns(self, sample_sections, sample_maxdim):
         """Should gracefully handle missing columns."""
         result = match_by_geometry(
@@ -233,6 +239,12 @@ class TestMatchByRouteKm:
             ValueError, match="Data provided for speed_ route/km matching is empty."
         ):
             match_by_route_km(sample_sections, empty_gdf, ["Speed"], "speed_")
+
+    def test_handles_missing_data(self, sample_sections):
+        """Should return empty DataFrame for missing (None) input data."""
+        result = match_by_route_km(sample_sections, None, ["Speed"], "speed_")
+        assert len(result) == len(sample_sections)
+        assert len(result.columns) == 0
 
 
 # =============================================================================
@@ -306,6 +318,23 @@ class TestBuildSectionEnrichment:
         # Check fairway number (canonical)
         assert "fairway_number" in result.columns
         assert result.loc[1, "fairway_number"] == "FW123"
+
+    def test_handles_missing_optional_datasets(self, sample_sections):
+        """Should handle cases where optional datasets are missing from the input dict."""
+        datasets = {
+            "section": sample_sections,
+            # All others missing (None)
+        }
+
+        # This should not raise KeyError or ValueError
+        result = build_fis_section_enrichment(datasets)
+
+        assert len(result) == len(sample_sections)
+        # Check that expected canonical columns are NOT present (as they were never created)
+        assert "dim_depth" not in result.columns
+        # Only fairway_number is explicitly created even if dataset is missing
+        assert "fairway_number" in result.columns
+        assert result["fairway_number"].isna().all()
 
 
 # =============================================================================
