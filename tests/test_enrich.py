@@ -27,6 +27,7 @@ def sample_sections():
             "Id": [1, 2, 3],
             "Name": ["Section A", "Section B", "Section C"],
             "RouteId": [100, 100, 200],
+            "FairwayId": [100, 100, 200],
             "RouteKmBegin": [0.0, 5.0, 0.0],
             "RouteKmEnd": [5.0, 10.0, 8.0],
             "StartJunctionId": [1001, 1002, 1003],
@@ -89,6 +90,49 @@ def sample_speed():
                 LineString([(0.5, 0), (1, 0)]),
             ],
         },
+        crs="EPSG:4326",
+    )
+
+
+@pytest.fixture
+def sample_status():
+    """Create sample fairwaystatus GeoDataFrame."""
+    return gpd.GeoDataFrame(
+        {
+            "Id": [401],
+            "RouteId": [100],
+            "RouteKmBegin": [0.0],
+            "RouteKmEnd": [5.0],
+            "TrajectCode": ["TR01"],
+            "StatusCode": ["ACT"],
+            "StatusDescription": ["Active"],
+            "geometry": [LineString([(0, 0), (0.5, 0)])],
+        },
+        crs="EPSG:4326",
+    )
+
+
+@pytest.fixture
+def sample_mgd():
+    """Create sample mgdtrajectory GeoDataFrame."""
+    return gpd.GeoDataFrame(
+        {
+            "Id": [501],
+            "RouteId": [100],
+            "RouteKmBegin": [0.0],
+            "RouteKmEnd": [10.0],
+            "FromTo": ["A to B"],
+            "geometry": [LineString([(0, 0), (1, 0)])],
+        },
+        crs="EPSG:4326",
+    )
+
+
+@pytest.fixture
+def sample_fairway():
+    """Create sample fairway GeoDataFrame."""
+    return gpd.GeoDataFrame(
+        {"Id": [100], "FairwayNumber": ["FW123"], "geometry": [None]},
         crs="EPSG:4326",
     )
 
@@ -200,7 +244,14 @@ class TestBuildSectionEnrichment:
     """Tests for combined enrichment building."""
 
     def test_combines_multiple_sources(
-        self, sample_sections, sample_maxdim, sample_navigability, sample_speed
+        self,
+        sample_sections,
+        sample_maxdim,
+        sample_navigability,
+        sample_speed,
+        sample_status,
+        sample_mgd,
+        sample_fairway,
     ):
         """Should combine enrichment from multiple data sources."""
         # Create minimal non-empty GDFs for other required datasets to satisfy strictness
@@ -225,6 +276,9 @@ class TestBuildSectionEnrichment:
             "fairwaytype": dummy_gdf,
             "tidalarea": dummy_gdf,
             "fairwayclassification": dummy_gdf,
+            "fairwaystatus": sample_status,
+            "mgdtrajectory": sample_mgd,
+            "fairway": sample_fairway,
         }
 
         result = build_fis_section_enrichment(datasets)
@@ -240,6 +294,18 @@ class TestBuildSectionEnrichment:
         # Check speed (canonical)
         assert "maxspeed" in result.columns
         assert result.loc[1, "maxspeed"] == 12.0
+
+        # Check status (canonical)
+        assert "status_description" in result.columns
+        assert result.loc[1, "status_description"] == "Active"
+
+        # Check MGD (canonical)
+        assert "mgd_from_to" in result.columns
+        assert result.loc[1, "mgd_from_to"] == "A to B"
+
+        # Check fairway number (canonical)
+        assert "fairway_number" in result.columns
+        assert result.loc[1, "fairway_number"] == "FW123"
 
 
 # =============================================================================

@@ -24,6 +24,11 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "speed_MaxSpeedDown" = "maxspeed_down"
 "speed_CalibratedSpeedUp" = "calspeed_up"
 "speed_CalibratedSpeedDown" = "calspeed_down"
+"speed_CalibratedSpeedConvoyUp" = "calspeed_convoy_up"
+"speed_CalibratedSpeedConvoyDown" = "calspeed_convoy_down"
+"speed_MaxSpeedConvoyUp" = "maxspeed_convoy_up"
+"speed_MaxSpeedConvoyDown" = "maxspeed_convoy_down"
+"speed_SpeedConvoy" = "maxspeed_convoy"
 # EURIS already uses these names:
 # "speed_maxspeed", "speed_calspeed"
 
@@ -47,12 +52,26 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "dim_CoupledDepth" = "dim_coupled_depth"
 "dim_CoupledLength" = "dim_coupled_length"
 "dim_CoupledWidth" = "dim_coupled_width"
+"dim_WidePushedDepth" = "dim_wide_pushed_depth"
+"dim_WidePushedLength" = "dim_wide_pushed_length"
+"dim_WidePushedWidth" = "dim_wide_pushed_width"
+"dim_WidePushedHeight" = "dim_wide_pushed_height"
+"dim_Note" = "dim_note"
 
 # Navigability/classification
 "cemt_class" = "cemt_class"  # Already canonical
 "nav_Classification" = "nav_classification"
 "nav_Code" = "nav_code"
 "nav_Description" = "nav_description"
+
+# Fairway status
+"status_TrajectCode" = "status_traject_code"
+"status_StatusCode" = "status_code"
+"status_StatusDescription" = "status_description"
+"status_Note" = "status_note"
+
+# MGD Trajectory
+"mgd_FromTo" = "mgd_from_to"
 
 # Fairway type
 "type_CharacterTypeCode" = "fairway_type"
@@ -117,6 +136,7 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 [attributes.fairways]
 "Id" = "id"
 "Name" = "name"
+"FairwayNumber" = "fairway_number"
 
 [attributes.berths]
 "Id" = "id"

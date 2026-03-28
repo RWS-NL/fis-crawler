@@ -33,6 +33,9 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
         "fairwaytype",
         "tidalarea",
         "fairwayclassification",
+        "fairwaystatus",
+        "mgdtrajectory",
+        "fairway",
     ]
 
     for name in required:
@@ -203,6 +206,11 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         "CoupledDepth",
         "CoupledLength",
         "CoupledWidth",
+        "WidePushedDepth",
+        "WidePushedLength",
+        "WidePushedWidth",
+        "WidePushedHeight",
+        "Note",
     ]
     maxdim_df = match_by_geometry(
         sections, datasets["maximumdimensions"], maxdim_cols, "dim_"
@@ -221,6 +229,11 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         "MaxSpeedDown",
         "CalibratedSpeedUp",
         "CalibratedSpeedDown",
+        "CalibratedSpeedConvoyUp",
+        "CalibratedSpeedConvoyDown",
+        "MaxSpeedConvoyUp",
+        "MaxSpeedConvoyDown",
+        "SpeedConvoy",
     ]
     speed_df = match_by_route_km(
         sections, datasets["navigationspeed"], speed_cols, "speed_"
@@ -246,9 +259,44 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         sections, datasets["fairwayclassification"], fwc_cols, "fwc_"
     )
 
+    # Fairway status
+    status_cols = ["TrajectCode", "StatusCode", "StatusDescription", "Note"]
+    status_df = match_by_route_km(
+        sections, datasets["fairwaystatus"], status_cols, "status_"
+    )
+
+    # MGD Trajectory
+    mgd_cols = ["FromTo"]
+    mgd_df = match_by_route_km(sections, datasets["mgdtrajectory"], mgd_cols, "mgd_")
+
+    # Fairway number (join by FairwayId)
+    fairway_df = (
+        sections[["Id", "FairwayId"]]
+        .merge(
+            datasets["fairway"][["Id", "FairwayNumber"]].rename(
+                columns={"Id": "FairwayId", "FairwayNumber": "fairway_number"}
+            ),
+            on="FairwayId",
+            how="left",
+        )
+        .set_index("Id")[["fairway_number"]]
+    )
+
     # Combine all enrichment
     enrichment = pd.concat(
-        [maxdim_df, nav_df, speed_df, depth_df, type_df, tidal_df, fwc_df], axis=1
+        [
+            maxdim_df,
+            nav_df,
+            speed_df,
+            depth_df,
+            type_df,
+            tidal_df,
+            fwc_df,
+            status_df,
+            mgd_df,
+            fairway_df,
+        ],
+        axis=1,
     )
 
     # Map enrichment columns to canonical names early
@@ -278,6 +326,9 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         ("fairway_type", "type"),
         ("is_tidal", "tidal"),
         ("fwc_", "fairway_classification"),
+        ("status_", "status"),
+        ("mgd_", "MGD"),
+        ("fairway_number", "fairway_number"),
     ]:
         cols = [c for c in enrichment.columns if c.startswith(prefix)]
         if cols:
