@@ -12,9 +12,9 @@ crawl: crawl-fis crawl-euris crawl-disk
 download-bivas:
 	mkdir -p reference
 	@echo "Downloading BIVAS database from Google Drive..."
-	curl -L -c /tmp/cookies.txt 'https://docs.google.com/uc?export=download&id=1s2QXcWnpUkALgF17zBKKv3j6ZVdKUXIP' | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p' > /tmp/confirm.txt
-	curl -L -b /tmp/cookies.txt 'https://docs.google.com/uc?export=download&confirm='$$(cat /tmp/confirm.txt)'&id=1s2QXcWnpUkALgF17zBKKv3j6ZVdKUXIP' -o reference/BIVAS_v5.10.1.zip
-	rm /tmp/cookies.txt /tmp/confirm.txt
+	curl -L -c reference/cookies.txt 'https://docs.google.com/uc?export=download&id=1s2QXcWnpUkALgF17zBKKv3j6ZVdKUXIP' | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p' > reference/confirm.txt
+	curl -L -b reference/cookies.txt 'https://docs.google.com/uc?export=download&confirm='$$(cat reference/confirm.txt)'&id=1s2QXcWnpUkALgF17zBKKv3j6ZVdKUXIP' -o reference/BIVAS_v5.10.1.zip
+	rm reference/cookies.txt reference/confirm.txt
 	unzip -o reference/BIVAS_v5.10.1.zip -d reference/
 	mv reference/Bivas.db reference/Bivas.5.10.1.sqlite
 	@echo "BIVAS database ready at reference/Bivas.5.10.1.sqlite"
