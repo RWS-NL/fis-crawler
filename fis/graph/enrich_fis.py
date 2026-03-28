@@ -24,8 +24,8 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
         Dict of dataset name to GeoDataFrame.
     """
     datasets = {}
-    names = [
-        "section",
+    required = ["section"]
+    optional = [
         "maximumdimensions",
         "navigability",
         "navigationspeed",
@@ -38,19 +38,26 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
         "fairway",
     ]
 
-    for name in names:
+    # Load required datasets
+    for name in required:
+        path = export_dir / f"{name}.geoparquet"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Required FIS dataset '{name}.geoparquet' not found in {export_dir}. "
+                "Ensure you have run the crawl-fis step."
+            )
+        datasets[name] = gpd.read_parquet(path)
+        logger.info("Loaded required dataset %s: %d records", name, len(datasets[name]))
+
+    # Load optional datasets
+    for name in optional:
         path = export_dir / f"{name}.geoparquet"
         if not path.exists():
             logger.warning("Optional FIS dataset missing: %s.geoparquet", name)
             continue
 
         datasets[name] = gpd.read_parquet(path)
-        logger.info("Loaded %s: %d records", name, len(datasets[name]))
-
-    if "section" not in datasets:
-        raise FileNotFoundError(
-            f"Required dataset 'section.geoparquet' not found in {export_dir}"
-        )
+        logger.info("Loaded optional dataset %s: %d records", name, len(datasets[name]))
 
     return datasets
 
