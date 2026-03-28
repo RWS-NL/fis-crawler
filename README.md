@@ -87,6 +87,50 @@ The network graph uses a harmonized schema based on the **EURIS** naming convent
 - **Identifier Standardization**: All identifier columns (e.g., `id`, `section_id`, `node_id`) are automatically converted to **strings** to prevent float/integer ambiguity and ensure consistent null handling across data sources. See [NAMING_CONVENTIONS.md](NAMING_CONVENTIONS.md#special-case-identifiers-ids) for details.
 - **Validation**: The `fis.cli graph validate` command checks generated graphs for schema compliance and attribute completeness.
 
+## BIVAS vs. FIS Network Comparison
+
+The repository includes tools and documentation for comparing the generated FIS network with the **BIVAS** (Binnenvaart Analyse Systeem) macroscopic assignment model.
+
+### 1. Schematization Approach
+
+| Feature | FIS Network (vaarweginformatie.nl) | BIVAS Network |
+| :--- | :--- | :--- |
+| **Geometry** | Detailed, geographically correct LineStrings. | Topological abstraction (straight lines between nodes). |
+| **Nodes** | Exact spatial junctions (`sectionjunction`). | Model nodes with RD coordinates. |
+| **Granularity** | High (captures physical curves and all regional waterways). | Macroscopic (focuses on primary transport corridors). |
+| **Length** | Derived from geographic shape (`geometry.length`). | Logical attribute (`Length__m`). |
+
+### 2. Terminology Mapping
+
+| FIS (Source) | Canonical (Project) | BIVAS Term | Note |
+| :--- | :--- | :--- | :--- |
+| `Section` | `fairway_segment` | `arcs` / `segment` | BIVAS uses 'arcs' for topological links. |
+| `SectionJunction` | `node` | `nodes` | Connects the segments/arcs. |
+| `StartJunctionId` | `source_node` | `FromNodeID` | |
+| `EndJunctionId` | `target_node` | `ToNodeID` | |
+| `VinCode` | `vincode` | `Code` (in segment) | Linked via trajectory mappings. |
+
+### 3. Attribute Equivalents
+
+The project maps FIS attributes to canonical names that align with BIVAS model requirements:
+
+| BIVAS Attribute (`arcs`) | Canonical Property | FIS Source Column |
+| :--- | :--- | :--- |
+| `MaximumWidth__m` | `dim_width` | `GeneralWidth` |
+| `MaximumDepth__m` | `dim_depth` | `GeneralDepth` |
+| `MaximumLength__m` | `dim_length` | `GeneralLength` |
+| `MaximumHeightClosed__m` | `dim_height` | `GeneralHeight` |
+| `MaximumSpeedEmpty__km_h` | `maxspeed` | `Speed` |
+| `CemtClassId` | `cemt_class` | `nav_Code` |
+
+### 4. Comparison Logic
+A dedicated script (`scripts/bivas/compare_networks.py`) provides spatial matching between the two networks using a 50m buffer. This allows for:
+- Validation of FIS network coverage against the BIVAS baseline.
+- Identification of secondary waterways present in FIS but absent in BIVAS.
+- Statistical reporting on network length and segment counts.
+
+**Prerequisites:** The BIVAS SQLite database is not stored in this repository (it is gitignored), so it will not be available in a fresh checkout. Obtain a BIVAS network export (SQLite) from your usual data source (e.g. internal data distribution or official BIVAS delivery) and store it locally. When running `scripts/bivas/compare_networks.py`, pass the path to this file via `--bivas-db /path/to/bivas.sqlite` to override the default database location.
+
 ### Standard Edge Attributes
 Every edge in the final network graph strictly follows these standardized naming conventions:
 

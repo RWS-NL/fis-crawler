@@ -9,6 +9,16 @@ logs-dir:
 # --- Crawling Steps ---
 crawl: crawl-fis crawl-euris crawl-disk
 
+download-bivas:
+	mkdir -p reference
+	@echo "Downloading BIVAS database from Google Drive..."
+	curl -L -c reference/cookies.txt 'https://docs.google.com/uc?export=download&id=1s2QXcWnpUkALgF17zBKKv3j6ZVdKUXIP' | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p' > reference/confirm.txt
+	curl -L -b reference/cookies.txt 'https://docs.google.com/uc?export=download&confirm='$$(cat reference/confirm.txt)'&id=1s2QXcWnpUkALgF17zBKKv3j6ZVdKUXIP' -o reference/BIVAS_v5.10.1.zip
+	rm reference/cookies.txt reference/confirm.txt
+	unzip -o reference/BIVAS_v5.10.1.zip -d reference/
+	mv reference/Bivas.db reference/Bivas.5.10.1.sqlite
+	@echo "BIVAS database ready at reference/Bivas.5.10.1.sqlite"
+
 crawl-fis: logs-dir
 	uv run scrapy crawl dataservice -L INFO 2>&1 | tee output/logs/crawl-fis.log
 

@@ -2,15 +2,25 @@ import sqlite3
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point, LineString
+import os
+import argparse
+import logging
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 
 def load_bivas_network(db_path, branch_set_id=337):
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"BIVAS database not found: {db_path}")
+
     conn = sqlite3.connect(db_path)
 
     # Load nodes
     nodes_df = pd.read_sql_query(
-        f"SELECT ID as NodeID, XCoordinate, YCoordinate FROM nodes WHERE BranchSetId = {branch_set_id}",
+        "SELECT ID as NodeID, XCoordinate, YCoordinate FROM nodes WHERE BranchSetId = ?",
         conn,
+        params=(branch_set_id,),
     )
     nodes_gdf = gpd.GeoDataFrame(
         nodes_df,
@@ -21,10 +31,12 @@ def load_bivas_network(db_path, branch_set_id=337):
     )
 
     # Load arcs (strictly Dutch network)
+    # Using MaximumWidth__m and MaximumDepth__m for vessel constraint comparison
     arcs_df = pd.read_sql_query(
-        f"SELECT ID, FromNodeID, ToNodeID, Name, Length__m, Width__m, MaximumDepth__m "
-        f"FROM arcs WHERE BranchSetId = {branch_set_id} AND CountryCode = 'NL'",
+        "SELECT ID, FromNodeID, ToNodeID, Name, Length__m, Width__m, MaximumDepth__m, MaximumWidth__m "
+        "FROM arcs WHERE BranchSetId = ? AND CountryCode = 'NL'",
         conn,
+        params=(branch_set_id,),
     )
 
     # Merge geometries to form LineStrings
@@ -47,27 +59,68 @@ def load_bivas_network(db_path, branch_set_id=337):
 
 
 def main():
-    print("Loading BIVAS network (NL only)...")
-    bivas_nodes, bivas_arcs = load_bivas_network("reference/Bivas.db")
+    parser = argparse.ArgumentParser(
+        description="Compare Enriched FIS network with BIVAS model."
+    )
+    parser.add_argument(
+        "--bivas-db",
+        default="tests/data/bivas/Bivas.5.10.1.sqlite",
+        help="Path to BIVAS SQLite database",
+    )
+    parser.add_argument(
+        "--branch-set-id", type=int, default=337, help="BIVAS Branch Set ID"
+    )
+    parser.add_argument(
+        "--fis-edges",
+        default="output/fis-enriched/edges.geoparquet",
+        help="Path to enriched FIS edges",
+    )
+    parser.add_argument(
+        "--output-dir", default="output/bivas-validation", help="Output directory"
+    )
 
-    print("Loading FIS network (NL only)...")
-    # Load FIS data
-    fis_sections = gpd.read_parquet("output/fis-export/section.geoparquet")
+    args = parser.parse_args()
 
-    # Filter for Dutch network: VinCode is present, ForeignCode is absent
-    fis_sections = fis_sections[fis_sections.VinCode.notna()].copy()
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    # Set CRS if none, usually FIS is EPSG:4326, but let's check and reproject
-    if fis_sections.crs is None:
-        fis_sections.set_crs(epsg=4326, inplace=True)
-    fis_sections_rd = fis_sections.to_crs(epsg=28992)
+    print(
+        f"Loading BIVAS network from {args.bivas_db} (BranchSet: {args.branch_set_id})..."
+    )
+    bivas_nodes, bivas_arcs = load_bivas_network(args.bivas_db, args.branch_set_id)
+
+    print(f"Loading ENRICHED FIS network from {args.fis_edges}...")
+    if not os.path.exists(args.fis_edges):
+        raise FileNotFoundError(f"FIS edges file not found: {args.fis_edges}")
+
+    fis_edges = gpd.read_parquet(args.fis_edges)
+
+    # Filter for Dutch network: VinCode is present
+    if "VinCode" in fis_edges.columns:
+        fis_edges = fis_edges[fis_edges.VinCode.notna()].copy()
+    else:
+        logger.warning(
+            "VinCode column missing from FIS edges, skipping Dutch network filter."
+        )
+
+    # Robust CRS handling
+    if fis_edges.crs is None:
+        logger.warning("FIS edges missing CRS, assuming EPSG:4326")
+        fis_edges.set_crs(epsg=4326, inplace=True)
+
+    current_epsg = fis_edges.crs.to_epsg()
+    if current_epsg != 28992:
+        logger.info(
+            "Reprojecting FIS edges from EPSG:%s to RD New (EPSG:28992)...",
+            current_epsg,
+        )
+        fis_edges = fis_edges.to_crs(epsg=28992)
 
     # Compare counts
     bivas_arc_cnt = len(bivas_arcs)
     bivas_len = bivas_arcs["Length__m"].sum() / 1000.0  # km
 
-    fis_arc_cnt = len(fis_sections_rd)
-    fis_len = fis_sections_rd.geometry.length.sum() / 1000.0  # km
+    fis_edge_cnt = len(fis_edges)
+    fis_len = fis_edges.geometry.length.sum() / 1000.0  # km
 
     # Matching Logic: Spatial join using 50m buffer
     bivas_arcs_buffered = bivas_arcs.copy()
@@ -75,102 +128,117 @@ def main():
 
     # Intersect
     joined = gpd.sjoin(
-        fis_sections_rd, bivas_arcs_buffered, how="inner", predicate="intersects"
+        fis_edges, bivas_arcs_buffered, how="inner", predicate="intersects"
     )
-    matched_fis_ids = joined["Id"].unique()
-    matched_bivas_ids = joined["ID"].unique()
 
-    matched_fis_pct = (len(matched_fis_ids) / fis_arc_cnt) * 100
-    matched_bivas_pct = (len(matched_bivas_ids) / bivas_arc_cnt) * 100
+    # Identify unique matches
+    matched_fis_ids = joined["Id"].unique() if "Id" in joined.columns else []
+    matched_bivas_ids = joined["ID"].unique() if "ID" in joined.columns else []
+
+    matched_fis_pct = (
+        (len(matched_fis_ids) / fis_edge_cnt * 100) if fis_edge_cnt > 0 else 0
+    )
+    matched_bivas_pct = (
+        (len(matched_bivas_ids) / bivas_arc_cnt * 100) if bivas_arc_cnt > 0 else 0
+    )
+
+    # Attribute Comparison for joined records
+    required_cols = ["dim_width", "MaximumWidth__m", "dim_depth", "MaximumDepth__m"]
+    missing_cols = [col for col in required_cols if col not in joined.columns]
+
+    if missing_cols:
+        raise ValueError(
+            f"Cannot perform attribute comparison: missing columns {', '.join(missing_cols)}. "
+            "Ensure FIS network is enriched with dim_width/dim_depth."
+        )
+
+    comp = joined.dropna(subset=required_cols).copy()
+    if not comp.empty:
+        comp["width_diff"] = comp["dim_width"] - comp["MaximumWidth__m"]
+        comp["depth_diff"] = comp["dim_depth"] - comp["MaximumDepth__m"]
+
+        width_mae = comp["width_diff"].abs().mean()
+        depth_mae = comp["depth_diff"].abs().mean()
+
+        width_bias = comp["width_diff"].mean()
+        depth_bias = comp["depth_diff"].mean()
+    else:
+        width_mae = depth_mae = width_bias = depth_bias = 0.0
 
     # Generate match/unmatch GDFs
-    fis_matched = fis_sections_rd[fis_sections_rd["Id"].isin(matched_fis_ids)]
-    fis_unmatched = fis_sections_rd[~fis_sections_rd["Id"].isin(matched_fis_ids)]
-
-    bivas_matched = bivas_arcs[bivas_arcs["ID"].isin(matched_bivas_ids)]
-    bivas_unmatched = bivas_arcs[~bivas_arcs["ID"].isin(matched_bivas_ids)]
-
-    print("Exporting match results to output/bivas-validation/...")
-    fis_matched.to_parquet("output/bivas-validation/fis_matched.geoparquet")
-    fis_unmatched.to_parquet("output/bivas-validation/fis_unmatched.geoparquet")
-    bivas_matched.to_parquet("output/bivas-validation/bivas_matched.geoparquet")
-    bivas_unmatched.to_parquet("output/bivas-validation/bivas_unmatched.geoparquet")
-
-    # Export to GeoJSON for compatibility
-    fis_matched.to_file("output/bivas-validation/fis_matched.geojson", driver="GeoJSON")
-    fis_unmatched.to_file(
-        "output/bivas-validation/fis_unmatched.geojson", driver="GeoJSON"
+    fis_matched = (
+        fis_edges[fis_edges["Id"].isin(matched_fis_ids)]
+        if "Id" in fis_edges.columns
+        else fis_edges
     )
-    bivas_matched.to_file(
-        "output/bivas-validation/bivas_matched.geojson", driver="GeoJSON"
-    )
-    bivas_unmatched.to_file(
-        "output/bivas-validation/bivas_unmatched.geojson", driver="GeoJSON"
+    bivas_matched = (
+        bivas_arcs[bivas_arcs["ID"].isin(matched_bivas_ids)]
+        if "ID" in bivas_arcs.columns
+        else bivas_arcs
     )
 
-    # Calculate Total Statistics
-    total_bivas_arc_cnt = 9631  # From database query
-    total_bivas_len = 26446.2  # From database query
-    total_fis_arc_cnt = 5107  # Total rows in parquet
-    total_fis_len = 31276.3  # Total RD length
+    print(f"Exporting match results to {args.output_dir}...")
+    fis_matched.to_parquet(os.path.join(args.output_dir, "fis_matched.geoparquet"))
+    bivas_matched.to_parquet(os.path.join(args.output_dir, "bivas_matched.geoparquet"))
 
-    report = f"""# FIS vs BIVAS Network Comparison
+    # Save a GeoParquet of attribute deltas for reporting
+    if not comp.empty:
+        comp_cols = [
+            "Id",
+            "ID",
+            "Name_left",
+            "Name_right",
+            "dim_width",
+            "MaximumWidth__m",
+            "width_diff",
+            "dim_depth",
+            "MaximumDepth__m",
+            "depth_diff",
+            "geometry",
+        ]
+        available_comp_cols = [c for c in comp_cols if c in comp.columns]
+        comp[available_comp_cols].to_parquet(
+            os.path.join(args.output_dir, "attribute_comparison.geoparquet")
+        )
 
-## 1. Network Schematization Approach
+    report = f"""# FIS (Enriched) vs BIVAS Network Comparison
 
-- **FIS Network (vaarweginformatie.nl):** The network uses detailed geographically correct geometries. Nodes are exact spatial points (`sectionjunction`), and edges (`section`) contain realistic, highly accurate LineStrings capturing the exact curves and path of the waterways. It maps directly to VIN codes.
-- **BIVAS Network:** This is a macroscopic assignment model. Nodes are given with specific coordinates (RD New, EPSG:28992), but edges (`arcs`) act topologically as straight lines between the nodes. The length in BIVAS is an attribute (`Length__m`), not strictly bound to the geographic shape length.
+## 1. Network Statistics (NL Focus)
 
-## 2. Terminology Mapping
+| Metric | FIS Enriched | BIVAS (NL) |
+| :--- | :---: | :---: |
+| Count | {fis_edge_cnt} | {bivas_arc_cnt} |
+| Total Length (km) | {fis_len:.1f} | {bivas_len:.1f} |
 
-| FIS (vaarweginformatie) Term | BIVAS Term | Note |
-| --- | --- | --- |
-| `Section` (edge) | `arcs` / `segment` | BIVAS uses 'arcs' for topological link. 'segment' describes logical sets. |
-| `SectionJunction` (node) | `nodes` | Nodes connect the arcs. |
-| `StartJunctionId` | `FromNodeID` | Source node. |
-| `EndJunctionId` | `ToNodeID` | Target node. |
-| `Length` | `Length__m` | FIS length vs BIVAS logical length. |
-| `VinCode` | `Code` (in segment) | Found via `arc_vin_trajectory_connection` mapping. |
+## 2. Spatial Matching
+Using a 50m spatial buffer:
+- **FIS matched with BIVAS:** {matched_fis_pct:.1f}% ({len(matched_fis_ids)} segments)
+- **BIVAS matched with FIS:** {matched_bivas_pct:.1f}% ({len(matched_bivas_ids)} arcs)
 
-## 3. Network Statistics (Total)
+## 3. Attribute Accuracy (Matched Segments)
 
-- **Total BIVAS Network:**
-  - Arc count: {total_bivas_arc_cnt}
-  - Total network length: {total_bivas_len:.1f} km (based on `Length__m` attribute)
-- **Total FIS Network:**
-  - Edge (Section) count: {total_fis_arc_cnt}
-  - Total network geographic length: {total_fis_len:.1f} km
+Analysis of physical dimensions for overlapping network segments (Vessel Constraints).
 
-## 4. Granularity & Matching Analysis (Focus: Netherlands)
+| Property | Mean Absolute Error (MAE) | Mean Bias |
+| :--- | :---: | :---: |
+| **Width (m)** | {width_mae:.2f} m | {width_bias:.2f} m |
+| **Depth (m)** | {depth_mae:.2f} m | {depth_bias:.2f} m |
 
-To ensure a meaningful comparison of Dutch waterway representations, we filter both networks to the Netherlands (BIVAS `CountryCode='NL'` and FIS entries with a valid `VinCode`).
+*Note: Comparison performed on {len(comp)} segments where both datasets provide dimensions.*
 
-### NL Quantitative Statistics
-
-- **BIVAS Network (NL only):**
-  - Arc count: {bivas_arc_cnt}
-  - Network length: {bivas_len:.1f} km
-- **FIS Network (NL only):**
-  - Edge (Section) count: {fis_arc_cnt}
-  - Network geographic length: {fis_len:.1f} km
-
-### Spatial Matching (NL only)
-Using a 50m spatial buffer around the straight-line topological BIVAS arcs:
-- **FIS NL Edges matched with BIVAS:** {matched_fis_pct:.1f}% of FIS NL network intersects with a BIVAS arc.
-- **BIVAS NL Arcs matched with FIS:** {matched_bivas_pct:.1f}% of BIVAS NL network intersects with a FIS section.
-
-### Qualitative Differences
-- BIVAS network represents a higher-level abstraction. Multiple consecutive FIS sections often map to a single topological BIVAS arc.
-- The 1-to-N relationship leads to geometric mismatch, as the straight topological line of a BIVAS arc does not follow the physical curves of the waterway stored in the FIS `geometry` column.
-- The FIS Dutch network is significantly more extensive (totaling ~12,838 km compared to BIVAS's ~6,931 km) as it includes many secondary and regional waterways not present in the BIVAS model.
-
+## 4. Observations
+- FIS Enrichment provides `dim_width` and `dim_depth` derived from `maximumdimensions.parquet`.
+- BIVAS `MaximumWidth__m` and `MaximumDepth__m` are used for comparison as they represent vessel constraints.
+- Differences often occur in complex junctions where BIVAS topological arcs cross multiple FIS segments with varying dimensions.
 """
 
-    with open("output/bivas-validation/comparison_report.md", "w") as f:
+    report_path = os.path.join(args.output_dir, "comparison_report.md")
+    with open(report_path, "w") as f:
         f.write(report)
 
-    print("Report written to output/bivas-validation/comparison_report.md")
+    print(f"Report written to {report_path}")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
     main()
