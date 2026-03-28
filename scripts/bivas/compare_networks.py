@@ -6,8 +6,7 @@ import os
 import argparse
 import logging
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+# Set up logger
 logger = logging.getLogger(__name__)
 
 
@@ -19,8 +18,9 @@ def load_bivas_network(db_path, branch_set_id=337):
 
     # Load nodes
     nodes_df = pd.read_sql_query(
-        f"SELECT ID as NodeID, XCoordinate, YCoordinate FROM nodes WHERE BranchSetId = {branch_set_id}",
+        "SELECT ID as NodeID, XCoordinate, YCoordinate FROM nodes WHERE BranchSetId = ?",
         conn,
+        params=(branch_set_id,),
     )
     nodes_gdf = gpd.GeoDataFrame(
         nodes_df,
@@ -33,9 +33,10 @@ def load_bivas_network(db_path, branch_set_id=337):
     # Load arcs (strictly Dutch network)
     # Using MaximumWidth__m and MaximumDepth__m for vessel constraint comparison
     arcs_df = pd.read_sql_query(
-        f"SELECT ID, FromNodeID, ToNodeID, Name, Length__m, Width__m, MaximumDepth__m, MaximumWidth__m "
-        f"FROM arcs WHERE BranchSetId = {branch_set_id} AND CountryCode = 'NL'",
+        "SELECT ID, FromNodeID, ToNodeID, Name, Length__m, Width__m, MaximumDepth__m, MaximumWidth__m "
+        "FROM arcs WHERE BranchSetId = ? AND CountryCode = 'NL'",
         conn,
+        params=(branch_set_id,),
     )
 
     # Merge geometries to form LineStrings
@@ -85,16 +86,11 @@ def main():
     print(
         f"Loading BIVAS network from {args.bivas_db} (BranchSet: {args.branch_set_id})..."
     )
-    try:
-        bivas_nodes, bivas_arcs = load_bivas_network(args.bivas_db, args.branch_set_id)
-    except FileNotFoundError as e:
-        logger.error(e)
-        return
+    bivas_nodes, bivas_arcs = load_bivas_network(args.bivas_db, args.branch_set_id)
 
     print(f"Loading ENRICHED FIS network from {args.fis_edges}...")
     if not os.path.exists(args.fis_edges):
-        logger.error(f"FIS edges file not found: {args.fis_edges}")
-        return
+        raise FileNotFoundError(f"FIS edges file not found: {args.fis_edges}")
 
     fis_edges = gpd.read_parquet(args.fis_edges)
 
@@ -111,8 +107,12 @@ def main():
         logger.warning("FIS edges missing CRS, assuming EPSG:4326")
         fis_edges.set_crs(epsg=4326, inplace=True)
 
-    if fis_edges.crs.to_epsg() != 28992:
-        print("Reprojecting FIS edges to RD New (EPSG:28992)...")
+    current_epsg = fis_edges.crs.to_epsg()
+    if current_epsg != 28992:
+        logger.info(
+            "Reprojecting FIS edges from EPSG:%s to RD New (EPSG:28992)...",
+            current_epsg,
+        )
         fis_edges = fis_edges.to_crs(epsg=28992)
 
     # Compare counts
@@ -147,24 +147,23 @@ def main():
     missing_cols = [col for col in required_cols if col not in joined.columns]
 
     if missing_cols:
-        print(
-            f"Warning: Skipping attribute comparison because columns are missing: {', '.join(missing_cols)}"
+        raise ValueError(
+            f"Cannot perform attribute comparison: missing columns {', '.join(missing_cols)}. "
+            "Ensure FIS network is enriched with dim_width/dim_depth."
         )
-        width_mae = depth_mae = width_bias = depth_bias = 0.0
-        comp = pd.DataFrame()
+
+    comp = joined.dropna(subset=required_cols).copy()
+    if not comp.empty:
+        comp["width_diff"] = comp["dim_width"] - comp["MaximumWidth__m"]
+        comp["depth_diff"] = comp["dim_depth"] - comp["MaximumDepth__m"]
+
+        width_mae = comp["width_diff"].abs().mean()
+        depth_mae = comp["depth_diff"].abs().mean()
+
+        width_bias = comp["width_diff"].mean()
+        depth_bias = comp["depth_diff"].mean()
     else:
-        comp = joined.dropna(subset=required_cols).copy()
-        if not comp.empty:
-            comp["width_diff"] = comp["dim_width"] - comp["MaximumWidth__m"]
-            comp["depth_diff"] = comp["dim_depth"] - comp["MaximumDepth__m"]
-
-            width_mae = comp["width_diff"].abs().mean()
-            depth_mae = comp["depth_diff"].abs().mean()
-
-            width_bias = comp["width_diff"].mean()
-            depth_bias = comp["depth_diff"].mean()
-        else:
-            width_mae = depth_mae = width_bias = depth_bias = 0.0
+        width_mae = depth_mae = width_bias = depth_bias = 0.0
 
     # Generate match/unmatch GDFs
     fis_matched = (
@@ -241,4 +240,5 @@ Analysis of physical dimensions for overlapping network segments (Vessel Constra
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
     main()

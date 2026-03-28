@@ -129,6 +129,8 @@ A dedicated script (`scripts/bivas/compare_networks.py`) provides spatial matchi
 - Identification of secondary waterways present in FIS but absent in BIVAS.
 - Statistical reporting on network length and segment counts.
 
+**Prerequisites:** The BIVAS SQLite database is not stored in this repository (it is gitignored), so it will not be available in a fresh checkout. Obtain a BIVAS network export (SQLite) from your usual data source (e.g. internal data distribution or official BIVAS delivery) and store it locally. When running `scripts/bivas/compare_networks.py`, pass the path to this file via `--bivas-db /path/to/bivas.sqlite` to override the default database location.
+
 ### Standard Edge Attributes
 Every edge in the final network graph strictly follows these standardized naming conventions:
 

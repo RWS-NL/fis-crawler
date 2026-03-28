@@ -300,7 +300,12 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
 
     # Fairway number (join by FairwayId)
     fairway = datasets.get("fairway")
-    if fairway is not None and {"Id", "FairwayNumber"}.issubset(fairway.columns):
+    if (
+        fairway is not None
+        and not fairway.empty
+        and {"Id", "FairwayNumber"}.issubset(fairway.columns)
+        and "FairwayId" in sections.columns
+    ):
         fairway_df = (
             sections[["Id", "FairwayId"]]
             .merge(
