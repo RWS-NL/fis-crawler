@@ -161,7 +161,7 @@ def normalize_attributes(
     Returns:
         DataFrame with renamed columns.
     """
-    if df is None or df.empty:
+    if df.empty:
         return df
 
     if schema is None:
@@ -177,27 +177,45 @@ def normalize_attributes(
         if k in df.columns:
             rename_map[k] = v
 
-    if rename_map:
-        logger.info("Normalizing columns for %s", schema_section)
-        # Avoid duplicate columns by dropping existing columns that will be overwritten by a rename
-        new_df = df.copy()
-        for old_col, new_col in rename_map.items():
-            if old_col != new_col and new_col in new_df.columns:
-                new_df = new_df.drop(columns=[new_col])
-        # Perform rename
-        new_df = new_df.rename(columns=rename_map)
+    # 2a. Standard global renames (FIS-specific but general)
+    # These ensure consistency even if not explicitly in a schema section
+    global_renames = {"Id": "id", "Geometry": "geometry"}
+    for k, v in global_renames.items():
+        if k in df.columns and k not in rename_map:
+            rename_map[k] = v
 
-        # 3. Standardize common ID columns as STRINGS
-        # Load list from identifiers section in schema.toml
-        id_cols = schema.get("identifiers", {}).get("columns", [])
+    logger.info("Normalizing columns for %s", schema_section)
+    # Avoid duplicate columns by dropping existing columns that will be overwritten by a rename
+    new_df = df.copy()
+    for old_col, new_col in rename_map.items():
+        if old_col != new_col and new_col in new_df.columns:
+            new_df = new_df.drop(columns=[new_col])
+    # Perform rename
+    new_df = new_df.rename(columns=rename_map)
 
-        for col in id_cols:
-            if col in new_df.columns:
-                new_df[col] = new_df[col].apply(stringify_id)
+    # 2b. Ensure all target columns from explicit mappings exist
+    # Use reindex for efficiency instead of a loop
+    target_cols = list(set(mappings.values()))
+    missing_target_cols = [c for c in target_cols if c not in new_df.columns]
+    if missing_target_cols:
+        # Add missing columns as NaN efficiently
+        new_df = pd.concat(
+            [
+                new_df,
+                pd.DataFrame(np.nan, index=new_df.index, columns=missing_target_cols),
+            ],
+            axis=1,
+        )
 
-        return new_df
+    # 3. Standardize common ID columns as STRINGS
+    # Load list from identifiers section in schema.toml
+    id_cols = schema.get("identifiers", {}).get("columns", [])
 
-    return df
+    for col in id_cols:
+        if col in new_df.columns:
+            new_df[col] = new_df[col].apply(stringify_id)
+
+    return new_df
 
 
 def process_fairway_geometry(fw_row, lock_row, buffer_dist=0, openings_data=None):

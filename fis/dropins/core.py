@@ -117,16 +117,20 @@ def _map_dropins_to_sections(
             )
     for term in terminals:
         sid = utils.stringify_id(term.get("FairwaySectionId"))
-        if sid:
-            dropins_by_section.setdefault(sid, []).append(
-                {"type": "terminal", "obj": term}
+        if not sid:
+            raise ValueError(
+                f"Terminal {term.get('id', term.get('Id'))} has no FairwaySectionId and cannot be spliced."
             )
+        dropins_by_section.setdefault(sid, []).append({"type": "terminal", "obj": term})
     if berths:
         for berth in berths:
             sid = utils.stringify_id(berth.get("FairwaySectionId"))
-            if sid:
-                dropins_by_section.setdefault(sid, []).append(
-                    {"type": "berth", "obj": berth}
+            if not sid:
+                raise ValueError(
+                    f"Berth {berth.get('id', berth.get('Id'))} has no FairwaySectionId and cannot be spliced."
                 )
+            dropins_by_section.setdefault(sid, []).append(
+                {"type": "berth", "obj": berth}
+            )
 
     return dropins_by_section

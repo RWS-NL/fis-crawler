@@ -137,20 +137,20 @@ def schematize(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Group complexes
     result = group_bridge_complexes(data)
 
+    # Summary JSON (per-bridge metadata)
     output_json = output_dir / "summary.json"
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
     logger.info("Saved summary to %s", output_json)
 
-    if not result:
-        return
-
     def save_gdf(gdf: gpd.GeoDataFrame, name: str) -> None:
         if gdf is None or gdf.empty:
-            logger.warning("No features for %s, skipping.", name)
-            return
+            raise ValueError(
+                f"Output DataFrame for '{name}' is empty or None. Expected data to export."
+            )
 
         # Ensure ID columns are strings to avoid Arrow conversion errors (mixed types)
         from fis.utils import load_schema, stringify_id

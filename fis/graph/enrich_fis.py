@@ -24,8 +24,10 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
         Dict of dataset name to GeoDataFrame.
     """
     datasets = {}
-    required = ["section", "maximumdimensions", "navigability"]
-    optional = [
+    required = [
+        "section",
+        "maximumdimensions",
+        "navigability",
         "navigationspeed",
         "fairwaydepth",
         "fairwaytype",
@@ -33,15 +35,10 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
         "fairwayclassification",
     ]
 
-    for name in required + optional:
+    for name in required:
         path = export_dir / f"{name}.geoparquet"
-        if path.exists():
-            datasets[name] = gpd.read_parquet(path)
-            logger.info("Loaded %s: %d records", name, len(datasets[name]))
-        elif name in required:
-            raise FileNotFoundError(f"Required file not found: {path}")
-        else:
-            logger.warning("Optional file not found: %s", path)
+        datasets[name] = gpd.read_parquet(path)
+        logger.info("Loaded %s: %d records", name, len(datasets[name]))
 
     return datasets
 
@@ -63,8 +60,8 @@ def match_by_geometry(
     Returns:
         DataFrame indexed by section Id with prefixed columns.
     """
-    if data is None or data.empty:
-        return pd.DataFrame(index=sections["Id"])
+    if data.empty:
+        raise ValueError(f"Data provided for {prefix} geometry matching is empty.")
 
     available = [c for c in columns if c in data.columns]
     if not available:
@@ -115,8 +112,8 @@ def match_by_route_km(
     Returns:
         DataFrame indexed by section Id with prefixed columns.
     """
-    if data is None or data.empty:
-        return pd.DataFrame(index=sections["Id"])
+    if data.empty:
+        raise ValueError(f"Data provided for {prefix} route/km matching is empty.")
 
     # Check required columns
     required = ["RouteId", "RouteKmBegin", "RouteKmEnd"]
@@ -208,11 +205,11 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         "CoupledWidth",
     ]
     maxdim_df = match_by_geometry(
-        sections, datasets.get("maximumdimensions"), maxdim_cols, "dim_"
+        sections, datasets["maximumdimensions"], maxdim_cols, "dim_"
     )
 
     nav_cols = ["Classification", "Code", "Description"]
-    nav_df = match_by_geometry(sections, datasets.get("navigability"), nav_cols, "nav_")
+    nav_df = match_by_geometry(sections, datasets["navigability"], nav_cols, "nav_")
     # Add cemt_class alias
     if "nav_Code" in nav_df.columns:
         nav_df["cemt_class"] = nav_df["nav_Code"]
@@ -226,23 +223,19 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         "CalibratedSpeedDown",
     ]
     speed_df = match_by_route_km(
-        sections, datasets.get("navigationspeed"), speed_cols, "speed_"
+        sections, datasets["navigationspeed"], speed_cols, "speed_"
     )
 
     depth_cols = ["MinimalDepthLowerLimit", "MinimalDepthUpperLimit", "ReferenceLevel"]
     depth_df = match_by_route_km(
-        sections, datasets.get("fairwaydepth"), depth_cols, "depth_"
+        sections, datasets["fairwaydepth"], depth_cols, "depth_"
     )
 
     type_cols = ["CharacterTypeCode"]
-    type_df = match_by_route_km(
-        sections, datasets.get("fairwaytype"), type_cols, "type_"
-    )
+    type_df = match_by_route_km(sections, datasets["fairwaytype"], type_cols, "type_")
 
     # Tidal area - just mark as boolean
-    tidal_df = match_by_route_km(
-        sections, datasets.get("tidalarea"), ["Name"], "tidal_"
-    )
+    tidal_df = match_by_route_km(sections, datasets["tidalarea"], ["Name"], "tidal_")
     if "tidal_Name" in tidal_df.columns:
         tidal_df["is_tidal"] = tidal_df["tidal_Name"].notna()
         tidal_df = tidal_df.drop(columns=["tidal_Name"])
@@ -250,7 +243,7 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
     # Fairway classification (HTA/HVW)
     fwc_cols = ["TypeDescription", "Type"]
     fwc_df = match_by_route_km(
-        sections, datasets.get("fairwayclassification"), fwc_cols, "fwc_"
+        sections, datasets["fairwayclassification"], fwc_cols, "fwc_"
     )
 
     # Combine all enrichment

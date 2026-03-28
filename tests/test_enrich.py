@@ -127,12 +127,12 @@ class TestMatchByGeometry:
         assert pd.isna(result.loc[2, "dim_GeneralDepth"])  # Section 2 not matched
 
     def test_handles_empty_data(self, sample_sections):
-        """Should return empty DataFrame for empty input data."""
+        """Should raise ValueError for empty input data."""
         empty_gdf = gpd.GeoDataFrame()
-        result = match_by_geometry(sample_sections, empty_gdf, ["SomeCol"], "test_")
-
-        assert len(result) == len(sample_sections)
-        assert result.empty or result.isna().all().all()
+        with pytest.raises(
+            ValueError, match="Data provided for test_ geometry matching is empty."
+        ):
+            match_by_geometry(sample_sections, empty_gdf, ["SomeCol"], "test_")
 
     def test_handles_missing_columns(self, sample_sections, sample_maxdim):
         """Should gracefully handle missing columns."""
@@ -183,11 +183,12 @@ class TestMatchByRouteKm:
         assert pd.isna(result.loc[3, "speed_Speed"])
 
     def test_handles_empty_data(self, sample_sections):
-        """Should return empty DataFrame for empty input data."""
+        """Should raise ValueError for empty input data."""
         empty_gdf = gpd.GeoDataFrame()
-        result = match_by_route_km(sample_sections, empty_gdf, ["Speed"], "speed_")
-
-        assert len(result) == len(sample_sections)
+        with pytest.raises(
+            ValueError, match="Data provided for speed_ route/km matching is empty."
+        ):
+            match_by_route_km(sample_sections, empty_gdf, ["Speed"], "speed_")
 
 
 # =============================================================================
@@ -202,11 +203,28 @@ class TestBuildSectionEnrichment:
         self, sample_sections, sample_maxdim, sample_navigability, sample_speed
     ):
         """Should combine enrichment from multiple data sources."""
+        # Create minimal non-empty GDFs for other required datasets to satisfy strictness
+        # We use a non-matching RouteId so they don't affect results but don't trigger empty error
+        dummy_gdf = gpd.GeoDataFrame(
+            {
+                "Id": [999],
+                "RouteId": [999],
+                "RouteKmBegin": [0.0],
+                "RouteKmEnd": [1.0],
+                "geometry": [LineString([(10, 10), (11, 11)])],
+            },
+            crs="EPSG:4326",
+        )
+
         datasets = {
             "section": sample_sections,
             "maximumdimensions": sample_maxdim,
             "navigability": sample_navigability,
             "navigationspeed": sample_speed,
+            "fairwaydepth": dummy_gdf,
+            "fairwaytype": dummy_gdf,
+            "tidalarea": dummy_gdf,
+            "fairwayclassification": dummy_gdf,
         }
 
         result = build_fis_section_enrichment(datasets)

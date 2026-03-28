@@ -122,19 +122,7 @@ def test_terminal_missing_section_id(sample_data):
     # Remove section ID from one terminal
     terminals[0]["FairwaySectionId"] = None
 
-    dropins_by_section = _map_dropins_to_sections([], [], terminals)
-    assert "sec_1" in dropins_by_section
-    assert len(dropins_by_section["sec_1"]) == 1  # Only term_far
-
-    splice_fairways(sections_df, dropins_by_section, {})
-    terminal_features = generate_terminal_graph_features(terminals)
-
-    # term_close should have no connection_geometry and thus no features
-    assert "connection_geometry" not in terminals[0]
-    assert (
-        len([f for f in terminal_features if "term_close" in f["properties"]["id"]])
-        == 0
-    )
-    assert (
-        len([f for f in terminal_features if "term_far" in f["properties"]["id"]]) == 3
-    )
+    with pytest.raises(
+        ValueError, match="has no FairwaySectionId and cannot be spliced."
+    ):
+        _map_dropins_to_sections([], [], terminals)

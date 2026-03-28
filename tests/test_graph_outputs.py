@@ -33,7 +33,12 @@ def _make_complex():
         "geometry_after_wkt": LineString([(4.5, 52.4), (4.5, 52.3)]).wkt,
         "start_junction_id": 10,
         "end_junction_id": 20,
-        "sections": [{"id": 300}],
+        "sections": [
+            {
+                "id": 300,
+                "geometry": LineString([(4.5, 52.6), (4.5, 52.3)]).wkt,
+            }
+        ],
         "berths": [
             {
                 "id": 99,

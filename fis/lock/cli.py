@@ -7,7 +7,6 @@ import pathlib
 import click
 import geopandas as gpd
 
-from fis.ris_index import load_ris_index
 from fis.lock.core import load_data, group_complexes
 
 import pickle
@@ -19,6 +18,9 @@ from fis.lock.graph import (
     build_chambers_gdf,
     build_subchambers_gdf,
 )
+
+from fis import utils
+from fis.utils import load_schema
 
 logger = logging.getLogger(__name__)
 
@@ -63,17 +65,9 @@ def schematize(
     """Process lock complexes into detailed graph features."""
     data = load_data(export_dir, disk_dir)
 
-    # Load RIS Index
-    ris_df = None
-    ris_path = export_dir / "RisIndexNL.xlsx"
-    if ris_path.exists():
-        ris_df = load_ris_index(ris_path)
-        logger.info("Loaded %d RIS Index entries", len(ris_df))
-
     # Load Network Graph for fairway connectivity
-
     network_graph = None
-    if fis_graph and fis_graph.exists():
+    if fis_graph:
         with open(fis_graph, "rb") as f:
             network_graph = pickle.load(f)
         logger.info(
@@ -84,7 +78,6 @@ def schematize(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Group complexes
-    data["ris_df"] = ris_df
     result = group_complexes(data, network_graph)
 
     # Summary JSON (per-lock metadata)
@@ -99,15 +92,15 @@ def schematize(
     def save_gdf(gdf: gpd.GeoDataFrame, name: str) -> None:
         """Save a GeoDataFrame as both GeoJSON and GeoParquet."""
         if gdf is None or gdf.empty:
-            logger.warning("No features for %s, skipping.", name)
+            logger.warning(
+                "Output DataFrame for '%s' is empty or None. Skipping export.", name
+            )
             return
 
         # Ensure ID columns are strings to avoid Arrow conversion errors (mixed types)
-        from fis import utils
-        from fis.utils import load_schema
-
         schema = load_schema()
-        id_cols = schema.get("identifiers", {}).get("columns", [])
+        id_cols = schema["identifiers"]["columns"]
+
         gdf = gdf.copy()
         for col in id_cols:
             if col in gdf.columns:
