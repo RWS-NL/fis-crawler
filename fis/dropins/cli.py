@@ -21,7 +21,7 @@ def dropins_cli():
 )
 @click.option(
     "--disk-dir",
-    type=click.Path(exists=True, path_type=pathlib.Path),
+    type=click.Path(path_type=pathlib.Path),
     default="output/disk-export",
 )
 @click.option(
@@ -46,7 +46,13 @@ def dropins_cli():
     default=False,
     help="Include berths as nodes and access edges in the graph. Caution: This adds many extra edges.",
 )
-def schematize(export_dir, disk_dir, output_dir, bbox, mode, include_berths):
+@click.option(
+    "--source",
+    type=click.Choice(["fis", "euris"]),
+    default="fis",
+    help="Data source to use for schematization. 'fis' (default) uses Dutch FIS/DISK data; 'euris' uses European data.",
+)
+def schematize(export_dir, disk_dir, output_dir, bbox, mode, include_berths, source):
     """Integrate locks and bridges into fairways globally."""
     bbox_tuple = None
     if bbox:
@@ -57,11 +63,36 @@ def schematize(export_dir, disk_dir, output_dir, bbox, mode, include_berths):
         except Exception:
             raise click.BadParameter("BBox must be 'minx,miny,maxx,maxy'")
 
+    from fis.dropins.io import load_dropins_with_spatial_matching
+    from fis.dropins.euris_io import load_dropins_with_explicit_linking
+
+    if source == "euris":
+        (
+            lock_complexes,
+            bridge_complexes,
+            terminals,
+            berths,
+            sections,
+            openings,
+        ) = load_dropins_with_explicit_linking(export_dir, bbox=bbox_tuple)
+    else:
+        (
+            lock_complexes,
+            bridge_complexes,
+            terminals,
+            berths,
+            sections,
+            openings,
+        ) = load_dropins_with_spatial_matching(export_dir, disk_dir, bbox=bbox_tuple)
+
     build_integrated_dropins_graph(
-        export_dir,
-        disk_dir,
+        lock_complexes,
+        bridge_complexes,
+        terminals,
+        berths,
+        sections,
+        openings,
         output_dir,
-        bbox=bbox_tuple,
         mode=mode,
         include_berths=include_berths,
     )

@@ -1,4 +1,5 @@
-.PHONY: all crawl crawl-fis crawl-euris crawl-disk build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas
+.PHONY: all crawl crawl-fis crawl-euris crawl-disk build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas \
+	schematize-dropins-fis-detailed schematize-dropins-fis-simplified schematize-dropins-euris
 
 # Default target
 all: crawl build-graphs merge-graphs schematize validate
@@ -66,8 +67,16 @@ schematize-lock: merge-graphs logs-dir
 schematize-bridge: merge-graphs logs-dir
 	uv run python -m fis.cli bridge schematize 2>&1 | tee output/logs/schematize-bridge.log
 
-schematize-dropins: merge-graphs logs-dir
-	uv run python -m fis.cli dropins schematize 2>&1 | tee output/logs/schematize-dropins.log
+schematize-dropins: schematize-dropins-fis-detailed schematize-dropins-fis-simplified schematize-dropins-euris
+
+schematize-dropins-fis-detailed: crawl-fis crawl-disk logs-dir
+	uv run python -m fis.cli dropins schematize --source fis --mode detailed --output-dir output/dropins-fis-detailed 2>&1 | tee output/logs/schematize-dropins-fis-detailed.log
+
+schematize-dropins-fis-simplified: crawl-fis crawl-disk logs-dir
+	uv run python -m fis.cli dropins schematize --source fis --mode simplified --output-dir output/dropins-fis-simplified 2>&1 | tee output/logs/schematize-dropins-fis-simplified.log
+
+schematize-dropins-euris: crawl-euris logs-dir
+	uv run python -m fis.cli dropins schematize --source euris --mode detailed --export-dir output/euris-export --output-dir output/dropins-euris-detailed 2>&1 | tee output/logs/schematize-dropins-euris.log
 
 # --- Validation ---
 validate: validate-fis validate-merged validate-bivas

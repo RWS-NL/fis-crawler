@@ -15,10 +15,21 @@ from fis.dropins.berths import build_berths_gdf
 logger = logging.getLogger(__name__)
 
 
-def load_and_group_dropins(
+def load_dropins_with_spatial_matching(
     export_dir: pathlib.Path, disk_dir: pathlib.Path, bbox=None
 ) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict], pd.DataFrame, pd.DataFrame]:
-    """Loads all parquet files and delegates to the grouped domain builders."""
+    """
+    Loads structure and network data for FIS/DISK, using spatial matching
+    (within buffers) to link physical structures to fairway sections.
+
+    This loading strategy is required for FIS as it does not provide explicit
+    section-to-structure foreign keys in its raw exports.
+
+    Mapping Strategy:
+    1. Units: Dimensions are in meters.
+    2. Grouping: Locks and bridges are grouped via specialized spatial core modules.
+    3. Fairway Linking: Spatial intersection between DISK geometries and FIS records.
+    """
     data = lock_load_data(export_dir, disk_dir)
 
     def read_geo_or_parquet(stem):

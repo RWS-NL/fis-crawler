@@ -29,10 +29,19 @@ def identify_embedded_structures(
 
     all_candidates = []
 
+    # Use spatial index for optimization
     for _, op_row in openings_rd.iterrows():
         op_id = str(op_row["id"])
         op_name = str(op_row.get("name", op_row.get("Name", ""))).lower()
-        for _, ch_row in chambers_rd.iterrows():
+
+        # Buffer the opening to find nearby chambers
+        buffer_geom = op_row.geometry.buffer(settings.EMBEDDED_STRUCTURE_MAX_DIST_M)
+        possible_matches_index = chambers_rd.sindex.query(
+            buffer_geom, predicate="intersects"
+        )
+        nearby_chambers = chambers_rd.iloc[possible_matches_index]
+
+        for _, ch_row in nearby_chambers.iterrows():
             ch_id = str(ch_row["id"])
             ch_name = str(ch_row.get("name", ch_row.get("Name", ""))).lower()
             dist = op_row.geometry.distance(ch_row.geometry)

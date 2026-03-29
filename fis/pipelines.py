@@ -27,25 +27,32 @@ logger = logging.getLogger(__name__)
 
 
 class VaarweginformatiePipeline:
-    def process_item(self, item, spider):
+    def process_item(self, item, spider=None):
         return item
 
 
 class PerGeoTypeExportPipeline:
     """Distribute items across multiple json files according to their geotype"""
 
-    def open_spider(self, spider):
+    @classmethod
+    def from_crawler(cls, crawler):
+        pipeline = cls()
+        pipeline.crawler = crawler
+        return pipeline
+
+    def open_spider(self, spider=None):
         self.geo_type_to_exporter = {}
 
-    def close_spider(self, spider):
+    def close_spider(self, spider=None):
         for exporter, json_file in self.geo_type_to_exporter.values():
             exporter.finish_exporting()
             json_file.close()
 
-    def _exporter_for_item(self, item, spider):
+    def _exporter_for_item(self, item):
         adapter = ItemAdapter(item)
         geo_type = adapter["GeoType"]
 
+        spider = self.crawler.spider
         data_dir = spider.data_dir
 
         if geo_type not in self.geo_type_to_exporter:
@@ -57,8 +64,8 @@ class PerGeoTypeExportPipeline:
         exporter, _ = self.geo_type_to_exporter[geo_type]
         return exporter
 
-    def process_item(self, item, spider):
-        exporter = self._exporter_for_item(item, spider)
+    def process_item(self, item, spider=None):
+        exporter = self._exporter_for_item(item)
         exporter.export_item(item)
 
         return item
@@ -87,8 +94,8 @@ class EurisFilesPipeline(FilesPipeline):
                     info.spider.logger.info(f"Extracted {abs_path} to {extract_dir}")
         return item
 
-    def close_spider(self, spider):
-        self.process_ris_files(spider)
+    def close_spider(self, spider=None):
+        self.process_ris_files(self.crawler.spider)
         # Graph building moved to fis.graph.cli euris command
 
     def process_ris_files(self, spider):

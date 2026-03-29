@@ -24,6 +24,14 @@ def splice_fairways(
     """
     Iterates over all fairway sections and splices them into sub-segments
     based on the structures (drop-ins) that lie upon them.
+
+    Approach divergence handling:
+    1. Attribute consistency: Splicing logic handles both 'length' (FIS) and
+       'dim_length' (EURIS) attributes via field-agnostic lookups.
+    2. Splicing Geometry: For structures provided as Points (common in EURIS),
+       the splicer projections handle Point geometries to derive cut distances.
+    3. Hierarchy: Embedded bridge logic is shared and applied to any source
+       where a bridge is spatially part of a lock complex.
     """
     all_features = []
     sections_gdf = _prepare_sections_gdf(sections)
@@ -214,13 +222,16 @@ def _generate_structure_cuts(
     cuts = []
     for dropin in dropins_on_sec:
         obj = dropin["obj"]
-        geom_wkt = obj.get("geometry")
-        if not geom_wkt:
+        # Use 'topological_anchor' for precise splicing position (e.g. snapped points for EURIS)
+        # Fallback to 'geometry' (which might be a Polygon centroid)
+        geom_val = obj.get("topological_anchor") or obj.get("geometry")
+        if not geom_val:
             raise ValueError(
-                f"Drop-in {dropin['type']} {obj.get('id', obj.get('Id'))} has no geometry. Cannot calculate splicing position."
+                f"Drop-in {dropin['type']} {obj.get('id', obj.get('Id'))} has no geometry or topological_anchor. "
+                "Cannot calculate splicing position."
             )
 
-        geom = wkt.loads(geom_wkt)
+        geom = wkt.loads(geom_val) if isinstance(geom_val, str) else geom_val
         geom_rd = gpd.GeoSeries([geom], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
         if geom_rd.geom_type != "Point":
             geom_rd = geom_rd.centroid
@@ -232,8 +243,10 @@ def _generate_structure_cuts(
                 max_len = 0.0
                 for child in obj.get("locks", []):
                     for ch in child.get("chambers", []):
-                        if ch.get("length"):
-                            max_len = max(max_len, float(ch["length"]))
+                        # Support both 'length' (FIS) and 'dim_length' (EURIS/Standard)
+                        length_val = ch.get("dim_length") or ch.get("length")
+                        if length_val:
+                            max_len = max(max_len, float(length_val))
                 buffer_dist = (
                     settings.SIMPLIFIED_LOCK_SPLICING_BUFFER_M
                     if mode == "simplified"

@@ -2,7 +2,9 @@ import logging
 import pathlib
 from typing import List, Dict, Any
 
-from fis.dropins.io import load_and_group_dropins, export_graph
+import pandas as pd
+
+from fis.dropins.io import export_graph
 from fis.dropins.embedded import identify_embedded_structures, inject_embedded_bridges
 from fis.dropins.splicing import splice_fairways
 from fis.dropins.graph import generate_simplified_passages
@@ -17,23 +19,20 @@ logger = logging.getLogger(__name__)
 
 @utils.timer
 def build_integrated_dropins_graph(
-    export_dir: pathlib.Path,
-    disk_dir: pathlib.Path,
+    lock_complexes: List[Dict],
+    bridge_complexes: List[Dict],
+    terminals: List[Dict],
+    berths: List[Dict],
+    sections: pd.DataFrame,
+    openings: pd.DataFrame,
     output_dir: pathlib.Path,
-    bbox=None,
     mode="detailed",
     include_berths=False,
 ):
-    """Main orchestrator to build the completely integrated Drop-ins graph."""
-
-    (
-        lock_complexes,
-        bridge_complexes,
-        terminals,
-        berths,
-        sections,
-        openings,
-    ) = load_and_group_dropins(export_dir, disk_dir, bbox)
+    """
+    Main orchestrator to build the completely integrated Drop-ins graph.
+    Expects all drop-in data and fairway sections to be provided in canonical format.
+    """
 
     embedded_bridges = identify_embedded_structures(lock_complexes, bridge_complexes)
     dropins_by_section = _map_dropins_to_sections(
