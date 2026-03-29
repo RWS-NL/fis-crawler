@@ -477,3 +477,34 @@ jobs:
           path: output/merged_validation_report.md
           retention-days: 30
 
+  validate-bivas:
+    needs: [build-fis-graph]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --all-groups
+      - name: Download FIS Enriched
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-enriched
+          path: output/fis-enriched/
+      - name: Run BIVAS Comparison
+        run: make validate-bivas
+      - name: Upload BIVAS Validation Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bivas-validation
+          path: output/bivas-validation/
+          retention-days: 30
+

@@ -26,8 +26,10 @@ output/fis-export/section.geoparquet: logs-dir
 
 crawl-fis: output/fis-export/section.geoparquet
 
-crawl-euris: logs-dir
+output/euris-export: logs-dir
 	uv run scrapy crawl euris -L INFO 2>&1 | tee output/logs/crawl-euris.log
+
+crawl-euris: output/euris-export
 
 crawl-disk: logs-dir
 	uv run scrapy crawl disk -L INFO 2>&1 | tee output/logs/crawl-disk.log
