@@ -9,7 +9,7 @@ logs-dir:
 # --- Crawling Steps ---
 crawl: crawl-fis crawl-euris crawl-disk
 
-download-bivas:
+reference/Bivas.5.10.1.sqlite:
 	mkdir -p reference
 	@echo "Downloading BIVAS database from Google Drive..."
 	curl -L -c reference/cookies.txt 'https://docs.google.com/uc?export=download&id=1s2QXcWnpUkALgF17zBKKv3j6ZVdKUXIP' | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p' > reference/confirm.txt
@@ -19,8 +19,12 @@ download-bivas:
 	mv reference/Bivas.db reference/Bivas.5.10.1.sqlite
 	@echo "BIVAS database ready at reference/Bivas.5.10.1.sqlite"
 
-crawl-fis: logs-dir
+download-bivas: reference/Bivas.5.10.1.sqlite
+
+output/fis-export/section.geoparquet: logs-dir
 	uv run scrapy crawl dataservice -L INFO 2>&1 | tee output/logs/crawl-fis.log
+
+crawl-fis: output/fis-export/section.geoparquet
 
 crawl-euris: logs-dir
 	uv run scrapy crawl euris -L INFO 2>&1 | tee output/logs/crawl-euris.log
