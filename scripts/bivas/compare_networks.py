@@ -167,7 +167,7 @@ def main():
             "Ensure FIS network is enriched with dim_width/dim_depth."
         )
         comp = pd.DataFrame()
-        width_mae = depth_mae = width_bias = depth_bias = 0.0
+        width_mae = depth_mae = width_bias = depth_bias = float("nan")
     else:
         comp = joined.dropna(subset=required_cols).copy()
         if not comp.empty:
@@ -180,36 +180,32 @@ def main():
             width_bias = comp["width_diff"].mean()
             depth_bias = comp["depth_diff"].mean()
         else:
-            width_mae = depth_mae = width_bias = depth_bias = 0.0
+            width_mae = depth_mae = width_bias = depth_bias = float("nan")
 
     # Generate match/unmatch GDFs
-    fis_matched = (
-        fis_edges[fis_edges["Id"].isin(matched_fis_ids)]
-        if "Id" in fis_edges.columns
-        else fis_edges
-    )
-    fis_only = (
-        fis_edges[~fis_edges["Id"].isin(matched_fis_ids)]
-        if "Id" in fis_edges.columns
-        else gpd.GeoDataFrame()
-    )
+    if "Id" in fis_edges.columns:
+        fis_matched = fis_edges[fis_edges["Id"].isin(matched_fis_ids)]
+        fis_only = fis_edges[~fis_edges["Id"].isin(matched_fis_ids)]
+    else:
+        fis_matched = fis_edges.iloc[0:0]
+        fis_only = fis_edges.iloc[0:0]
 
-    bivas_matched = (
-        bivas_arcs[bivas_arcs["ID"].isin(matched_bivas_ids)]
-        if "ID" in bivas_arcs.columns
-        else bivas_arcs
-    )
-    bivas_only = (
-        bivas_arcs[~bivas_arcs["ID"].isin(matched_bivas_ids)]
-        if "ID" in bivas_arcs.columns
-        else gpd.GeoDataFrame()
-    )
+    if "ID" in bivas_arcs.columns:
+        bivas_matched = bivas_arcs[bivas_arcs["ID"].isin(matched_bivas_ids)]
+        bivas_only = bivas_arcs[~bivas_arcs["ID"].isin(matched_bivas_ids)]
+    else:
+        bivas_matched = bivas_arcs.iloc[0:0]
+        bivas_only = bivas_arcs.iloc[0:0]
 
     print(f"Exporting results to {args.output_dir}...")
-    fis_matched.to_parquet(get_out_path("fis_matched"))
-    fis_only.to_parquet(get_out_path("fis_only"))
-    bivas_matched.to_parquet(get_out_path("bivas_matched"))
-    bivas_only.to_parquet(get_out_path("bivas_only"))
+    if not fis_matched.empty:
+        fis_matched.to_parquet(get_out_path("fis_matched"))
+    if not fis_only.empty:
+        fis_only.to_parquet(get_out_path("fis_only"))
+    if not bivas_matched.empty:
+        bivas_matched.to_parquet(get_out_path("bivas_matched"))
+    if not bivas_only.empty:
+        bivas_only.to_parquet(get_out_path("bivas_only"))
 
     # Save a GeoParquet of attribute deltas for reporting
     if not comp.empty:
@@ -241,9 +237,9 @@ def main():
 ## 2. Spatial Matching
 Using a 50m spatial buffer:
 - **FIS matched with BIVAS:** {matched_fis_pct:.1f}% ({len(matched_fis_ids)} segments)
-- **FIS only (mismatches):** {100 - matched_fis_pct:.1f}% ({len(fis_only)} segments)
+- **FIS only (mismatches):** {(len(fis_only) / fis_edge_cnt * 100) if fis_edge_cnt else 0:.1f}% ({len(fis_only)} segments)
 - **BIVAS matched with FIS:** {matched_bivas_pct:.1f}% ({len(matched_bivas_ids)} arcs)
-- **BIVAS only (mismatches):** {100 - matched_bivas_pct:.1f}% ({len(bivas_only)} arcs)
+- **BIVAS only (mismatches):** {(len(bivas_only) / bivas_arc_cnt * 100) if bivas_arc_cnt else 0:.1f}% ({len(bivas_only)} arcs)
 
 ## 3. Attribute Accuracy (Matched Segments)
 
@@ -251,8 +247,8 @@ Analysis of physical dimensions for overlapping network segments (Vessel Constra
 
 | Property | Mean Absolute Error (MAE) | Mean Bias |
 | :--- | :---: | :---: |
-| **Width (m)** | {width_mae:.2f} m | {width_bias:.2f} m |
-| **Depth (m)** | {depth_mae:.2f} m | {depth_bias:.2f} m |
+| **Width (m)** | {f"{width_mae:.2f} m" if not pd.isna(width_mae) else "N/A"} | {f"{width_bias:.2f} m" if not pd.isna(width_bias) else "N/A"} |
+| **Depth (m)** | {f"{depth_mae:.2f} m" if not pd.isna(depth_mae) else "N/A"} | {f"{depth_bias:.2f} m" if not pd.isna(depth_bias) else "N/A"} |
 
 *Note: Comparison performed on {len(comp)} segments where both datasets provide dimensions.*
 

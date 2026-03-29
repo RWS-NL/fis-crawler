@@ -1,4 +1,4 @@
-.PHONY: all crawl crawl-fis crawl-euris crawl-disk build-graphs merge-graphs schematize validate clean logs-dir
+.PHONY: all crawl crawl-fis crawl-euris crawl-disk build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas
 
 # Default target
 all: crawl build-graphs merge-graphs schematize validate
@@ -21,15 +21,25 @@ reference/Bivas.5.10.1.sqlite:
 
 download-bivas: reference/Bivas.5.10.1.sqlite
 
-output/fis-export/section.geoparquet: logs-dir
+output/fis-export/.fis_crawl_complete: logs-dir
+	mkdir -p output/fis-export
 	uv run scrapy crawl dataservice -L INFO 2>&1 | tee output/logs/crawl-fis.log
+	@if [ ! -f output/fis-export/section.geoparquet ] || [ ! -f output/fis-export/sectionjunction.geoparquet ]; then \
+		echo "FIS crawl incomplete: missing section or junction files"; exit 1; \
+	fi
+	touch $@
 
-crawl-fis: output/fis-export/section.geoparquet
+crawl-fis: output/fis-export/.fis_crawl_complete
 
-output/euris-export: logs-dir
+output/euris-export/.euris_crawl_complete: logs-dir
+	mkdir -p output/euris-export
 	uv run scrapy crawl euris -L INFO 2>&1 | tee output/logs/crawl-euris.log
+	@if ! ls output/euris-export/Node_*.geojson >/dev/null 2>&1 || ! ls output/euris-export/FairwaySection_*.geojson >/dev/null 2>&1; then \
+		echo "EURIS crawl incomplete: missing Node or FairwaySection files"; exit 1; \
+	fi
+	touch $@
 
-crawl-euris: output/euris-export
+crawl-euris: output/euris-export/.euris_crawl_complete
 
 crawl-disk: logs-dir
 	uv run scrapy crawl disk -L INFO 2>&1 | tee output/logs/crawl-disk.log
@@ -70,11 +80,16 @@ validate-fis: build-fis-graph logs-dir
 validate-merged: merge-graphs logs-dir
 	uv run python -m fis.cli graph validate --graph output/merged-graph/graph.pickle --schema config/schema.toml --output-file output/merged_validation_report.md 2>&1 | tee output/logs/validate-merged.log
 
-validate-bivas: download-bivas build-fis-graph logs-dir
+FIS_ENRICHED = output/fis-enriched/edges.geoparquet
+
+validate-bivas: reference/Bivas.5.10.1.sqlite logs-dir
+	@if [ ! -f $(FIS_ENRICHED) ]; then \
+		$(MAKE) build-fis-graph; \
+	fi
 	uv run python scripts/bivas/compare_networks.py \
 		--bivas-db reference/Bivas.5.10.1.sqlite \
 		--bivas-version 5.10.1 \
-		--fis-edges output/fis-enriched/edges.geoparquet \
+		--fis-edges $(FIS_ENRICHED) \
 		--fis-version $$(date +%Y%m%d) \
 		--output-dir output/bivas-validation 2>&1 | tee output/logs/validate-bivas.log
 
