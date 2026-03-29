@@ -1,4 +1,4 @@
-.PHONY: all crawl crawl-fis crawl-euris crawl-disk build-graphs merge-graphs schematize validate clean logs-dir
+.PHONY: all crawl crawl-fis crawl-euris crawl-disk build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas
 
 # Default target
 all: crawl build-graphs merge-graphs schematize validate
@@ -9,7 +9,7 @@ logs-dir:
 # --- Crawling Steps ---
 crawl: crawl-fis crawl-euris crawl-disk
 
-download-bivas:
+reference/Bivas.5.10.1.sqlite:
 	mkdir -p reference
 	@echo "Downloading BIVAS database from Google Drive..."
 	curl -L -c reference/cookies.txt 'https://docs.google.com/uc?export=download&id=1s2QXcWnpUkALgF17zBKKv3j6ZVdKUXIP' | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p' > reference/confirm.txt
@@ -19,11 +19,27 @@ download-bivas:
 	mv reference/Bivas.db reference/Bivas.5.10.1.sqlite
 	@echo "BIVAS database ready at reference/Bivas.5.10.1.sqlite"
 
-crawl-fis: logs-dir
-	uv run scrapy crawl dataservice -L INFO 2>&1 | tee output/logs/crawl-fis.log
+download-bivas: reference/Bivas.5.10.1.sqlite
 
-crawl-euris: logs-dir
+output/fis-export/.fis_crawl_complete: logs-dir
+	mkdir -p output/fis-export
+	uv run scrapy crawl dataservice -L INFO 2>&1 | tee output/logs/crawl-fis.log
+	@if [ ! -f output/fis-export/section.geoparquet ] || [ ! -f output/fis-export/sectionjunction.geoparquet ]; then \
+		echo "FIS crawl incomplete: missing section or junction files"; exit 1; \
+	fi
+	touch $@
+
+crawl-fis: output/fis-export/.fis_crawl_complete
+
+output/euris-export/.euris_crawl_complete: logs-dir
+	mkdir -p output/euris-export
 	uv run scrapy crawl euris -L INFO 2>&1 | tee output/logs/crawl-euris.log
+	@if ! ls output/euris-export/Node_*.geojson >/dev/null 2>&1 || ! ls output/euris-export/FairwaySection_*.geojson >/dev/null 2>&1; then \
+		echo "EURIS crawl incomplete: missing Node or FairwaySection files"; exit 1; \
+	fi
+	touch $@
+
+crawl-euris: output/euris-export/.euris_crawl_complete
 
 crawl-disk: logs-dir
 	uv run scrapy crawl disk -L INFO 2>&1 | tee output/logs/crawl-disk.log
@@ -56,13 +72,26 @@ schematize-dropins: merge-graphs logs-dir
 	uv run python -m fis.cli dropins schematize 2>&1 | tee output/logs/schematize-dropins.log
 
 # --- Validation ---
-validate: validate-fis validate-merged
+validate: validate-fis validate-merged validate-bivas
 
 validate-fis: build-fis-graph logs-dir
 	uv run python -m fis.cli graph validate --graph output/fis-enriched/graph.pickle --schema config/schema.toml --output-file output/fis_validation_report.md 2>&1 | tee output/logs/validate-fis.log
 
 validate-merged: merge-graphs logs-dir
 	uv run python -m fis.cli graph validate --graph output/merged-graph/graph.pickle --schema config/schema.toml --output-file output/merged_validation_report.md 2>&1 | tee output/logs/validate-merged.log
+
+FIS_ENRICHED = output/fis-enriched/edges.geoparquet
+
+validate-bivas: reference/Bivas.5.10.1.sqlite logs-dir
+	@if [ ! -f $(FIS_ENRICHED) ]; then \
+		$(MAKE) build-fis-graph; \
+	fi
+	uv run python scripts/bivas/compare_networks.py \
+		--bivas-db reference/Bivas.5.10.1.sqlite \
+		--bivas-version 5.10.1 \
+		--fis-edges $(FIS_ENRICHED) \
+		--fis-version $$(date +%Y%m%d) \
+		--output-dir output/bivas-validation 2>&1 | tee output/logs/validate-bivas.log
 
 
 # --- Utilities ---
