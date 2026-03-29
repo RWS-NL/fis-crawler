@@ -50,3 +50,8 @@ exclude = [
 
 [tool.ruff.format]
 line-ending = "lf"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+norecursedirs = "scripts"

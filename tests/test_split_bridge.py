@@ -4,6 +4,7 @@ import geopandas as gpd
 import pandas as pd
 import networkx as nx
 from fis.dropins.core import build_integrated_dropins_graph
+from fis.dropins.io import load_dropins_with_spatial_matching
 from fis import utils
 
 
@@ -19,9 +20,22 @@ def split_test_graph(tmp_path_factory):
     if not export_dir.exists():
         pytest.skip("Test data subset not found")
 
+    (
+        lock_complexes,
+        bridge_complexes,
+        terminals,
+        berths,
+        sections,
+        openings,
+    ) = load_dropins_with_spatial_matching(export_dir, disk_dir)
+
     build_integrated_dropins_graph(
-        export_dir=export_dir,
-        disk_dir=disk_dir,
+        lock_complexes,
+        bridge_complexes,
+        terminals,
+        berths,
+        sections,
+        openings,
         output_dir=output_dir,
         mode="simplified",
     )
