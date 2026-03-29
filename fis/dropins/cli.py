@@ -76,6 +76,11 @@ def schematize(export_dir, disk_dir, output_dir, bbox, mode, include_berths, sou
             openings,
         ) = load_dropins_with_explicit_linking(export_dir, bbox=bbox_tuple)
     else:
+        if disk_dir is None or not disk_dir.exists():
+            raise click.BadParameter(
+                f"Disk directory '{disk_dir}' does not exist. It is required for source='fis'.",
+                param_hint="--disk-dir",
+            )
         (
             lock_complexes,
             bridge_complexes,

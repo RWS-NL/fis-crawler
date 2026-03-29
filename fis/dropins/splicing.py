@@ -33,7 +33,54 @@ def splice_fairways(
     3. Hierarchy: Embedded bridge logic is shared and applied to any source
        where a bridge is spatially part of a lock complex.
     """
+    # Harmonize junction ID column naming between legacy (camelCase) and
+    # normalized (snake_case) schemas so downstream code can rely on either.
+    # This supports:
+    # - EURIS/legacy sources that provide StartJunctionId/EndJunctionId
+    # - Normalized inputs (e.g. via schema.toml) that use start_junction_id /
+    #   end_junction_id
+    if sections is not None:
+        # Work on a shallow copy if we are going to add columns, to avoid
+        # mutating caller-owned DataFrames unexpectedly.
+        needs_alias = any(
+            name not in sections.columns
+            for name in (
+                "StartJunctionId",
+                "EndJunctionId",
+                "start_junction_id",
+                "end_junction_id",
+            )
+        )
+        if needs_alias:
+            sections = sections.copy()
+
+        # Create legacy camelCase columns from normalized snake_case when needed.
+        if (
+            "StartJunctionId" not in sections.columns
+            and "start_junction_id" in sections.columns
+        ):
+            sections["StartJunctionId"] = sections["start_junction_id"]
+        if (
+            "EndJunctionId" not in sections.columns
+            and "end_junction_id" in sections.columns
+        ):
+            sections["EndJunctionId"] = sections["end_junction_id"]
+
+        # And vice versa: ensure normalized columns exist when only legacy ones
+        # are provided (helps any newer code that expects snake_case).
+        if (
+            "start_junction_id" not in sections.columns
+            and "StartJunctionId" in sections.columns
+        ):
+            sections["start_junction_id"] = sections["StartJunctionId"]
+        if (
+            "end_junction_id" not in sections.columns
+            and "EndJunctionId" in sections.columns
+        ):
+            sections["end_junction_id"] = sections["EndJunctionId"]
+
     all_features = []
+
     sections_gdf = _prepare_sections_gdf(sections)
     embedded_ids = {str(k) for k in embedded_bridges.keys()}
 

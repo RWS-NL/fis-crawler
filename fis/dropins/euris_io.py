@@ -137,6 +137,14 @@ def load_dropins_with_explicit_linking(
         else {}
     )
 
+    # Pre-group chambers by parent complex for O(1) lookup
+    chambers_by_parent = {}
+    if not lock_chambers_gdf.empty:
+        chambers_by_parent = {
+            pid: group.to_dict(orient="records")
+            for pid, group in lock_chambers_gdf.groupby("parent_id")
+        }
+
     for _, complex_row in lock_complexes_gdf.iterrows():
         cid = complex_row["id"]
         complex_dict = complex_row.to_dict()
@@ -160,16 +168,17 @@ def load_dropins_with_explicit_linking(
 
         # Chambers
         chambers = []
-        relevant_chambers = lock_chambers_gdf[lock_chambers_gdf["parent_id"] == cid]
-        for _, chamber_row in relevant_chambers.iterrows():
-            chamber_dict = chamber_row.to_dict()
+        relevant_chambers = chambers_by_parent.get(cid, [])
+        for chamber_dict in relevant_chambers:
+            # Ensure geometry is a shapely object if it came from to_dict
+            c_geom = chamber_dict["geometry"]
 
             # Preserve the Point geometry for splicing (Topological Anchor)
-            chamber_dict["topological_anchor"] = chamber_row.geometry.wkt
+            chamber_dict["topological_anchor"] = c_geom.wkt
 
             # Match Area for visualization
             # Use raw 'locode' for area matching if available, otherwise 'id'
-            area_match_id = chamber_row.get("id")
+            area_match_id = chamber_dict.get("id")
             if not lock_chamber_areas_gdf.empty:
                 # lock_chamber_areas_gdf wasn't normalized, so it has 'locode'
                 areas = lock_chamber_areas_gdf[
@@ -178,9 +187,9 @@ def load_dropins_with_explicit_linking(
                 if not areas.empty:
                     chamber_dict["geometry"] = areas.iloc[0].geometry.wkt
                 else:
-                    chamber_dict["geometry"] = chamber_row.geometry.wkt
+                    chamber_dict["geometry"] = c_geom.wkt
             else:
-                chamber_dict["geometry"] = chamber_row.geometry.wkt
+                chamber_dict["geometry"] = c_geom.wkt
 
             chambers.append(chamber_dict)
 
@@ -190,6 +199,14 @@ def load_dropins_with_explicit_linking(
     # 2. Group Bridges
     logger.info("Grouping Bridges (Explicit)...")
     bridge_complexes = []
+
+    # Pre-group openings for performance
+    openings_by_parent = {}
+    if not bridge_openings_gdf.empty:
+        openings_by_parent = {
+            pid: group.to_dict(orient="records")
+            for pid, group in bridge_openings_gdf.groupby("parent_id")
+        }
 
     for _, area_row in bridge_areas_gdf.iterrows():
         bid = area_row["id"]
@@ -211,11 +228,11 @@ def load_dropins_with_explicit_linking(
         bridge_dict["geometry"] = area_row.geometry.wkt
 
         openings = []
-        relevant_openings = bridge_openings_gdf[bridge_openings_gdf["parent_id"] == bid]
-        for _, opening_row in relevant_openings.iterrows():
-            opening_dict = opening_row.to_dict()
-            opening_dict["topological_anchor"] = opening_row.geometry.wkt
-            opening_dict["geometry"] = opening_row.geometry.wkt
+        relevant_openings = openings_by_parent.get(bid, [])
+        for opening_dict in relevant_openings:
+            o_geom = opening_dict["geometry"]
+            opening_dict["topological_anchor"] = o_geom.wkt
+            opening_dict["geometry"] = o_geom.wkt
             openings.append(opening_dict)
 
         bridge_dict["openings"] = openings

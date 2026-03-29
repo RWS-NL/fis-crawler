@@ -207,6 +207,7 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "Id" = "fis_id"
 "GeoType" = "geo_type"
 "GeoGeneration" = "geo_generation"
+"sectionref" = "section_id"
 
 # =============================================================================
 # Border Node Corrections

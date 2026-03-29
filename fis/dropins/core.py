@@ -24,7 +24,7 @@ def build_integrated_dropins_graph(
     terminals: List[Dict],
     berths: List[Dict],
     sections: pd.DataFrame,
-    openings: pd.DataFrame,
+    _openings: pd.DataFrame,
     output_dir: pathlib.Path,
     mode="detailed",
     include_berths=False,

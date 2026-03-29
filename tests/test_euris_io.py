@@ -126,3 +126,52 @@ def test_load_dropins_with_explicit_linking_bridge_grouping(tmp_path):
     assert br["openings"][0]["id"] == "TEST_OP_1"
     assert br["openings"][0]["dim_length"] == 50.0
     assert br["openings"][0]["topological_anchor"] == Point(5.051, 52.001).wkt
+
+
+def test_load_dropins_with_explicit_linking_node_association(tmp_path):
+    export_dir = tmp_path / "euris-export"
+    export_dir.mkdir()
+
+    # Create mock FairwaySection
+    fairway_section = gpd.GeoDataFrame(
+        [
+            {
+                "code": "SEC_1",
+                "name": "Test Fairway",
+                "geometry": LineString([(0, 0), (1, 0)]),
+            }
+        ],
+        crs="EPSG:4326",
+    )
+    fairway_section.to_file(
+        export_dir / "FairwaySection_XX_20260101.geojson", driver="GeoJSON"
+    )
+
+    # Create mock Nodes linked to SEC_1
+    nodes = gpd.GeoDataFrame(
+        [
+            {
+                "locode": "XXNOD001",
+                "objectcode": "NOD1",
+                "sectionref": "SEC_1",
+                "geometry": Point(0, 0),
+            },
+            {
+                "locode": "XXNOD002",
+                "objectcode": "NOD2",
+                "sectionref": "SEC_1",
+                "geometry": Point(1, 0),
+            },
+        ],
+        crs="EPSG:4326",
+    )
+    nodes.to_file(export_dir / "Node_XX_20260101.geojson", driver="GeoJSON")
+
+    # Run loader
+    _, _, _, _, sections, _ = load_dropins_with_explicit_linking(export_dir)
+
+    assert len(sections) == 1
+    sec = sections.iloc[0]
+    # Expected IDs are countrycode_objectcode
+    assert sec["StartJunctionId"] == "XX_NOD1"
+    assert sec["EndJunctionId"] == "XX_NOD2"
