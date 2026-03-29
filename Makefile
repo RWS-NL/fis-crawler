@@ -56,13 +56,21 @@ schematize-dropins: merge-graphs logs-dir
 	uv run python -m fis.cli dropins schematize 2>&1 | tee output/logs/schematize-dropins.log
 
 # --- Validation ---
-validate: validate-fis validate-merged
+validate: validate-fis validate-merged validate-bivas
 
 validate-fis: build-fis-graph logs-dir
 	uv run python -m fis.cli graph validate --graph output/fis-enriched/graph.pickle --schema config/schema.toml --output-file output/fis_validation_report.md 2>&1 | tee output/logs/validate-fis.log
 
 validate-merged: merge-graphs logs-dir
 	uv run python -m fis.cli graph validate --graph output/merged-graph/graph.pickle --schema config/schema.toml --output-file output/merged_validation_report.md 2>&1 | tee output/logs/validate-merged.log
+
+validate-bivas: download-bivas build-fis-graph logs-dir
+	uv run python scripts/bivas/compare_networks.py \
+		--bivas-db reference/Bivas.5.10.1.sqlite \
+		--bivas-version 5.10.1 \
+		--fis-edges output/fis-enriched/edges.geoparquet \
+		--fis-version $$(date +%Y%m%d) \
+		--output-dir output/bivas-validation 2>&1 | tee output/logs/validate-bivas.log
 
 
 # --- Utilities ---
