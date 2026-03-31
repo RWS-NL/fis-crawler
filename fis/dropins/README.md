@@ -19,6 +19,7 @@ uv run python -m fis.cli dropins schematize
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `--source` | `fis` | Data source: `fis` (Dutch DISK) or `euris` (European) |
 | `--mode` | `detailed` | `detailed` or `simplified` |
 | `--include-berths` | `False` | Whether to include berths in the graph |
 | `--bbox` | `None` | Filter by bounding box `minx,miny,maxx,maxy` |
