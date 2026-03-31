@@ -48,6 +48,7 @@ def dropins_cli():
 )
 @click.option(
     "--source",
+    "--input-source",
     type=click.Choice(["fis", "euris"]),
     default="fis",
     help="Data source to use for schematization. 'fis' (default) uses Dutch FIS/DISK data; 'euris' uses European data.",
