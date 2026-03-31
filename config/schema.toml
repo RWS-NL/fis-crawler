@@ -100,6 +100,10 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "FairwaySectionId" = "section_id"
 "FairwayId" = "fairway_id"
 "OperatingTimesId" = "operating_times_id"
+# EURIS → Canonical mappings
+"locode" = "id"
+"objectname" = "name"
+"sectionref" = "section_id"
 
 [attributes.chambers]
 # FIS → Canonical mappings
@@ -111,6 +115,13 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "ThresholdUpperLevel" = "dim_threshold_upper"
 "ThresholdLowerLevel" = "dim_threshold_lower"
 "OperatingTimesId" = "operating_times_id"
+# EURIS → Canonical mappings
+"locode" = "id"
+"objectname" = "name"
+"slslocode" = "parent_id"
+"mlengthcm" = "dim_length_cm"
+"mwidthcm" = "dim_width_cm"
+"mheightcm" = "dim_height_cm"
 
 [attributes.subchambers]
 "Id" = "id"
@@ -132,6 +143,8 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "Length" = "length"
 "StartJunctionId" = "start_junction_id"
 "EndJunctionId" = "end_junction_id"
+# EURIS → Canonical mappings
+"code" = "id"
 
 [attributes.fairways]
 "Id" = "id"
@@ -145,6 +158,9 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "FairwaySectionId" = "section_id"
 "RouteKmBegin" = "route_km"
 "Category" = "category"
+# EURIS → Canonical mappings
+"locode" = "id"
+"sectionref" = "section_id"
 
 [attributes.bridges]
 "Id" = "id"
@@ -152,6 +168,10 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "FairwaySectionId" = "section_id"
 "FairwayId" = "fairway_id"
 "OperatingTimesId" = "operating_times_id"
+# EURIS → Canonical mappings
+"locode" = "id"
+"objectname" = "name"
+"sectionref" = "section_id"
 
 [attributes.openings]
 "Id" = "id"
@@ -165,6 +185,13 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "PushedWidth" = "dim_pushed_width"
 "PushedHeight" = "dim_pushed_height"
 "OperatingTimesId" = "operating_times_id"
+# EURIS → Canonical mappings
+"locode" = "id"
+"objectname" = "name"
+"brgalocode" = "parent_id"
+"mlengthcm" = "dim_length_cm"
+"mwidthcm" = "dim_width_cm"
+"mheightcm" = "dim_height_cm"
 
 [attributes.operatingtimes]
 "Id" = "id"
@@ -180,6 +207,7 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "Id" = "fis_id"
 "GeoType" = "geo_type"
 "GeoGeneration" = "geo_generation"
+"sectionref" = "section_id"
 
 # =============================================================================
 # Border Node Corrections

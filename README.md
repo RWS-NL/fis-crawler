@@ -53,7 +53,7 @@ CRAWL → NETWORKS → ENRICH → SCHEMATIZE → MERGE
 | Crawl EURIS | `scrapy crawl euris` | `output/euris-export/` |
 | Build Networks | `fis.cli graph {fis,euris}` | `output/{fis,euris}-graph/` |
 | Enrich | `fis.cli graph enrich-{fis,euris}` | `output/{fis,euris}-enriched/` |
-| Schematize Dropins | `fis.cli dropins schematize --disk-dir output/disk-export` | `output/dropins-schematization/` |
+| Schematize Dropins | `fis.cli dropins schematize --source {fis,euris}` | `output/dropins-{fis,euris}-{detailed,simplified}/` |
 | Merge | `fis.cli graph merge` | `output/merged-graph/` |
 
 ### Drop-in Schematization (Locks and Bridges)

@@ -24,8 +24,63 @@ def splice_fairways(
     """
     Iterates over all fairway sections and splices them into sub-segments
     based on the structures (drop-ins) that lie upon them.
+
+    Approach divergence handling:
+    1. Attribute consistency: Splicing logic handles both 'length' (FIS) and
+       'dim_length' (EURIS) attributes via field-agnostic lookups.
+    2. Splicing Geometry: For structures provided as Points (common in EURIS),
+       the splicer projections handle Point geometries to derive cut distances.
+    3. Hierarchy: Embedded bridge logic is shared and applied to any source
+       where a bridge is spatially part of a lock complex.
     """
+    # Harmonize junction ID column naming between legacy (camelCase) and
+    # normalized (snake_case) schemas so downstream code can rely on either.
+    # This supports:
+    # - EURIS/legacy sources that provide StartJunctionId/EndJunctionId
+    # - Normalized inputs (e.g. via schema.toml) that use start_junction_id /
+    #   end_junction_id
+    if sections is not None:
+        # Work on a shallow copy if we are going to add columns, to avoid
+        # mutating caller-owned DataFrames unexpectedly.
+        needs_alias = any(
+            name not in sections.columns
+            for name in (
+                "StartJunctionId",
+                "EndJunctionId",
+                "start_junction_id",
+                "end_junction_id",
+            )
+        )
+        if needs_alias:
+            sections = sections.copy()
+
+        # Create legacy camelCase columns from normalized snake_case when needed.
+        if (
+            "StartJunctionId" not in sections.columns
+            and "start_junction_id" in sections.columns
+        ):
+            sections["StartJunctionId"] = sections["start_junction_id"]
+        if (
+            "EndJunctionId" not in sections.columns
+            and "end_junction_id" in sections.columns
+        ):
+            sections["EndJunctionId"] = sections["end_junction_id"]
+
+        # And vice versa: ensure normalized columns exist when only legacy ones
+        # are provided (helps any newer code that expects snake_case).
+        if (
+            "start_junction_id" not in sections.columns
+            and "StartJunctionId" in sections.columns
+        ):
+            sections["start_junction_id"] = sections["StartJunctionId"]
+        if (
+            "end_junction_id" not in sections.columns
+            and "EndJunctionId" in sections.columns
+        ):
+            sections["end_junction_id"] = sections["EndJunctionId"]
+
     all_features = []
+
     sections_gdf = _prepare_sections_gdf(sections)
     embedded_ids = {str(k) for k in embedded_bridges.keys()}
 
@@ -214,13 +269,16 @@ def _generate_structure_cuts(
     cuts = []
     for dropin in dropins_on_sec:
         obj = dropin["obj"]
-        geom_wkt = obj.get("geometry")
-        if not geom_wkt:
+        # Use 'topological_anchor' for precise splicing position (e.g. snapped points for EURIS)
+        # Fallback to 'geometry' (which might be a Polygon centroid)
+        geom_val = obj.get("topological_anchor") or obj.get("geometry")
+        if not geom_val:
             raise ValueError(
-                f"Drop-in {dropin['type']} {obj.get('id', obj.get('Id'))} has no geometry. Cannot calculate splicing position."
+                f"Drop-in {dropin['type']} {obj.get('id', obj.get('Id'))} has no geometry or topological_anchor. "
+                "Cannot calculate splicing position."
             )
 
-        geom = wkt.loads(geom_wkt)
+        geom = wkt.loads(geom_val) if isinstance(geom_val, str) else geom_val
         geom_rd = gpd.GeoSeries([geom], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
         if geom_rd.geom_type != "Point":
             geom_rd = geom_rd.centroid
@@ -232,8 +290,10 @@ def _generate_structure_cuts(
                 max_len = 0.0
                 for child in obj.get("locks", []):
                     for ch in child.get("chambers", []):
-                        if ch.get("length"):
-                            max_len = max(max_len, float(ch["length"]))
+                        # Support both 'length' (FIS) and 'dim_length' (EURIS/Standard)
+                        length_val = ch.get("dim_length") or ch.get("length")
+                        if length_val:
+                            max_len = max(max_len, float(length_val))
                 buffer_dist = (
                     settings.SIMPLIFIED_LOCK_SPLICING_BUFFER_M
                     if mode == "simplified"
