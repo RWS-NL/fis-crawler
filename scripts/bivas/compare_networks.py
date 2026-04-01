@@ -32,9 +32,14 @@ def load_bivas_network(db_path, branch_set_id=337):
 
     # Load arcs (strictly Dutch network)
     # Using MaximumWidth__m and MaximumDepth__m for vessel constraint comparison
+    # Joining with arc_vin_trajectory_connection to get TrajectCode (VinCode equivalent)
     arcs_df = pd.read_sql_query(
-        "SELECT ID, FromNodeID, ToNodeID, Name, Length__m, Width__m, MaximumDepth__m, MaximumWidth__m "
-        "FROM arcs WHERE BranchSetId = ? AND CountryCode = 'NL'",
+        """
+        SELECT a.ID, a.FromNodeID, a.ToNodeID, a.Name, a.Length__m, a.Width__m, a.MaximumDepth__m, a.MaximumWidth__m, t.TrajectCode 
+        FROM arcs a
+        LEFT JOIN arc_vin_trajectory_connection t ON a.ID = t.ArcID
+        WHERE a.BranchSetId = ? AND a.CountryCode = 'NL'
+        """,
         conn,
         params=(branch_set_id,),
     )
@@ -130,82 +135,112 @@ def main():
         )
         fis_edges = fis_edges.to_crs(epsg=28992)
 
+    # Ensure IDs and Codes are strings for robust matching
+    fis_edges["VinCode"] = fis_edges["VinCode"].astype(str)
+    bivas_arcs["TrajectCode"] = bivas_arcs["TrajectCode"].astype(str)
+    fis_edges["Id"] = fis_edges["Id"].astype(str)
+    bivas_arcs["ID"] = bivas_arcs["ID"].astype(str)
+
     # Compare counts
     bivas_arc_cnt = len(bivas_arcs)
-    bivas_len = bivas_arcs["Length__m"].sum() / 1000.0  # km
-
     fis_edge_cnt = len(fis_edges)
-    fis_len = fis_edges.geometry.length.sum() / 1000.0  # km
+    
+    fis_total_len = fis_edges.geometry.length.sum()
+    bivas_total_len = bivas_arcs.geometry.length.sum()
 
-    # Matching Logic: Spatial join using 50m buffer
+    # -------------------------------------------------------------------------
+    # Matching Method A: Spatial only (50m buffer)
+    # -------------------------------------------------------------------------
     bivas_arcs_buffered = bivas_arcs.copy()
     bivas_arcs_buffered.geometry = bivas_arcs.buffer(50)
-
-    # Intersect
-    joined = gpd.sjoin(
+    
+    spatial_joined = gpd.sjoin(
         fis_edges, bivas_arcs_buffered, how="inner", predicate="intersects"
     )
+    spatial_fis_ids = spatial_joined["Id"].unique() if "Id" in spatial_joined.columns else []
+    spatial_bivas_ids = spatial_joined["ID"].unique() if "ID" in spatial_joined.columns else []
 
-    # Identify unique matches
-    matched_fis_ids = joined["Id"].unique() if "Id" in joined.columns else []
-    matched_bivas_ids = joined["ID"].unique() if "ID" in joined.columns else []
+    fis_spatial = fis_edges[fis_edges["Id"].isin(spatial_fis_ids)]
+    bivas_spatial = bivas_arcs[bivas_arcs["ID"].isin(spatial_bivas_ids)]
+    
+    spatial_fis_len = fis_spatial.geometry.length.sum()
+    spatial_bivas_len = bivas_spatial.geometry.length.sum()
 
-    matched_fis_pct = (
-        (len(matched_fis_ids) / fis_edge_cnt * 100) if fis_edge_cnt > 0 else 0
+    if not fis_spatial.empty: fis_spatial.to_parquet(get_out_path("fis_matches_spatial_only"))
+    if not bivas_spatial.empty: bivas_spatial.to_parquet(get_out_path("bivas_matches_spatial_only"))
+
+    # -------------------------------------------------------------------------
+    # Matching Method B: ID only (VinCode == TrajectCode)
+    # -------------------------------------------------------------------------
+    id_joined = fis_edges.merge(
+        bivas_arcs.drop(columns="geometry"), 
+        left_on="VinCode", 
+        right_on="TrajectCode", 
+        how="inner"
     )
-    matched_bivas_pct = (
-        (len(matched_bivas_ids) / bivas_arc_cnt * 100) if bivas_arc_cnt > 0 else 0
-    )
+    id_fis_ids = id_joined["Id"].unique() if "Id" in id_joined.columns else []
+    id_bivas_ids = id_joined["ID"].unique() if "ID" in id_joined.columns else []
+    
+    fis_id = fis_edges[fis_edges["Id"].isin(id_fis_ids)]
+    bivas_id = bivas_arcs[bivas_arcs["ID"].isin(id_bivas_ids)]
+    
+    id_fis_len = fis_id.geometry.length.sum()
+    id_bivas_len = bivas_id.geometry.length.sum()
 
-    # Attribute Comparison for joined records
+    if not fis_id.empty: fis_id.to_parquet(get_out_path("fis_matches_id_only"))
+    if not bivas_id.empty: bivas_id.to_parquet(get_out_path("bivas_matches_id_only"))
+    
+    # Export ID-only mapping table as GeoParquet (mapping with FIS geometry)
+    id_mapping_gdf = id_joined[["Id", "ID", "VinCode", "TrajectCode", "geometry"]].drop_duplicates()
+    id_mapping_gdf.to_parquet(get_out_path("id_matches_mapping"))
+
+    # -------------------------------------------------------------------------
+    # Matching Method C: Combined (Spatial AND ID)
+    # -------------------------------------------------------------------------
+    combined_joined = spatial_joined[
+        spatial_joined["VinCode"].astype(str) == spatial_joined["TrajectCode"].astype(str)
+    ].copy()
+    combined_fis_ids = combined_joined["Id"].unique() if "Id" in combined_joined.columns else []
+    combined_bivas_ids = combined_joined["ID"].unique() if "ID" in combined_joined.columns else []
+
+    fis_combined = fis_edges[fis_edges["Id"].isin(combined_fis_ids)]
+    bivas_combined = bivas_arcs[bivas_arcs["ID"].isin(combined_bivas_ids)]
+    
+    combined_fis_len = fis_combined.geometry.length.sum()
+    combined_bivas_len = bivas_combined.geometry.length.sum()
+
+    if not fis_combined.empty: fis_combined.to_parquet(get_out_path("fis_matches_combined"))
+    if not bivas_combined.empty: bivas_combined.to_parquet(get_out_path("bivas_matches_combined"))
+
+    # -------------------------------------------------------------------------
+    # Attribute Comparison (using Combined matches for highest accuracy)
+    # -------------------------------------------------------------------------
     required_cols = ["dim_width", "MaximumWidth__m", "dim_depth", "MaximumDepth__m"]
-    missing_cols = [col for col in required_cols if col not in joined.columns]
+    missing_cols = [col for col in required_cols if col not in combined_joined.columns]
 
     if missing_cols:
         logger.warning(
             f"Cannot perform attribute comparison: missing columns {', '.join(missing_cols)}. "
-            "Ensure FIS network is enriched with dim_width/dim_depth."
         )
         comp = pd.DataFrame()
         width_mae = depth_mae = width_bias = depth_bias = float("nan")
     else:
-        comp = joined.dropna(subset=required_cols).copy()
+        comp = combined_joined.dropna(subset=required_cols).copy()
         if not comp.empty:
             comp["width_diff"] = comp["dim_width"] - comp["MaximumWidth__m"]
             comp["depth_diff"] = comp["dim_depth"] - comp["MaximumDepth__m"]
-
             width_mae = comp["width_diff"].abs().mean()
             depth_mae = comp["depth_diff"].abs().mean()
-
             width_bias = comp["width_diff"].mean()
             depth_bias = comp["depth_diff"].mean()
         else:
             width_mae = depth_mae = width_bias = depth_bias = float("nan")
 
-    # Generate match/unmatch GDFs
-    if "Id" in fis_edges.columns:
-        fis_matched = fis_edges[fis_edges["Id"].isin(matched_fis_ids)]
-        fis_only = fis_edges[~fis_edges["Id"].isin(matched_fis_ids)]
-    else:
-        fis_matched = fis_edges.iloc[0:0]
-        fis_only = fis_edges.iloc[0:0]
-
-    if "ID" in bivas_arcs.columns:
-        bivas_matched = bivas_arcs[bivas_arcs["ID"].isin(matched_bivas_ids)]
-        bivas_only = bivas_arcs[~bivas_arcs["ID"].isin(matched_bivas_ids)]
-    else:
-        bivas_matched = bivas_arcs.iloc[0:0]
-        bivas_only = bivas_arcs.iloc[0:0]
-
-    print(f"Exporting results to {args.output_dir}...")
-    if not fis_matched.empty:
-        fis_matched.to_parquet(get_out_path("fis_matched"))
-    if not fis_only.empty:
-        fis_only.to_parquet(get_out_path("fis_only"))
-    if not bivas_matched.empty:
-        bivas_matched.to_parquet(get_out_path("bivas_matched"))
-    if not bivas_only.empty:
-        bivas_only.to_parquet(get_out_path("bivas_only"))
+    # Final unmatched sets (using combined as the default 'matched' set)
+    fis_only = fis_edges[~fis_edges["Id"].isin(combined_fis_ids)]
+    bivas_only = bivas_arcs[~bivas_arcs["ID"].isin(combined_bivas_ids)]
+    if not fis_only.empty: fis_only.to_parquet(get_out_path("fis_unmatched_combined"))
+    if not bivas_only.empty: bivas_only.to_parquet(get_out_path("bivas_unmatched_combined"))
 
     # Save a GeoParquet of attribute deltas for reporting
     if not comp.empty:
@@ -225,6 +260,9 @@ def main():
         available_comp_cols = [c for c in comp_cols if c in comp.columns]
         comp[available_comp_cols].to_parquet(get_out_path("attribute_comparison"))
 
+    # Report Generation
+    def pct(part_val, total_val): return (part_val / total_val * 100) if total_val > 0 else 0
+
     report = f"""# FIS (Enriched) vs BIVAS Network Comparison
 
 ## 1. Network Statistics (NL Focus)
@@ -232,30 +270,39 @@ def main():
 | Metric | FIS Enriched (v{args.fis_version}) | BIVAS (v{args.bivas_version}) |
 | :--- | :---: | :---: |
 | Count | {fis_edge_cnt} | {bivas_arc_cnt} |
-| Total Length (km) | {fis_len:.1f} | {bivas_len:.1f} |
+| Total Length (km) | {fis_total_len/1000.0:.1f} | {bivas_total_len/1000.0:.1f} |
 
-## 2. Spatial Matching
-Using a 50m spatial buffer:
-- **FIS matched with BIVAS:** {matched_fis_pct:.1f}% ({len(matched_fis_ids)} segments)
-- **FIS only (mismatches):** {(len(fis_only) / fis_edge_cnt * 100) if fis_edge_cnt else 0:.1f}% ({len(fis_only)} segments)
-- **BIVAS matched with FIS:** {matched_bivas_pct:.1f}% ({len(matched_bivas_ids)} arcs)
-- **BIVAS only (mismatches):** {(len(bivas_only) / bivas_arc_cnt * 100) if bivas_arc_cnt else 0:.1f}% ({len(bivas_only)} arcs)
+## 2. Matching Method Comparison
 
-## 3. Attribute Accuracy (Matched Segments)
+### FIS Segments Matched (Source: FIS)
+| Method | Count | Count % | Length % |
+| :--- | :---: | :---: | :---: |
+| **Spatial Only (50m)** | {len(spatial_fis_ids)} | {pct(len(spatial_fis_ids), fis_edge_cnt):.1f}% | {pct(spatial_fis_len, fis_total_len):.1f}% |
+| **ID Only (VinCode)** | {len(id_fis_ids)} | {pct(len(id_fis_ids), fis_edge_cnt):.1f}% | {pct(id_fis_len, fis_total_len):.1f}% |
+| **Combined (Spatial + ID)** | {len(combined_fis_ids)} | {pct(len(combined_fis_ids), fis_edge_cnt):.1f}% | {pct(combined_fis_len, fis_total_len):.1f}% |
 
-Analysis of physical dimensions for overlapping network segments (Vessel Constraints).
+### BIVAS Arcs Matched (Source: BIVAS)
+| Method | Count | Count % | Length % |
+| :--- | :---: | :---: | :---: |
+| **Spatial Only (50m)** | {len(spatial_bivas_ids)} | {pct(len(spatial_bivas_ids), bivas_arc_cnt):.1f}% | {pct(spatial_bivas_len, bivas_total_len):.1f}% |
+| **ID Only (VinCode)** | {len(id_bivas_ids)} | {pct(len(id_bivas_ids), bivas_arc_cnt):.1f}% | {pct(id_bivas_len, bivas_total_len):.1f}% |
+| **Combined (Spatial + ID)** | {len(combined_bivas_ids)} | {pct(len(combined_bivas_ids), bivas_arc_cnt):.1f}% | {pct(combined_bivas_len, bivas_total_len):.1f}% |
+
+## 3. Attribute Accuracy (Combined Matches)
+
+Analysis of physical dimensions for network segments matched by both proximity and trajectory code.
 
 | Property | Mean Absolute Error (MAE) | Mean Bias |
 | :--- | :---: | :---: |
 | **Width (m)** | {f"{width_mae:.2f} m" if not pd.isna(width_mae) else "N/A"} | {f"{width_bias:.2f} m" if not pd.isna(width_bias) else "N/A"} |
 | **Depth (m)** | {f"{depth_mae:.2f} m" if not pd.isna(depth_mae) else "N/A"} | {f"{depth_bias:.2f} m" if not pd.isna(depth_bias) else "N/A"} |
 
-*Note: Comparison performed on {len(comp)} segments where both datasets provide dimensions.*
+*Note: Comparison performed on {len(comp)} segments.*
 
 ## 4. Observations
-- FIS Enrichment provides `dim_width` and `dim_depth` derived from `maximumdimensions.parquet`.
-- BIVAS `MaximumWidth__m` and `MaximumDepth__m` are used for comparison as they represent vessel constraints.
-- Differences often occur in complex junctions where BIVAS topological arcs cross multiple FIS segments with varying dimensions.
+- **ID Matching** using `VinCode` (FIS) and `TrajectCode` (BIVAS) provides a robust topological link.
+- **Combined Matching** significantly reduces false positives in dense areas like Meppel or Rotterdam.
+- Discrepancies in **Spatial Only** often occur where fairways run parallel but have different trajectory codes.
 """
 
     report_path = os.path.join(args.output_dir, "comparison_report.md")
@@ -263,6 +310,7 @@ Analysis of physical dimensions for overlapping network segments (Vessel Constra
         f.write(report)
 
     print(f"Report written to {report_path}")
+    print(f"Results exported to {args.output_dir}")
 
 
 if __name__ == "__main__":
