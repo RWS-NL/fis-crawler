@@ -549,25 +549,25 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fis-validation-report
-          path: output/fis-validation-report
+          path: output/
 
       - name: Download Merged validation report
         uses: actions/download-artifact@v4
         with:
           name: merged-validation-report
-          path: output/merged-validation-report
+          path: output/
 
       - name: Download Lock schematization
         uses: actions/download-artifact@v4
         with:
           name: lock-schematization
-          path: output/schematize-lock
+          path: output/lock-schematization
 
       - name: Download Bridge schematization
         uses: actions/download-artifact@v4
         with:
           name: bridge-schematization
-          path: output/schematize-bridge
+          path: output/bridge-schematization
 
       - name: Download Dropins simplified
         uses: actions/download-artifact@v4

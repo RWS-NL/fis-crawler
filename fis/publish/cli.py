@@ -46,14 +46,16 @@ def _md_to_html(md_text: str) -> str:
     html = re.sub(r"\[(.*?)\]\((.*?)\)", r'<a href="\2">\1</a>', html)
 
     # Paragraphs (avoid wrapping existing block tags)
-    # This is a very simplistic heuristic
     blocks = html.split("\n\n")
     formatted_blocks = []
     for block in blocks:
-        if not re.match(r"<(h1|h2|h3|ul|li)", block.strip()):
-            formatted_blocks.append(f"<p>{block.strip()}</p>")
+        stripped = block.strip()
+        if not stripped:
+            continue
+        if not re.match(r"<(h1|h2|h3|ul|li)", stripped):
+            formatted_blocks.append(f"<p>{stripped}</p>")
         else:
-            formatted_blocks.append(block.strip())
+            formatted_blocks.append(stripped)
 
     return "\n".join(formatted_blocks)
 
@@ -77,7 +79,9 @@ def _md_to_html(md_text: str) -> str:
 @click.option(
     "--output-dir",
     default="output",
-    type=click.Path(exists=True),
+    type=click.Path(
+        exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path
+    ),
     help="Directory containing processing outputs.",
 )
 @click.option(
@@ -113,7 +117,6 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
         },
     ]
 
-    output_path = pathlib.Path(output_dir)
     upload_files = []
     zip_to_cleanup = []
 
@@ -126,13 +129,17 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
         ) -> Optional[pathlib.Path]:
             """Robustly find a file in output/ or output/artifact-name/."""
             # 1. Try direct path
-            p = output_path / rel_path
-            if p.exists():
+            p = output_dir / rel_path
+            if p.exists() and p.is_file():
                 return p
             # 2. Try inside artifact-named subfolder (as created by GitHub Actions download-artifact)
             if artifact_name:
-                p = output_path / artifact_name / rel_path
-                if p.exists():
+                p = output_dir / artifact_name / rel_path
+                if p.exists() and p.is_file():
+                    return p
+                # If the artifact name is already the directory, and the rel_path is just the filename
+                p = output_dir / artifact_name / pathlib.Path(rel_path).name
+                if p.exists() and p.is_file():
                     return p
             return None
 
@@ -140,23 +147,19 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
             rel_path: str, artifact_name: Optional[str] = None
         ) -> Optional[pathlib.Path]:
             """Robustly find a directory in output/ or output/artifact-name/."""
-            # Same logic as find_file
-            p = output_path / rel_path
+            # 1. Try direct path
+            p = output_dir / rel_path
             if p.exists() and p.is_dir():
                 return p
+            # 2. Try inside artifact-named subfolder
             if artifact_name:
-                p = output_path / artifact_name / rel_path
+                p = output_dir / artifact_name / rel_path
                 if p.exists() and p.is_dir():
                     return p
-                # If the entire directory IS the artifact
-                p = output_path / artifact_name
-                if (
-                    p.exists() and p.is_dir() and (p / ".git").exists() is False
-                ):  # Just a safety check
-                    # We might be looking for output/fis-export but only output/fis-export/ exists
-                    # where the content is already what we want.
-                    # This is tricky because rel_path might be 'fis-export'.
-                    pass
+                # 3. If the entire artifact directory IS the target directory
+                p = output_dir / artifact_name
+                if p.exists() and p.is_dir():
+                    return p
             return None
 
         # Main directory files (Direct upload)
@@ -171,12 +174,20 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
             ("fis_validation_report.md", "fis-validation-report"),
         ]
 
+        missing_required = False
         for rel, art in candidates:
             f = find_file(rel, art)
             if f:
                 upload_files.append(f)
             else:
-                logger.warning(f"Important file {rel} (artifact: {art}) missing.")
+                missing_required = True
+                logger.error(f"Important file {rel} (artifact: {art}) missing.")
+
+        if missing_required:
+            raise click.ClickException(
+                "One or more required dataset artifacts are missing. "
+                "Aborting Zenodo publication."
+            )
 
         # Zipped Raw/Full Exports
         def stage_zip(zip_name, paths_with_artifacts):
@@ -207,8 +218,8 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
         stage_zip(
             "schematizations.zip",
             [
-                ("lock-schematization", "schematize-lock"),
-                ("bridge-schematization", "schematize-bridge"),
+                ("lock-schematization", "lock-schematization"),
+                ("bridge-schematization", "bridge-schematization"),
                 (
                     "dropins-schematization-detailed",
                     "integrated-schematization-detailed",
@@ -221,21 +232,21 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
                     "integrated-schematization-with-berths",
                     "integrated-schematization-with-berths",
                 ),
-                ("dropins-euris-detailed", "dropins-euris-detailed"),  # local name
             ],
         )
 
         # 2. Interact with Zenodo API
         base_url = "https://zenodo.org/api/deposit/depositions"
-        headers = {
+        json_headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
         }
+        auth_headers = {"Authorization": f"Bearer {token}"}
 
         if draft_id:
             logger.info(f"Updating existing draft ID: {draft_id}...")
             r = requests.get(
-                f"{base_url}/{draft_id}", headers=headers, timeout=ZENODO_TIMEOUT
+                f"{base_url}/{draft_id}", headers=auth_headers, timeout=ZENODO_TIMEOUT
             )
             r.raise_for_status()
             deposition = r.json()
@@ -247,7 +258,7 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
                 file_id = existing_file["id"]
                 requests.delete(
                     f"{base_url}/{deposition_id}/files/{file_id}",
-                    headers=headers,
+                    headers=auth_headers,
                     timeout=ZENODO_TIMEOUT,
                 ).raise_for_status()
 
@@ -255,12 +266,14 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
             logger.info(f"Creating new version from base ID: {base_id}...")
             r = requests.post(
                 f"{base_url}/{base_id}/actions/newversion",
-                headers=headers,
+                headers=auth_headers,
                 timeout=ZENODO_TIMEOUT,
             )
             r.raise_for_status()
             new_version_url = r.json()["links"]["latest_draft"]
-            r = requests.get(new_version_url, headers=headers, timeout=ZENODO_TIMEOUT)
+            r = requests.get(
+                new_version_url, headers=auth_headers, timeout=ZENODO_TIMEOUT
+            )
             r.raise_for_status()
             deposition = r.json()
             deposition_id = deposition["id"]
@@ -271,13 +284,13 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
                 file_id = existing_file["id"]
                 requests.delete(
                     f"{base_url}/{deposition_id}/files/{file_id}",
-                    headers=headers,
+                    headers=auth_headers,
                     timeout=ZENODO_TIMEOUT,
                 ).raise_for_status()
         else:
             logger.info("Creating new Zenodo deposition...")
             r = requests.post(
-                base_url, json={}, headers=headers, timeout=ZENODO_TIMEOUT
+                base_url, json={}, headers=json_headers, timeout=ZENODO_TIMEOUT
             )
             r.raise_for_status()
             deposition = r.json()
@@ -290,10 +303,11 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
             filename = file_path.name
             logger.info(f"Uploading {filename}...")
             with open(file_path, "rb") as fp:
+                # Use auth_headers (no content-type) for binary bucket uploads
                 r = requests.put(
                     f"{bucket_url}/{filename}",
                     data=fp,
-                    headers=headers,
+                    headers=auth_headers,
                     timeout=ZENODO_TIMEOUT,
                 )
                 r.raise_for_status()
@@ -313,7 +327,7 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
         r = requests.put(
             f"{base_url}/{deposition_id}",
             json=meta_data,
-            headers=headers,
+            headers=json_headers,
             timeout=ZENODO_TIMEOUT,
         )
         r.raise_for_status()
@@ -324,7 +338,7 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
             logger.info("Publishing (submitting) deposition...")
             r = requests.post(
                 f"{base_url}/{deposition_id}/actions/publish",
-                headers=headers,
+                headers=auth_headers,
                 timeout=ZENODO_TIMEOUT,
             )
             r.raise_for_status()
