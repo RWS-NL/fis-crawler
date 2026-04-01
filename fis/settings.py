@@ -97,7 +97,8 @@ TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
 FIS_EXPORT_DIR = "output/fis-export"
 
-VERSION = __version__
+# Dataset version used for output paths. Falls back to 0.0.0 if unknown.
+VERSION = __version__ if __version__ != "unknown" else "0.0.0"
 
 # --- Graph Integration & Splicing Parameters ---
 

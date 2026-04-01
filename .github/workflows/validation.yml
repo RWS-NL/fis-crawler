@@ -539,10 +539,77 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
-      - name: Download all artifacts
+      - name: Download merged graph
         uses: actions/download-artifact@v4
         with:
-          path: output/
+          name: merged-graph
+          path: output/merged-graph
+
+      - name: Download FIS validation report
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-validation-report
+          path: output/fis-validation-report
+
+      - name: Download Merged validation report
+        uses: actions/download-artifact@v4
+        with:
+          name: merged-validation-report
+          path: output/merged-validation-report
+
+      - name: Download Lock schematization
+        uses: actions/download-artifact@v4
+        with:
+          name: lock-schematization
+          path: output/schematize-lock
+
+      - name: Download Bridge schematization
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-schematization
+          path: output/schematize-bridge
+
+      - name: Download Dropins simplified
+        uses: actions/download-artifact@v4
+        with:
+          name: integrated-schematization-simplified
+          path: output/integrated-schematization-simplified
+
+      - name: Download Dropins detailed
+        uses: actions/download-artifact@v4
+        with:
+          name: integrated-schematization-detailed
+          path: output/integrated-schematization-detailed
+
+      - name: Download Dropins berths
+        uses: actions/download-artifact@v4
+        with:
+          name: integrated-schematization-with-berths
+          path: output/integrated-schematization-with-berths
+
+      - name: Download FIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-export
+          path: output/fis-export
+
+      - name: Download FIS Enriched
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-enriched
+          path: output/fis-enriched
+
+      - name: Download EURIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: euris-export
+          path: output/euris-export
+
+      - name: Download EURIS Enriched
+        uses: actions/download-artifact@v4
+        with:
+          name: euris-enriched
+          path: output/euris-enriched
 
       - name: Publish to Zenodo
         run: |
