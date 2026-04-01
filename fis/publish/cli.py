@@ -3,6 +3,7 @@ import os
 import pathlib
 import zipfile
 import re
+import tempfile
 import click
 import requests
 from typing import List, Optional
@@ -45,17 +46,35 @@ def _md_to_html(md_text: str) -> str:
     # Links
     html = re.sub(r"\[(.*?)\]\((.*?)\)", r'<a href="\2">\1</a>', html)
 
-    # Paragraphs (avoid wrapping existing block tags)
+    # Paragraphs (robust wrapping)
     blocks = html.split("\n\n")
     formatted_blocks = []
     for block in blocks:
         stripped = block.strip()
         if not stripped:
             continue
-        if not re.match(r"<(h1|h2|h3|ul|li)", stripped):
+
+        # If the block contains any block-level HTML tags, handle carefully
+        block_tag_match = re.search(
+            r"<(/)?(h1|h2|h3|ul|ol|li|blockquote|pre|code|table|thead|tbody|tr|th|td|hr)\b",
+            stripped,
+        )
+
+        if not block_tag_match:
+            # Pure text block: wrap everything in a paragraph
             formatted_blocks.append(f"<p>{stripped}</p>")
         else:
-            formatted_blocks.append(stripped)
+            # If a block tag appears at the start, keep the whole block as-is
+            if block_tag_match.start() == 0:
+                formatted_blocks.append(stripped)
+            else:
+                # Split into leading text (before first block tag) and the rest
+                leading_text = stripped[: block_tag_match.start()].rstrip()
+                rest = stripped[block_tag_match.start() :].strip()
+                if leading_text:
+                    formatted_blocks.append(f"<p>{leading_text}</p>")
+                if rest:
+                    formatted_blocks.append(rest)
 
     return "\n".join(formatted_blocks)
 
@@ -87,7 +106,12 @@ def _md_to_html(md_text: str) -> str:
 @click.option(
     "--publish", is_flag=True, help="Automatically publish (submit) the deposition."
 )
-def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish):
+@click.option(
+    "--allow-partial", is_flag=True, help="Proceed even if some artifacts are missing."
+)
+def publish_zenodo(
+    token, base_id, draft_id, title, license, output_dir, publish, allow_partial
+):
     """Publish processed artifacts to Zenodo (supports versioning and draft updates)."""
     if not token:
         msg = "Zenodo access token not provided. Set ZENODO_KEY environment variable."
@@ -118,7 +142,10 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
     ]
 
     upload_files = []
-    zip_to_cleanup = []
+
+    # Create a temporary directory for zips to avoid clobbering user files
+    tmp_zip_dir = pathlib.Path(tempfile.mkdtemp(prefix="fis_zenodo_"))
+    logger.info(f"Using temporary directory for archives: {tmp_zip_dir}")
 
     try:
         # 1. Prepare Artifacts
@@ -163,7 +190,6 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
             return None
 
         # Main directory files (Direct upload)
-        # We try both flattened and nested (GA style) paths
         candidates = [
             ("merged-graph/graph.pickle", "merged-graph"),
             ("merged-graph/edges.geojson", "merged-graph"),
@@ -180,31 +206,35 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
             if f:
                 upload_files.append(f)
             else:
-                missing_required = True
-                logger.error(f"Important file {rel} (artifact: {art}) missing.")
-
-        if missing_required:
-            raise click.ClickException(
-                "One or more required dataset artifacts are missing. "
-                "Aborting Zenodo publication."
-            )
+                msg = f"Required file {rel} (artifact: {art}) missing."
+                if not allow_partial:
+                    logger.error(msg)
+                    missing_required = True
+                else:
+                    logger.warning(msg)
 
         # Zipped Raw/Full Exports
-        def stage_zip(zip_name, paths_with_artifacts):
+        def stage_zip(zip_filename, paths_with_artifacts, required=True):
+            nonlocal missing_required
             resolved_paths = []
             for rel, art in paths_with_artifacts:
                 d = find_dir(rel, art)
                 if d:
                     resolved_paths.append(d)
                 else:
-                    logger.warning(
-                        f"Directory {rel} (artifact: {art}) missing for {zip_name}."
+                    msg = (
+                        f"Directory {rel} (artifact: {art}) missing for {zip_filename}."
                     )
+                    if required and not allow_partial:
+                        logger.error(msg)
+                        missing_required = True
+                    else:
+                        logger.warning(msg)
 
             if resolved_paths:
-                _create_zip(zip_name, resolved_paths)
-                upload_files.append(pathlib.Path(zip_name))
-                zip_to_cleanup.append(zip_name)
+                zip_path = tmp_zip_dir / zip_filename
+                _create_zip(zip_path, resolved_paths)
+                upload_files.append(zip_path)
 
         logger.info("Creating supplemental zip archives...")
         stage_zip(
@@ -234,6 +264,12 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
                 ),
             ],
         )
+
+        if missing_required:
+            raise click.ClickException(
+                "One or more required dataset artifacts are missing. "
+                "Aborting Zenodo publication. Use --allow-partial to override."
+            )
 
         # 2. Interact with Zenodo API
         base_url = "https://zenodo.org/api/deposit/depositions"
@@ -352,16 +388,17 @@ def publish_zenodo(token, base_id, draft_id, title, license, output_dir, publish
         logger.exception(f"Failed to publish to Zenodo: {e}")
         raise click.ClickException(f"Failed to publish to Zenodo: {e}")
     finally:
-        logger.info("Cleaning up temporary zip files...")
-        for f in zip_to_cleanup:
-            if os.path.exists(f):
-                os.remove(f)
+        logger.info("Cleaning up temporary archives...")
+        import shutil
+
+        if tmp_zip_dir.exists():
+            shutil.rmtree(tmp_zip_dir)
 
 
-def _create_zip(zip_name: str, paths: List[pathlib.Path]):
+def _create_zip(zip_path: pathlib.Path, paths: List[pathlib.Path]):
     """Helper to create a zip file from a list of directories or files."""
-    logger.info(f"Creating {zip_name} from {len(paths)} paths...")
-    with zipfile.ZipFile(zip_name, "w", zipfile.ZIP_DEFLATED) as zf:
+    logger.info(f"Creating {zip_path.name} from {len(paths)} paths...")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in paths:
             if not path.exists():
                 logger.warning(f"Path {path} does not exist, skipping.")

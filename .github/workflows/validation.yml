@@ -611,13 +611,17 @@ jobs:
           name: euris-enriched
           path: output/euris-enriched
 
+      - name: List downloaded artifacts
+        run: ls -R output/
+
       - name: Publish to Zenodo
         run: |
           BASE_ID_ARG=""
-          if [ -n "${{ github.event.inputs.base_id }}" ]; then
-            BASE_ID_ARG="--base-id ${{ github.event.inputs.base_id }}"
+          if [ -n "${ZENODO_BASE_ID}" ]; then
+            BASE_ID_ARG="--base-id ${ZENODO_BASE_ID}"
           fi
           uv run python -m fis.cli publish zenodo $BASE_ID_ARG --publish
         env:
           ZENODO_KEY: ${{ secrets.ZENODO_KEY }}
+          ZENODO_BASE_ID: ${{ github.event.inputs.base_id || vars.ZENODO_BASE_ID }}
 

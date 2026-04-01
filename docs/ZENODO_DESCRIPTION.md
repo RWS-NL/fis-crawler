@@ -4,6 +4,7 @@
 This dataset provides a harmonized, pan-European inland waterway network integrated with high-resolution Dutch fairway data. It combines the broad topological connectivity of the **European River Information Services (EuRIS)** with the detailed physical and administrative attributes of the **Dutch Fairway Information System (FIS)**.
 
 The network is specifically designed for:
+
 - **Macroscopic Traffic Assignment:** Route planning and strategic transport modeling (e.g., BIVAS).
 - **Microscopic Simulation:** Detailed discrete event simulations of lock operations and bridge passages (e.g., OpenTNSim, SIVAK).
 - **Network Analysis:** Pan-European connectivity studies and infrastructure bottleneck analysis.
@@ -15,6 +16,7 @@ Provides the backbone for the pan-European network, ensuring seamless connectivi
 
 ### 2. FIS (Dutch Fairway Information System / Vaarweginformatie.nl)
 Provides high-resolution data for the Dutch waterway network, including the Rhine corridor. This source contributes detailed information on:
+
 - Hydraulic conditions (water levels and flow velocities).
 - Bathymetric profiles and navigable depths.
 - Comprehensive infrastructure details for locks, bridges, and berths.
@@ -22,6 +24,7 @@ Provides high-resolution data for the Dutch waterway network, including the Rhin
 
 ### Integration Strategy
 The dataset uses a custom processing pipeline to merge these sources:
+
 - **Topological Harmonization:** Geometric snapping and merging of source nodes at border points (e.g., Lobith) to ensure a single, contiguous graph.
 - **Attribute Mapping:** FIS attributes are mapped to a canonical schema based on EURIS naming conventions.
 - **Detailed Schematization:** Locks and bridges are expanded into detailed subgraphs, representing individual chambers, approach segments, and gate positions.
