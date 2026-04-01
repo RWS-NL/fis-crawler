@@ -2,10 +2,10 @@ import logging
 import os
 import pathlib
 import zipfile
-import re
 import tempfile
 import click
 import requests
+import markdown
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
@@ -20,72 +20,45 @@ def publish_cli():
     pass
 
 
-def _md_to_html(md_text: str) -> str:
-    """Basic markdown to HTML conversion for Zenodo description."""
-    html = md_text
+def _validate_mutually_exclusive_ids(ctx, param, value):
+    """Ensure that --base-id and --draft-id are not both provided."""
+    if value is None:
+        return value
 
-    # Escape existing HTML if any (very basic)
-    html = html.replace("<", "&lt;").replace(">", "&gt;")
+    if param.name == "base_id":
+        other_name = "draft_id"
+    elif param.name == "draft_id":
+        other_name = "base_id"
+    else:
+        return value
 
-    # Headers
-    html = re.sub(r"^# (.*)$", r"<h1>\1</h1>", html, flags=re.MULTILINE)
-    html = re.sub(r"^## (.*)$", r"<h2>\1</h2>", html, flags=re.MULTILINE)
-    html = re.sub(r"^### (.*)$", r"<h3>\1</h3>", html, flags=re.MULTILINE)
-
-    # Bold
-    html = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", html)
-
-    # Lists: handle blocks of lines starting with '- '
-    def replace_list(match):
-        items = match.group(0).strip().split("\n")
-        list_html = "<ul>" + "".join(f"<li>{item[2:]}</li>" for item in items) + "</ul>"
-        return list_html
-
-    html = re.sub(r"(^- .*(?:\n- .*)*)", replace_list, html, flags=re.MULTILINE)
-
-    # Links
-    html = re.sub(r"\[(.*?)\]\((.*?)\)", r'<a href="\2">\1</a>', html)
-
-    # Paragraphs (robust wrapping)
-    blocks = html.split("\n\n")
-    formatted_blocks = []
-    for block in blocks:
-        stripped = block.strip()
-        if not stripped:
-            continue
-
-        # If the block contains any block-level HTML tags, handle carefully
-        block_tag_match = re.search(
-            r"<(/)?(h1|h2|h3|ul|ol|li|blockquote|pre|code|table|thead|tbody|tr|th|td|hr)\b",
-            stripped,
+    other_value = ctx.params.get(other_name)
+    if other_value is not None:
+        raise click.UsageError(
+            "Options --base-id and --draft-id are mutually exclusive; please provide only one."
         )
 
-        if not block_tag_match:
-            # Pure text block: wrap everything in a paragraph
-            formatted_blocks.append(f"<p>{stripped}</p>")
-        else:
-            # If a block tag appears at the start, keep the whole block as-is
-            if block_tag_match.start() == 0:
-                formatted_blocks.append(stripped)
-            else:
-                # Split into leading text (before first block tag) and the rest
-                leading_text = stripped[: block_tag_match.start()].rstrip()
-                rest = stripped[block_tag_match.start() :].strip()
-                if leading_text:
-                    formatted_blocks.append(f"<p>{leading_text}</p>")
-                if rest:
-                    formatted_blocks.append(rest)
+    return value
 
-    return "\n".join(formatted_blocks)
+
+def _md_to_html(md_text: str) -> str:
+    """Proper markdown to HTML conversion."""
+    return markdown.markdown(md_text)
 
 
 @publish_cli.command(name="zenodo")
 @click.option("--token", envvar="ZENODO_KEY", help="Zenodo API access token.")
 @click.option(
-    "--base-id", default=None, help="Base deposition ID to create a new version from."
+    "--base-id",
+    default=None,
+    callback=_validate_mutually_exclusive_ids,
+    help="Base deposition ID to create a new version from.",
 )
 @click.option(
-    "--draft-id", default=None, help="Existing draft deposition ID to update."
+    "--draft-id",
+    default=None,
+    callback=_validate_mutually_exclusive_ids,
+    help="Existing draft deposition ID to update.",
 )
 @click.option(
     "--title",
@@ -93,7 +66,10 @@ def _md_to_html(md_text: str) -> str:
     help="Deposition title.",
 )
 @click.option(
-    "--license", default="cc-by-4.0", help="Dataset license (Zenodo identifier)."
+    "--license",
+    "license_id",
+    default="cc-by-4.0",
+    help="Dataset license (Zenodo identifier).",
 )
 @click.option(
     "--output-dir",
@@ -110,7 +86,7 @@ def _md_to_html(md_text: str) -> str:
     "--allow-partial", is_flag=True, help="Proceed even if some artifacts are missing."
 )
 def publish_zenodo(
-    token, base_id, draft_id, title, license, output_dir, publish, allow_partial
+    token, base_id, draft_id, title, license_id, output_dir, publish, allow_partial
 ):
     """Publish processed artifacts to Zenodo (supports versioning and draft updates)."""
     if not token:
@@ -122,10 +98,10 @@ def publish_zenodo(
     desc_path = pathlib.Path("docs/ZENODO_DESCRIPTION.md")
     if desc_path.exists():
         logger.info(f"Loading description from {desc_path}")
-        with open(desc_path, "r") as f:
+        with open(desc_path, "r", encoding="utf-8") as f:
             description = _md_to_html(f.read())
     else:
-        description = "FIS-EURIS Inland Waterway Network Dataset. Data provided by EuRIS and Rijkswaterstaat."
+        description = "<p>FIS-EURIS Inland Waterway Network Dataset. Data provided by EuRIS and Rijkswaterstaat.</p>"
 
     # Define authors
     creators = [
@@ -159,7 +135,7 @@ def publish_zenodo(
             p = output_dir / rel_path
             if p.exists() and p.is_file():
                 return p
-            # 2. Try inside artifact-named subfolder (as created by GitHub Actions download-artifact)
+            # 2. Try inside artifact-named subfolder
             if artifact_name:
                 p = output_dir / artifact_name / rel_path
                 if p.exists() and p.is_file():
@@ -357,7 +333,7 @@ def publish_zenodo(
                 "upload_type": "dataset",
                 "description": description,
                 "creators": creators,
-                "license": license,
+                "license": license_id,
             }
         }
         r = requests.put(

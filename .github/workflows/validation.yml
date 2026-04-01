@@ -616,7 +616,6 @@ jobs:
 
       - name: Publish to Zenodo
         run: |
-          BASE_ID_ARG=""
           if [ -n "${ZENODO_BASE_ID}" ]; then
             BASE_ID_ARG="--base-id ${ZENODO_BASE_ID}"
           fi
