@@ -32,19 +32,35 @@ class TestPublishZenodo(unittest.TestCase):
         self, mock_del, mock_put, mock_get, mock_post
     ):
         # We catch the exception because we want to check the error message
-        result = self.runner.invoke(publish_cli, ["zenodo"], env={"ZENODO_KEY": ""})
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertIn("Zenodo access token not provided", result.output)
+        with self.runner.isolated_filesystem():
+            pathlib.Path("output").mkdir()
+            result = self.runner.invoke(
+                publish_cli,
+                ["zenodo", "--output-dir", "output"],
+                env={"ZENODO_KEY": ""},
+            )
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn("Zenodo access token not provided", result.output)
 
     @patch("requests.post")
     def test_publish_zenodo_mutually_exclusive(self, mock_post):
-        result = self.runner.invoke(
-            publish_cli,
-            ["zenodo", "--base-id", "123", "--draft-id", "456"],
-            env={"ZENODO_KEY": "test-token"},
-        )
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertIn("mutually exclusive", result.output)
+        with self.runner.isolated_filesystem():
+            pathlib.Path("output").mkdir()
+            result = self.runner.invoke(
+                publish_cli,
+                [
+                    "zenodo",
+                    "--output-dir",
+                    "output",
+                    "--base-id",
+                    "123",
+                    "--draft-id",
+                    "456",
+                ],
+                env={"ZENODO_KEY": "test-token"},
+            )
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn("mutually exclusive", result.output)
 
     @patch("requests.post")
     @patch("requests.get")
