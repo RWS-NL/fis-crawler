@@ -51,7 +51,6 @@ def load_bivas_network(db_path, branch_set_id=337):
     merged = merged.merge(nodes_df, left_on="ToNodeID", right_on="NodeID")
     merged = merged.rename(columns={"XCoordinate": "X_to", "YCoordinate": "Y_to"})
 
-    # Check for empty merged to avoid errors
     if merged.empty:
         return nodes_gdf, gpd.GeoDataFrame(columns=arcs_df.columns, geometry=[], crs="EPSG:28992")
 
@@ -139,28 +138,38 @@ def main():
         )
         fis_edges = fis_edges.to_crs(epsg=28992)
 
-    # Ensure IDs and Codes are strings for robust matching
-    fis_edges["VinCode"] = fis_edges["VinCode"].astype(str)
-    bivas_arcs["TrajectCode"] = bivas_arcs["TrajectCode"].astype(str)
-    fis_edges["Id"] = fis_edges["Id"].astype(str)
-    bivas_arcs["ID"] = bivas_arcs["ID"].astype(str)
+    # Ensure IDs and Codes are strings for robust matching (preserve missing as <NA>)
+    fis_edges["VinCode"] = fis_edges["VinCode"].astype("string")
+    bivas_arcs["TrajectCode"] = bivas_arcs["TrajectCode"].astype("string")
+    fis_edges["Id"] = fis_edges["Id"].astype("string")
+    bivas_arcs["ID"] = bivas_arcs["ID"].astype("string")
 
-    # Compare counts
+    # BIVAS total length using Length__m (database provided)
+    if "Length__m" in bivas_arcs.columns:
+        bivas_total_len = bivas_arcs["Length__m"].sum()
+        if pd.isna(bivas_total_len) or bivas_total_len == 0:
+            logger.warning("BIVAS Length__m is missing or zero; falling back to geometry-based length.")
+            bivas_total_len = bivas_arcs.geometry.length.sum()
+    else:
+        bivas_total_len = bivas_arcs.geometry.length.sum()
+
+    fis_total_len = fis_edges.geometry.length.sum()
     bivas_arc_cnt = len(bivas_arcs)
     fis_edge_cnt = len(fis_edges)
     
-    fis_total_len = fis_edges.geometry.length.sum()
-    bivas_total_len = bivas_arcs.geometry.length.sum()
-
     # -------------------------------------------------------------------------
     # Matching Method A: Spatial only (50m buffer)
     # -------------------------------------------------------------------------
     bivas_arcs_buffered = bivas_arcs.copy()
     bivas_arcs_buffered.geometry = bivas_arcs.buffer(50)
     
-    spatial_joined = gpd.sjoin(
+    spatial_joined_all = gpd.sjoin(
         fis_edges, bivas_arcs_buffered, how="inner", predicate="intersects"
     )
+    
+    # Reduce to a 1:1 match set to avoid weighting duplicated matches in metrics.
+    spatial_joined = spatial_joined_all.sort_values(by=["Id", "ID"]).drop_duplicates(subset="Id", keep="first")
+    
     spatial_fis_ids = set(spatial_joined["Id"].unique()) if "Id" in spatial_joined.columns else set()
     spatial_bivas_ids = set(spatial_joined["ID"].unique()) if "ID" in spatial_joined.columns else set()
 
@@ -168,7 +177,7 @@ def main():
     bivas_spatial = bivas_arcs[bivas_arcs["ID"].isin(spatial_bivas_ids)]
     
     spatial_fis_len = fis_spatial.geometry.length.sum()
-    spatial_bivas_len = bivas_spatial.geometry.length.sum()
+    spatial_bivas_len = bivas_spatial["Length__m"].sum() if "Length__m" in bivas_spatial.columns else bivas_spatial.geometry.length.sum()
 
     if not fis_spatial.empty: fis_spatial.to_parquet(get_out_path("fis_matches_spatial_only"))
     if not bivas_spatial.empty: bivas_spatial.to_parquet(get_out_path("bivas_matches_spatial_only"))
@@ -176,12 +185,16 @@ def main():
     # -------------------------------------------------------------------------
     # Matching Method B: ID only (VinCode == TrajectCode)
     # -------------------------------------------------------------------------
-    id_joined = fis_edges.merge(
+    id_joined_all = fis_edges.merge(
         bivas_arcs.drop(columns="geometry"), 
         left_on="VinCode", 
         right_on="TrajectCode", 
         how="inner"
     )
+    
+    # Reduce to 1:1
+    id_joined = id_joined_all.sort_values(by=["Id", "ID"]).drop_duplicates(subset="Id", keep="first")
+
     id_fis_ids = set(id_joined["Id"].unique()) if "Id" in id_joined.columns else set()
     id_bivas_ids = set(id_joined["ID"].unique()) if "ID" in id_joined.columns else set()
     
@@ -189,7 +202,7 @@ def main():
     bivas_id = bivas_arcs[bivas_arcs["ID"].isin(id_bivas_ids)]
     
     id_fis_len = fis_id.geometry.length.sum()
-    id_bivas_len = bivas_id.geometry.length.sum()
+    id_bivas_len = bivas_id["Length__m"].sum() if "Length__m" in bivas_id.columns else bivas_id.geometry.length.sum()
 
     if not fis_id.empty: fis_id.to_parquet(get_out_path("fis_matches_id_only"))
     if not bivas_id.empty: bivas_id.to_parquet(get_out_path("bivas_matches_id_only"))
@@ -201,9 +214,13 @@ def main():
     # -------------------------------------------------------------------------
     # Matching Method C: Combined (Spatial AND ID)
     # -------------------------------------------------------------------------
-    combined_joined = spatial_joined[
-        spatial_joined["VinCode"].astype(str) == spatial_joined["TrajectCode"].astype(str)
+    combined_joined_all = spatial_joined_all[
+        spatial_joined_all["VinCode"].astype(str) == spatial_joined_all["TrajectCode"].astype(str)
     ].copy()
+    
+    # Reduce to 1:1 match set to avoid biasing metrics
+    combined_joined = combined_joined_all.sort_values(by=["Id", "ID"]).drop_duplicates(subset="Id", keep="first")
+
     combined_fis_ids = set(combined_joined["Id"].unique()) if "Id" in combined_joined.columns else set()
     combined_bivas_ids = set(combined_joined["ID"].unique()) if "ID" in combined_joined.columns else set()
 
@@ -211,7 +228,7 @@ def main():
     bivas_combined = bivas_arcs[bivas_arcs["ID"].isin(combined_bivas_ids)]
     
     combined_fis_len = fis_combined.geometry.length.sum()
-    combined_bivas_len = bivas_combined.geometry.length.sum()
+    combined_bivas_len = bivas_combined["Length__m"].sum() if "Length__m" in bivas_combined.columns else bivas_combined.geometry.length.sum()
 
     if not fis_combined.empty: fis_combined.to_parquet(get_out_path("fis_matches_combined"))
     if not bivas_combined.empty: bivas_combined.to_parquet(get_out_path("bivas_matches_combined"))
@@ -219,11 +236,11 @@ def main():
     # -------------------------------------------------------------------------
     # Mismatch Analysis (Three types)
     # -------------------------------------------------------------------------
-    # 1. Not matched by Spatial (Mismatches by proximity)
+    # 1. Not matched by Spatial (proximity mismatch)
     fis_no_spatial = fis_edges[~fis_edges["Id"].isin(spatial_fis_ids)]
     bivas_no_spatial = bivas_arcs[~bivas_arcs["ID"].isin(spatial_bivas_ids)]
 
-    # 2. Not matched by ID (Mismatches by trajectory code)
+    # 2. Not matched by ID (trajectory code mismatch)
     fis_no_id = fis_edges[~fis_edges["Id"].isin(id_fis_ids)]
     bivas_no_id = bivas_arcs[~bivas_arcs["ID"].isin(id_bivas_ids)]
 
