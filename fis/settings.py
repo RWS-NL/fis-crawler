@@ -7,6 +7,8 @@
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+from fis import __version__
+
 BOT_NAME = "fis"
 
 SPIDER_MODULES = ["fis.spiders"]
@@ -95,7 +97,7 @@ TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
 FIS_EXPORT_DIR = "output/fis-export"
 
-VERSION = "0.2.0"
+VERSION = __version__
 
 # --- Graph Integration & Splicing Parameters ---
 

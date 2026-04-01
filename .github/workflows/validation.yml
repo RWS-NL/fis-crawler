@@ -6,6 +6,15 @@ on:
   schedule:
     - cron: '0 0 * * 0' # Weekly run on Sunday midnight
   workflow_dispatch:
+    inputs:
+      publish_to_zenodo:
+        description: 'Publish artifacts to Zenodo after validation'
+        type: boolean
+        default: false
+      base_id:
+        description: 'Base Zenodo deposition ID (for new versions)'
+        required: false
+        default: '19371716'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -507,4 +516,41 @@ jobs:
           name: bivas-validation
           path: output/bivas-validation/
           retention-days: 30
+
+  publish-zenodo:
+    needs: [merge-graphs, schematize-lock, schematize-bridge, schematize-dropins-simplified, schematize-dropins-detailed, schematize-dropins-berths, validate-fis, validate-merged, validate-bivas]
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_zenodo == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+          
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: output/
+
+      - name: Publish to Zenodo
+        run: |
+          BASE_ID_ARG=""
+          if [ -n "${{ github.event.inputs.base_id }}" ]; then
+            BASE_ID_ARG="--base-id ${{ github.event.inputs.base_id }}"
+          fi
+          uv run python -m fis.cli publish zenodo $BASE_ID_ARG --publish
+        env:
+          ZENODO_KEY: ${{ secrets.ZENODO_KEY }}
 
