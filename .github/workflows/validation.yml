@@ -6,6 +6,15 @@ on:
   schedule:
     - cron: '0 0 * * 0' # Weekly run on Sunday midnight
   workflow_dispatch:
+    inputs:
+      publish_to_zenodo:
+        description: 'Publish artifacts to Zenodo after validation'
+        type: boolean
+        default: false
+      base_id:
+        description: 'Base Zenodo deposition ID (for new versions)'
+        required: false
+        default: '19371716'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -507,4 +516,111 @@ jobs:
           name: bivas-validation
           path: output/bivas-validation/
           retention-days: 30
+
+  publish-zenodo:
+    needs: [merge-graphs, schematize-lock, schematize-bridge, schematize-dropins-simplified, schematize-dropins-detailed, schematize-dropins-berths, validate-fis, validate-merged, validate-bivas]
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_to_zenodo == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+          
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Download merged graph
+        uses: actions/download-artifact@v4
+        with:
+          name: merged-graph
+          path: output/merged-graph
+
+      - name: Download FIS validation report
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-validation-report
+          path: output/
+
+      - name: Download Merged validation report
+        uses: actions/download-artifact@v4
+        with:
+          name: merged-validation-report
+          path: output/
+
+      - name: Download Lock schematization
+        uses: actions/download-artifact@v4
+        with:
+          name: lock-schematization
+          path: output/lock-schematization
+
+      - name: Download Bridge schematization
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-schematization
+          path: output/bridge-schematization
+
+      - name: Download Dropins simplified
+        uses: actions/download-artifact@v4
+        with:
+          name: integrated-schematization-simplified
+          path: output/integrated-schematization-simplified
+
+      - name: Download Dropins detailed
+        uses: actions/download-artifact@v4
+        with:
+          name: integrated-schematization-detailed
+          path: output/integrated-schematization-detailed
+
+      - name: Download Dropins berths
+        uses: actions/download-artifact@v4
+        with:
+          name: integrated-schematization-with-berths
+          path: output/integrated-schematization-with-berths
+
+      - name: Download FIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-export
+          path: output/fis-export
+
+      - name: Download FIS Enriched
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-enriched
+          path: output/fis-enriched
+
+      - name: Download EURIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: euris-export
+          path: output/euris-export
+
+      - name: Download EURIS Enriched
+        uses: actions/download-artifact@v4
+        with:
+          name: euris-enriched
+          path: output/euris-enriched
+
+      - name: List downloaded artifacts
+        run: ls -R output/
+
+      - name: Publish to Zenodo
+        run: |
+          if [ -n "${ZENODO_BASE_ID}" ]; then
+            BASE_ID_ARG="--base-id ${ZENODO_BASE_ID}"
+          fi
+          uv run python -m fis.cli publish zenodo $BASE_ID_ARG --publish
+        env:
+          ZENODO_KEY: ${{ secrets.ZENODO_KEY }}
+          ZENODO_BASE_ID: ${{ github.event.inputs.base_id || vars.ZENODO_BASE_ID }}
 

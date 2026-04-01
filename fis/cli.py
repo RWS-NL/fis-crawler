@@ -8,6 +8,7 @@ from fis.graph.cli import cli as graph_cli
 from fis.lock.cli import cli as lock_cli
 from fis.bridge.cli import cli as bridge_cli
 from fis.dropins.cli import dropins_cli
+from fis.publish.cli import publish_cli
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +30,7 @@ cli.add_command(graph_cli, name="graph")
 cli.add_command(lock_cli, name="lock")
 cli.add_command(bridge_cli, name="bridge")
 cli.add_command(dropins_cli, name="dropins")
+cli.add_command(publish_cli, name="publish")
 
 
 if __name__ == "__main__":

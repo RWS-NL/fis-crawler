@@ -4,6 +4,7 @@ from typing import List, Dict, Tuple
 
 import pandas as pd
 import geopandas as gpd
+from shapely import wkt
 from fis.utils import normalize_attributes
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,8 @@ def load_dropins_with_explicit_linking(
         for chamber_dict in relevant_chambers:
             # Ensure geometry is a shapely object if it came from to_dict
             c_geom = chamber_dict["geometry"]
+            if isinstance(c_geom, str):
+                c_geom = wkt.loads(c_geom)
 
             # Preserve the Point geometry for splicing (Topological Anchor)
             chamber_dict["topological_anchor"] = c_geom.wkt
@@ -231,6 +234,8 @@ def load_dropins_with_explicit_linking(
         relevant_openings = openings_by_parent.get(bid, [])
         for opening_dict in relevant_openings:
             o_geom = opening_dict["geometry"]
+            if isinstance(o_geom, str):
+                o_geom = wkt.loads(o_geom)
             opening_dict["topological_anchor"] = o_geom.wkt
             opening_dict["geometry"] = o_geom.wkt
             openings.append(opening_dict)

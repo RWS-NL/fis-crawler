@@ -7,7 +7,13 @@
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+import os
+import logging
+from fis import __version__
+
 BOT_NAME = "fis"
+
+logger = logging.getLogger(__name__)
 
 SPIDER_MODULES = ["fis.spiders"]
 NEWSPIDER_MODULE = "fis.spiders"
@@ -95,8 +101,23 @@ TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
 FIS_EXPORT_DIR = "output/fis-export"
 
-VERSION = "0.2.0"
+# Dataset version used for output paths.
+# Allow override via FIS_VERSION environment variable.
+# Normalize to a "base" version for filesystem paths by stripping any
+# local version segment (e.g. "+g<hash>" from setuptools_scm).
+_raw_version_for_paths = os.environ.get("FIS_VERSION", __version__)
 
+if _raw_version_for_paths == "unknown":
+    # Fail fast in CI/production if version is not set/discoverable
+    if os.environ.get("GITHUB_ACTIONS"):
+        raise RuntimeError(
+            "Package version is 'unknown'. Ensure setuptools_scm can discover version."
+        )
+    else:
+        logger.warning("Package version is 'unknown'. Falling back to '0.0.0'.")
+        _raw_version_for_paths = "0.0.0"
+
+VERSION = _raw_version_for_paths.split("+", 1)[0]
 # --- Graph Integration & Splicing Parameters ---
 
 # Coordinate Reference System for Projected/Metric Operations
