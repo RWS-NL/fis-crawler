@@ -51,6 +51,10 @@ def load_bivas_network(db_path, branch_set_id=337):
     merged = merged.merge(nodes_df, left_on="ToNodeID", right_on="NodeID")
     merged = merged.rename(columns={"XCoordinate": "X_to", "YCoordinate": "Y_to"})
 
+    # Check for empty merged to avoid errors
+    if merged.empty:
+        return nodes_gdf, gpd.GeoDataFrame(columns=arcs_df.columns, geometry=[], crs="EPSG:28992")
+
     lines = []
     for _, row in merged.iterrows():
         p_from = Point(row["X_from"], row["Y_from"])
@@ -157,8 +161,8 @@ def main():
     spatial_joined = gpd.sjoin(
         fis_edges, bivas_arcs_buffered, how="inner", predicate="intersects"
     )
-    spatial_fis_ids = spatial_joined["Id"].unique() if "Id" in spatial_joined.columns else []
-    spatial_bivas_ids = spatial_joined["ID"].unique() if "ID" in spatial_joined.columns else []
+    spatial_fis_ids = set(spatial_joined["Id"].unique()) if "Id" in spatial_joined.columns else set()
+    spatial_bivas_ids = set(spatial_joined["ID"].unique()) if "ID" in spatial_joined.columns else set()
 
     fis_spatial = fis_edges[fis_edges["Id"].isin(spatial_fis_ids)]
     bivas_spatial = bivas_arcs[bivas_arcs["ID"].isin(spatial_bivas_ids)]
@@ -178,8 +182,8 @@ def main():
         right_on="TrajectCode", 
         how="inner"
     )
-    id_fis_ids = id_joined["Id"].unique() if "Id" in id_joined.columns else []
-    id_bivas_ids = id_joined["ID"].unique() if "ID" in id_joined.columns else []
+    id_fis_ids = set(id_joined["Id"].unique()) if "Id" in id_joined.columns else set()
+    id_bivas_ids = set(id_joined["ID"].unique()) if "ID" in id_joined.columns else set()
     
     fis_id = fis_edges[fis_edges["Id"].isin(id_fis_ids)]
     bivas_id = bivas_arcs[bivas_arcs["ID"].isin(id_bivas_ids)]
@@ -200,8 +204,8 @@ def main():
     combined_joined = spatial_joined[
         spatial_joined["VinCode"].astype(str) == spatial_joined["TrajectCode"].astype(str)
     ].copy()
-    combined_fis_ids = combined_joined["Id"].unique() if "Id" in combined_joined.columns else []
-    combined_bivas_ids = combined_joined["ID"].unique() if "ID" in combined_joined.columns else []
+    combined_fis_ids = set(combined_joined["Id"].unique()) if "Id" in combined_joined.columns else set()
+    combined_bivas_ids = set(combined_joined["ID"].unique()) if "ID" in combined_joined.columns else set()
 
     fis_combined = fis_edges[fis_edges["Id"].isin(combined_fis_ids)]
     bivas_combined = bivas_arcs[bivas_arcs["ID"].isin(combined_bivas_ids)]
@@ -211,6 +215,29 @@ def main():
 
     if not fis_combined.empty: fis_combined.to_parquet(get_out_path("fis_matches_combined"))
     if not bivas_combined.empty: bivas_combined.to_parquet(get_out_path("bivas_matches_combined"))
+
+    # -------------------------------------------------------------------------
+    # Mismatch Analysis (Three types)
+    # -------------------------------------------------------------------------
+    # 1. Not matched by Spatial (Mismatches by proximity)
+    fis_no_spatial = fis_edges[~fis_edges["Id"].isin(spatial_fis_ids)]
+    bivas_no_spatial = bivas_arcs[~bivas_arcs["ID"].isin(spatial_bivas_ids)]
+
+    # 2. Not matched by ID (Mismatches by trajectory code)
+    fis_no_id = fis_edges[~fis_edges["Id"].isin(id_fis_ids)]
+    bivas_no_id = bivas_arcs[~bivas_arcs["ID"].isin(id_bivas_ids)]
+
+    # 3. Not matched by BOTH (Complete mismatches)
+    fis_no_both = fis_edges[~(fis_edges["Id"].isin(spatial_fis_ids) | fis_edges["Id"].isin(id_fis_ids))]
+    bivas_no_both = bivas_arcs[~(bivas_arcs["ID"].isin(spatial_bivas_ids) | bivas_arcs["ID"].isin(id_bivas_ids))]
+
+    # Export Mismatch sets
+    if not fis_no_spatial.empty: fis_no_spatial.to_parquet(get_out_path("fis_unmatched_spatial"))
+    if not bivas_no_spatial.empty: bivas_no_spatial.to_parquet(get_out_path("bivas_unmatched_spatial"))
+    if not fis_no_id.empty: fis_no_id.to_parquet(get_out_path("fis_unmatched_id"))
+    if not bivas_no_id.empty: bivas_no_id.to_parquet(get_out_path("bivas_unmatched_id"))
+    if not fis_no_both.empty: fis_no_both.to_parquet(get_out_path("fis_unmatched_both"))
+    if not bivas_no_both.empty: bivas_no_both.to_parquet(get_out_path("bivas_unmatched_both"))
 
     # -------------------------------------------------------------------------
     # Attribute Comparison (using Combined matches for highest accuracy)
@@ -235,12 +262,6 @@ def main():
             depth_bias = comp["depth_diff"].mean()
         else:
             width_mae = depth_mae = width_bias = depth_bias = float("nan")
-
-    # Final unmatched sets (using combined as the default 'matched' set)
-    fis_only = fis_edges[~fis_edges["Id"].isin(combined_fis_ids)]
-    bivas_only = bivas_arcs[~bivas_arcs["ID"].isin(combined_bivas_ids)]
-    if not fis_only.empty: fis_only.to_parquet(get_out_path("fis_unmatched_combined"))
-    if not bivas_only.empty: bivas_only.to_parquet(get_out_path("bivas_unmatched_combined"))
 
     # Save a GeoParquet of attribute deltas for reporting
     if not comp.empty:
@@ -288,7 +309,23 @@ def main():
 | **ID Only (VinCode)** | {len(id_bivas_ids)} | {pct(len(id_bivas_ids), bivas_arc_cnt):.1f}% | {pct(id_bivas_len, bivas_total_len):.1f}% |
 | **Combined (Spatial + ID)** | {len(combined_bivas_ids)} | {pct(len(combined_bivas_ids), bivas_arc_cnt):.1f}% | {pct(combined_bivas_len, bivas_total_len):.1f}% |
 
-## 3. Attribute Accuracy (Combined Matches)
+## 3. Mismatch Analysis (Not Matched)
+
+### FIS Segments Unmatched
+| Category | Count | Count % | Length % |
+| :--- | :---: | :---: | :---: |
+| **Not matched by Spatial** | {len(fis_no_spatial)} | {pct(len(fis_no_spatial), fis_edge_cnt):.1f}% | {pct(fis_no_spatial.geometry.length.sum(), fis_total_len):.1f}% |
+| **Not matched by ID** | {len(fis_no_id)} | {pct(len(fis_no_id), fis_edge_cnt):.1f}% | {pct(fis_no_id.geometry.length.sum(), fis_total_len):.1f}% |
+| **Not matched by BOTH** | {len(fis_no_both)} | {pct(len(fis_no_both), fis_edge_cnt):.1f}% | {pct(fis_no_both.geometry.length.sum(), fis_total_len):.1f}% |
+
+### BIVAS Arcs Unmatched
+| Category | Count | Count % | Length % |
+| :--- | :---: | :---: | :---: |
+| **Not matched by Spatial** | {len(bivas_no_spatial)} | {pct(len(bivas_no_spatial), bivas_arc_cnt):.1f}% | {pct(bivas_no_spatial.geometry.length.sum(), bivas_total_len):.1f}% |
+| **Not matched by ID** | {len(bivas_no_id)} | {pct(len(bivas_no_id), bivas_arc_cnt):.1f}% | {pct(bivas_no_id.geometry.length.sum(), bivas_total_len):.1f}% |
+| **Not matched by BOTH** | {len(bivas_no_both)} | {pct(len(bivas_no_both), bivas_arc_cnt):.1f}% | {pct(bivas_no_both.geometry.length.sum(), bivas_total_len):.1f}% |
+
+## 4. Attribute Accuracy (Combined Matches)
 
 Analysis of physical dimensions for network segments matched by both proximity and trajectory code.
 
@@ -299,7 +336,7 @@ Analysis of physical dimensions for network segments matched by both proximity a
 
 *Note: Comparison performed on {len(comp)} segments.*
 
-## 4. Observations
+## 5. Observations
 - **ID Matching** using `VinCode` (FIS) and `TrajectCode` (BIVAS) provides a robust topological link.
 - **Combined Matching** significantly reduces false positives in dense areas like Meppel or Rotterdam.
 - Discrepancies in **Spatial Only** often occur where fairways run parallel but have different trajectory codes.
