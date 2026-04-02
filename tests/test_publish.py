@@ -65,15 +65,23 @@ class TestPublishZenodo(unittest.TestCase):
     @patch("requests.post")
     @patch("requests.get")
     @patch("requests.put")
+    @patch("requests.delete")
     @patch("fis.publish.cli.logger")
-    def test_publish_zenodo_new_deposition_flow(
-        self, mock_logger, mock_put, mock_get, mock_post
+    def test_publish_zenodo_default_versioning_flow(
+        self, mock_logger, mock_del, mock_put, mock_get, mock_post
     ):
-        # Mock create deposition
+        # Mock new version creation from default ID 19389587
         mock_post.return_value.status_code = 201
         mock_post.return_value.json.return_value = {
+            "links": {"latest_draft": "http://zenodo/depositions/12345"}
+        }
+
+        # Mock GET for the newly created draft
+        mock_get.return_value.status_code = 200
+        mock_get.return_value.json.return_value = {
             "id": 12345,
             "links": {"bucket": "http://zenodo/bucket/12345"},
+            "files": [],
         }
 
         # Mock metadata update
@@ -119,7 +127,9 @@ class TestPublishZenodo(unittest.TestCase):
             # Check that logger was called with expected messages
             logger_calls = [call.args[0] for call in mock_logger.info.call_args_list]
             self.assertTrue(
-                any("Created deposition ID: 12345" in msg for msg in logger_calls)
+                any(
+                    "Created new draft version ID: 12345" in msg for msg in logger_calls
+                )
             )
             self.assertTrue(
                 any("Successfully updated metadata" in msg for msg in logger_calls)
