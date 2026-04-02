@@ -20,27 +20,26 @@ def test_case_7901_30984594():
     }
 
     # Combined route max KM (determined from full data previously)
-    # The diagnostic showed FIS has ~116km, so max is around that.
     route_max = 121.0
-
-    print(f"Testing BIVAS {bivas_data['ID']} vs FIS {fis_data['Id']} (Route 121)")
 
     # 2. Test Normalization
     b_norm = normalize_code(bivas_data["TrajectCode"])
     f_norm = normalize_code(fis_data["route_code"])
-    print(f"Normalized: BIVAS={b_norm}, FIS={f_norm}")
+    assert b_norm == f_norm, (
+        f"Expected normalized codes to match, got BIVAS={b_norm}, FIS={f_norm}"
+    )
 
     # 3. Test KM Overlap with Inversion
     row = {**fis_data, **bivas_data}
     overlap = has_km_overlap(row, route_max_km=route_max)
-    print(f"KM Overlap (with max_km={route_max}): {overlap}")
-
-    # 4. Final check
-    if b_norm == f_norm and overlap:
-        print("SUCCESS: Inverse KM match confirmed.")
-    else:
-        print("FAILURE: Match conditions not met.")
+    assert overlap, (
+        f"Expected KM overlap for inverse-KM case (max_km={route_max}), got overlap={overlap}"
+    )
 
 
 if __name__ == "__main__":
-    test_case_7901_30984594()
+    try:
+        test_case_7901_30984594()
+        print("SUCCESS: Inverse KM match confirmed.")
+    except AssertionError as e:
+        print(f"FAILURE: {e}")

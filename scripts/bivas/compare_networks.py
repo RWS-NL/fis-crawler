@@ -20,7 +20,7 @@ def main():
     )
     parser.add_argument(
         "--bivas-db",
-        default="tests/data/bivas/Bivas.5.10.1.sqlite",
+        default="reference/Bivas.5.10.1.sqlite",
         help="Path to BIVAS SQLite database",
     )
     parser.add_argument(
@@ -66,8 +66,23 @@ def main():
     fis_edges["Id"] = fis_edges["Id"].astype("string")
     bivas_arcs["ID"] = bivas_arcs["ID"].astype("string")
 
+    # Determine FIS match column (prefer route_code if populated, fallback to VinCode)
+    if "route_code" in fis_edges.columns and fis_edges["route_code"].notna().any():
+        fis_match_col = "route_code"
+    elif "VinCode" in fis_edges.columns and fis_edges["VinCode"].notna().any():
+        fis_match_col = "VinCode"
+    elif "vincode" in fis_edges.columns and fis_edges["vincode"].notna().any():
+        fis_match_col = "vincode"
+    else:
+        available = list(fis_edges.columns)
+        logger.error(
+            f"Could not determine FIS match column. Available columns: {available}"
+        )
+        raise ValueError(
+            "FIS edges must contain a non-null 'route_code' or 'VinCode' column."
+        )
+
     # Normalize Codes for robust matching
-    fis_match_col = "route_code" if "route_code" in fis_edges.columns else "vincode"
     fis_edges["match_code_norm"] = (
         fis_edges[fis_match_col].apply(normalize_code).astype("string")
     )
