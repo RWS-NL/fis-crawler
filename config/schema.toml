@@ -73,6 +73,9 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 # MGD Trajectory
 "mgd_FromTo" = "mgd_from_to"
 
+# Route Code (matches BIVAS TrajectCode)
+"route_code" = "route_code"
+
 # Fairway type
 "type_CharacterTypeCode" = "fairway_type"
 

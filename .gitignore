@@ -6,7 +6,7 @@ reference/
 # Ignore export and file storage directories
 /fis-export/
 /euris-export/
-/output/
+# /output/
 /files-store/
 
 

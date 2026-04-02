@@ -37,6 +37,7 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
         "fairwaystatus",
         "mgdtrajectory",
         "fairway",
+        "route",
     ]
 
     # Load required datasets
@@ -320,6 +321,28 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
     else:
         fairway_df = pd.DataFrame(index=sections["Id"], columns=["fairway_number"])
 
+    # Route code (join by RouteId)
+    route = datasets.get("route")
+    if (
+        route is not None
+        and not route.empty
+        and {"Id", "Code"}.issubset(route.columns)
+        and "RouteId" in sections.columns
+    ):
+        route_df = (
+            sections[["Id", "RouteId"]]
+            .merge(
+                route[["Id", "Code"]].rename(
+                    columns={"Id": "RouteId", "Code": "route_code"}
+                ),
+                on="RouteId",
+                how="left",
+            )
+            .set_index("Id")[["route_code"]]
+        )
+    else:
+        route_df = pd.DataFrame(index=sections["Id"], columns=["route_code"])
+
     # Combine all enrichment
     enrichment = pd.concat(
         [
@@ -333,6 +356,7 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
             status_df,
             mgd_df,
             fairway_df,
+            route_df,
         ],
         axis=1,
     )
@@ -367,6 +391,7 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         ("status_", "status"),
         ("mgd_", "MGD"),
         ("fairway_number", "fairway_number"),
+        ("route_code", "route_code"),
     ]:
         cols = [c for c in enrichment.columns if c.startswith(prefix)]
         if cols:
