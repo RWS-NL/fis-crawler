@@ -25,7 +25,7 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
         Dict of dataset name to GeoDataFrame.
     """
     datasets = {}
-    required = ["section"]
+    required = ["section", "routejunction"]
     optional = [
         "maximumdimensions",
         "navigability",
@@ -38,7 +38,6 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
         "mgdtrajectory",
         "fairway",
         "route",
-        "routejunction",
     ]
 
     # Load required datasets
@@ -455,33 +454,33 @@ def enrich_fis_graph(
 
     # 2. Enrich Nodes (Locode / ISRS)
     # We use routejunction to map sectionjunctions to locodes
-    route_junc = datasets.get("routejunction")
+    route_junc = datasets["routejunction"]
     enriched_nodes_count = 0
-    if route_junc is not None and not route_junc.empty:
-        logger.info(
-            "ACTUALLY ENRICHING NODES using routejunction dataset, records: %d",
-            len(route_junc),
-        )
-        # Map section_junction_id -> first locode found
-        # Ensure SectionJunctionId is integer for matching
-        node_locode_map = (
-            route_junc.dropna(subset=["SectionJunctionId", "Code"])
-            .groupby("SectionJunctionId")["Code"]
-            .first()
-            .to_dict()
-        )
 
-        for node_id in graph.nodes():
-            # node_id in graph is the junction Id (int)
-            locode = node_locode_map.get(node_id)
-            if locode:
-                graph.nodes[node_id]["locode"] = locode
-                enriched_nodes_count += 1
+    logger.info(
+        "Enriching nodes using routejunction dataset, records: %d",
+        len(route_junc),
+    )
+    # Map section_junction_id -> first locode found
+    # Ensure SectionJunctionId is integer for matching
+    node_locode_map = (
+        route_junc.dropna(subset=["SectionJunctionId", "Code"])
+        .groupby("SectionJunctionId")["Code"]
+        .first()
+        .to_dict()
+    )
 
-        logger.info(
-            "Enriched %d / %d nodes with locode",
-            enriched_nodes_count,
-            graph.number_of_nodes(),
-        )
+    for node_id in graph.nodes():
+        # node_id in graph is the junction Id (int)
+        locode = node_locode_map.get(node_id)
+        if locode:
+            graph.nodes[node_id]["locode"] = locode
+            enriched_nodes_count += 1
+
+    logger.info(
+        "Enriched %d / %d nodes with locode",
+        enriched_nodes_count,
+        graph.number_of_nodes(),
+    )
 
     return graph
