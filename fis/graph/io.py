@@ -63,6 +63,8 @@ def export_graph(
     edges_parquet = output_dir / "edges.geoparquet"
     edges_geojson = output_dir / "edges.geojson"
     logger.info("Exporting %d edges to %s", len(sections), edges_parquet)
+    if sections.crs is None:
+        sections = sections.set_crs("EPSG:4326")
     sections.to_parquet(edges_parquet)
     sections.to_file(edges_geojson, driver="GeoJSON")
 
@@ -70,6 +72,8 @@ def export_graph(
     nodes_parquet = output_dir / "nodes.geoparquet"
     nodes_geojson = output_dir / "nodes.geojson"
     logger.info("Exporting %d nodes to %s", len(junctions), nodes_parquet)
+    if junctions.crs is None:
+        junctions = junctions.set_crs("EPSG:4326")
     junctions.to_parquet(nodes_parquet)
     junctions.to_file(nodes_geojson, driver="GeoJSON")
 

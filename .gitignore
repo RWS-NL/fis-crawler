@@ -13,6 +13,7 @@ reference/
 # data files
 notebooks/data/*.json
 notebooks/data/*.geojson
+unlo-geocoded-v0.1.gpkg
 *.jsonl
 *.parquet
 *.geoparquet
