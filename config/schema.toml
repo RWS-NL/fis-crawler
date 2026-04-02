@@ -74,12 +74,17 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "mgd_FromTo" = "mgd_from_to"
 
 # Route Code (matches BIVAS TrajectCode)
-"route_code" = "route_code"
+"Code" = "route_code"
+
+# Fairway number
+"FairwayNumber" = "fairway_number"
 
 # Fairway type
 "type_CharacterTypeCode" = "fairway_type"
 
 # Tidal
+"WaterName" = "water_name"
+
 # Routing attributes
 "Id" = "fis_id"
 "GeoType" = "geo_type"
@@ -94,7 +99,6 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "FairwayId" = "fairway_id"
 "RouteId" = "route_id"
 "ForeignCode" = "foreign_code"
-"Geometry" = "geometry"
 
 [attributes.locks]
 # FIS → Canonical mappings

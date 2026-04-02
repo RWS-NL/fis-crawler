@@ -42,15 +42,14 @@ def apply_schema_mapping(graph: nx.Graph, schema: Dict[str, Any]) -> nx.Graph:
     # 1. Harmonize Nodes
     logger.info("Harmonizing node attributes")
     for _, attrs in graph.nodes(data=True):
-        # Rename keys in place
-        # Create list of keys to avoid runtime error during iteration
         keys = list(attrs.keys())
         for k in keys:
             if k in node_map:
                 new_key = node_map[k]
-                # Only rename if new key doesn't exist or we want to overwrite
-                # Schema mapping implies strict rename
-                attrs[new_key] = attrs.pop(k)
+                val = attrs.pop(k)
+                # Ensure we don't accidentally convert objects to strings
+                # if the value is already a geometry object and we are just renaming
+                attrs[new_key] = val
 
     # 2. Harmonize Edges
     logger.info("Harmonizing edge attributes")

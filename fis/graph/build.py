@@ -83,9 +83,6 @@ def build_graph(
         columns={"StartJunctionId": "source", "EndJunctionId": "target"}
     )
 
-    # Convert geometry to WKT for edge attributes (networkx can't serialize shapely)
-    edge_data["geometry_wkt"] = edge_data["geometry"].apply(lambda g: g.wkt)
-
     # Build graph from edge list
     logger.info("Building graph from %d edges", len(edge_data))
     graph = nx.from_pandas_edgelist(
@@ -98,15 +95,7 @@ def build_graph(
 
     for node_id in graph.nodes():
         if node_id in junction_dict:
-            attrs = junction_dict[node_id]
-            # Convert geometry to WKT
-            if "geometry" in attrs:
-                attrs["geometry_wkt"] = attrs["geometry"].wkt
-                attrs["x"] = attrs["geometry"].x
-                attrs["y"] = attrs["geometry"].y
-                del attrs["geometry"]
-            graph.nodes[node_id].update(attrs)
-
+            graph.nodes[node_id].update(junction_dict[node_id])
     # Log graph statistics
     logger.info(
         "Graph built: %d nodes, %d edges, %d connected components",

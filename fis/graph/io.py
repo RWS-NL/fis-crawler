@@ -27,9 +27,31 @@ def load_fis_data(
 
     logger.info("Loading sections from %s", export_dir / "section.geoparquet")
     sections = gpd.read_parquet(export_dir / "section.geoparquet")
+    if "geometry" not in sections.columns and "Geometry" in sections.columns:
+        sections = sections.rename(columns={"Geometry": "geometry"}).set_geometry(
+            "geometry"
+        )
+    elif "geometry" in sections.columns:
+        sections = sections.set_geometry("geometry")
+        if "Geometry" in sections.columns:
+            sections = sections.drop(columns=["Geometry"])
+
+    if sections.crs is None:
+        sections = sections.set_crs("EPSG:4326")
 
     logger.info("Loading junctions from %s", export_dir / "sectionjunction.geoparquet")
     junctions = gpd.read_parquet(export_dir / "sectionjunction.geoparquet")
+    if "geometry" not in junctions.columns and "Geometry" in junctions.columns:
+        junctions = junctions.rename(columns={"Geometry": "geometry"}).set_geometry(
+            "geometry"
+        )
+    elif "geometry" in junctions.columns:
+        junctions = junctions.set_geometry("geometry")
+        if "Geometry" in junctions.columns:
+            junctions = junctions.drop(columns=["Geometry"])
+
+    if junctions.crs is None:
+        junctions = junctions.set_crs("EPSG:4326")
 
     logger.info("Loaded %d sections and %d junctions", len(sections), len(junctions))
 
@@ -63,6 +85,11 @@ def export_graph(
     edges_parquet = output_dir / "edges.geoparquet"
     edges_geojson = output_dir / "edges.geojson"
     logger.info("Exporting %d edges to %s", len(sections), edges_parquet)
+
+    # Ensure standard CRS for export
+    sections = (
+        sections.to_crs("EPSG:4326") if sections.crs else sections.set_crs("EPSG:4326")
+    )
     sections.to_parquet(edges_parquet)
     sections.to_file(edges_geojson, driver="GeoJSON")
 
@@ -70,6 +97,13 @@ def export_graph(
     nodes_parquet = output_dir / "nodes.geoparquet"
     nodes_geojson = output_dir / "nodes.geojson"
     logger.info("Exporting %d nodes to %s", len(junctions), nodes_parquet)
+
+    # Ensure standard CRS for export
+    junctions = (
+        junctions.to_crs("EPSG:4326")
+        if junctions.crs
+        else junctions.set_crs("EPSG:4326")
+    )
     junctions.to_parquet(nodes_parquet)
     junctions.to_file(nodes_geojson, driver="GeoJSON")
 

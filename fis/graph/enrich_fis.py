@@ -15,8 +15,8 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataFrame]:
-    """Load all FIS enrichment datasets.
+def load_fis_node_enrichments(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataFrame]:
+    """Load all FIS enrichment datasets (used for both edges and nodes).
 
     Args:
         export_dir: Path to fis-export directory.
@@ -25,7 +25,7 @@ def load_fis_enrichment_data(export_dir: pathlib.Path) -> dict[str, gpd.GeoDataF
         Dict of dataset name to GeoDataFrame.
     """
     datasets = {}
-    required = ["section"]
+    required = ["section", "routejunction"]
     optional = [
         "maximumdimensions",
         "navigability",
@@ -203,7 +203,7 @@ def match_by_route_km(
     return result_df
 
 
-def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.DataFrame:
+def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.DataFrame:
     """Build enrichment lookup by joining all datasets to sections.
 
     Args:
@@ -310,38 +310,34 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         fairway_df = (
             sections[["Id", "FairwayId"]]
             .merge(
-                fairway[["Id", "FairwayNumber"]].rename(
-                    columns={"Id": "FairwayId", "FairwayNumber": "fairway_number"}
-                ),
+                fairway[["Id", "FairwayNumber"]].rename(columns={"Id": "FairwayId"}),
                 on="FairwayId",
                 how="left",
             )
-            .set_index("Id")[["fairway_number"]]
+            .set_index("Id")[["FairwayNumber"]]
         )
     else:
-        fairway_df = pd.DataFrame(index=sections["Id"], columns=["fairway_number"])
+        fairway_df = pd.DataFrame(index=sections["Id"], columns=["FairwayNumber"])
 
-    # Route code (join by RouteId)
+    # Route code and WaterName (join by RouteId)
     route = datasets.get("route")
     if (
         route is not None
         and not route.empty
-        and {"Id", "Code"}.issubset(route.columns)
+        and {"Id", "Code", "WaterName"}.issubset(route.columns)
         and "RouteId" in sections.columns
     ):
         route_df = (
             sections[["Id", "RouteId"]]
             .merge(
-                route[["Id", "Code"]].rename(
-                    columns={"Id": "RouteId", "Code": "route_code"}
-                ),
+                route[["Id", "Code", "WaterName"]].rename(columns={"Id": "RouteId"}),
                 on="RouteId",
                 how="left",
             )
-            .set_index("Id")[["route_code"]]
+            .set_index("Id")[["Code", "WaterName"]]
         )
     else:
-        route_df = pd.DataFrame(index=sections["Id"], columns=["route_code"])
+        route_df = pd.DataFrame(index=sections["Id"], columns=["Code", "WaterName"])
 
     # Combine all enrichment
     enrichment = pd.concat(
@@ -392,6 +388,7 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
         ("mgd_", "MGD"),
         ("fairway_number", "fairway_number"),
         ("route_code", "route_code"),
+        ("water_name", "water_name"),
     ]:
         cols = [c for c in enrichment.columns if c.startswith(prefix)]
         if cols:
@@ -404,18 +401,21 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
 def enrich_fis_graph(
     graph: nx.Graph,
     sections: gpd.GeoDataFrame,
-    enrichment: pd.DataFrame,
+    edge_enrichments: pd.DataFrame,
+    node_enrichments: Optional[dict[str, gpd.GeoDataFrame]] = None,
 ) -> nx.Graph:
-    """Add enrichment attributes to FIS graph edges.
+    """Add enrichment attributes to FIS graph edges and nodes.
 
     Args:
         graph: FIS networkx graph (nodes are junction IDs).
         sections: Sections GeoDataFrame with junction ID columns.
-        enrichment: DataFrame indexed by section Id with enrichment attrs.
+        edge_enrichments: DataFrame indexed by section Id with enrichment attrs.
+        node_enrichments: Optional dict of all FIS datasets for node enrichment.
 
     Returns:
-        Graph with enriched edge attributes.
+        Graph with enriched attributes.
     """
+    # 1. Enrich Edges
     # Build edge → section mapping
     section_lookup = (
         sections[["Id", "StartJunctionId", "EndJunctionId"]]
@@ -435,15 +435,61 @@ def enrich_fis_graph(
         "Built edge-to-section mapping with %d entries", len(edge_to_section) // 2
     )
 
-    # Apply enrichment
-    enriched_count = 0
+    # Apply edge enrichment
+    enriched_edges_count = 0
     for u, v, data in graph.edges(data=True):
         section_id = edge_to_section.get((u, v))
-        if section_id is not None and section_id in enrichment.index:
-            attrs = enrichment.loc[section_id].dropna().to_dict()
-            data.update(attrs)
-            if attrs:
-                enriched_count += 1
+        if section_id is None or section_id not in edge_enrichments.index:
+            continue
 
-    logger.info("Enriched %d / %d edges", enriched_count, graph.number_of_edges())
+        attrs = edge_enrichments.loc[section_id].dropna().to_dict()
+        data.update(attrs)
+        if attrs:
+            enriched_edges_count += 1
+
+    logger.info("Enriched %d / %d edges", enriched_edges_count, graph.number_of_edges())
+
+    # 2. Enrich Nodes (Locode / ISRS)
+    if node_enrichments is None:
+        return graph
+
+    # We use routejunction to map sectionjunctions to locodes
+    route_junc = node_enrichments.get("routejunction")
+    if route_junc is None:
+        logger.warning(
+            "Node enrichment requested but 'routejunction' dataset is missing; skipping."
+        )
+        return graph
+
+    enriched_nodes_count = 0
+
+    logger.info(
+        "Enriching nodes using routejunction dataset, records: %d",
+        len(route_junc),
+    )
+    # Map section_junction_id -> first locode found
+    # Ensure SectionJunctionId is integer for matching with graph nodes
+    node_locode_map = (
+        route_junc.dropna(subset=["SectionJunctionId", "Code"])
+        .assign(sid=lambda df: df["SectionJunctionId"].astype(int))
+        .groupby("sid")["Code"]
+        .first()
+        .to_dict()
+    )
+
+    for node_id in graph.nodes():
+        # node_id in graph is the junction Id (int)
+        locode = node_locode_map.get(node_id)
+        if not locode:
+            continue
+
+        graph.nodes[node_id]["locode"] = locode
+        enriched_nodes_count += 1
+
+    logger.info(
+        "Enriched %d / %d nodes with locode",
+        enriched_nodes_count,
+        graph.number_of_nodes(),
+    )
+
     return graph

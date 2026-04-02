@@ -9,7 +9,7 @@ from shapely.geometry import LineString
 from fis.graph.enrich import (
     match_by_geometry,
     match_by_route_km,
-    build_fis_section_enrichment,
+    build_fis_edge_enrichments,
     enrich_fis_graph,
 )
 
@@ -251,11 +251,11 @@ class TestMatchByRouteKm:
 
 
 # =============================================================================
-# Tests for build_fis_section_enrichment
+# Tests for build_fis_edge_enrichments
 # =============================================================================
 
 
-class TestBuildSectionEnrichment:
+class TestBuildEdgeEnrichments:
     """Tests for combined enrichment building."""
 
     def test_combines_multiple_sources(
@@ -296,7 +296,7 @@ class TestBuildSectionEnrichment:
             "fairway": sample_fairway,
         }
 
-        result = build_fis_section_enrichment(datasets)
+        result = build_fis_edge_enrichments(datasets)
 
         # Check dimensions (canonical)
         assert "dim_depth" in result.columns
@@ -340,7 +340,7 @@ class TestBuildSectionEnrichment:
         }
 
         # This should not raise KeyError or ValueError
-        result = build_fis_section_enrichment(datasets)
+        result = build_fis_edge_enrichments(datasets)
 
         assert len(result) == len(sample_sections)
         # Check that expected canonical columns are NOT present (as they were never created)
@@ -360,7 +360,7 @@ class TestEnrichFisGraph:
 
     def test_enriches_matching_edges(self, sample_graph, sample_sections):
         """Should add enrichment attributes to graph edges."""
-        enrichment = pd.DataFrame(
+        edge_enrichments = pd.DataFrame(
             {
                 "dim_depth": [3.5, None, 2.0],
                 "cemt_class": ["IV", "III", None],
@@ -368,7 +368,9 @@ class TestEnrichFisGraph:
             index=[1, 2, 3],
         )
 
-        result = enrich_fis_graph(sample_graph, sample_sections, enrichment)
+        result = enrich_fis_graph(
+            sample_graph, sample_sections, edge_enrichments=edge_enrichments
+        )
 
         # Edge 1001-1002 (section 1)
         assert result[1001][1002]["dim_depth"] == 3.5
@@ -382,8 +384,31 @@ class TestEnrichFisGraph:
         G = nx.Graph()
         G.add_edge(9999, 9998)  # Non-existent junction IDs
 
-        enrichment = pd.DataFrame({"cemt_class": ["IV"]}, index=[1])
-        result = enrich_fis_graph(G, sample_sections, enrichment)
+        edge_enrichments = pd.DataFrame({"cemt_class": ["IV"]}, index=[1])
+        result = enrich_fis_graph(G, sample_sections, edge_enrichments=edge_enrichments)
 
         # Should not crash, edge should have no enrichment
         assert "cemt_class" not in result[9999][9998]
+
+    def test_enriches_nodes_with_locode(self, sample_graph, sample_sections):
+        """Should add locode to graph nodes from routejunction data."""
+        node_enrichments = {
+            "routejunction": pd.DataFrame(
+                {
+                    "SectionJunctionId": [1001, 1002],
+                    "Code": ["NLRTM...", "NLAMS..."],
+                }
+            )
+        }
+        edge_enrichments = pd.DataFrame(index=[1, 2, 3])
+
+        result = enrich_fis_graph(
+            sample_graph,
+            sample_sections,
+            edge_enrichments=edge_enrichments,
+            node_enrichments=node_enrichments,
+        )
+
+        assert result.nodes[1001]["locode"] == "NLRTM..."
+        assert result.nodes[1002]["locode"] == "NLAMS..."
+        assert "locode" not in result.nodes[1004]
