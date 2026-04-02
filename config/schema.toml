@@ -80,6 +80,8 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "type_CharacterTypeCode" = "fairway_type"
 
 # Tidal
+"water_name" = "water_name"
+
 # Routing attributes
 "Id" = "fis_id"
 "GeoType" = "geo_type"
@@ -94,7 +96,6 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "FairwayId" = "fairway_id"
 "RouteId" = "route_id"
 "ForeignCode" = "foreign_code"
-"Geometry" = "geometry"
 
 [attributes.locks]
 # FIS → Canonical mappings

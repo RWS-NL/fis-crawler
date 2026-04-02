@@ -305,23 +305,30 @@ def merge(
 
     # Export nodes as geoparquet and geojson
     node_data = []
-    skip_cols = {"euris_nodes"}  # Non-serializable columns to skip
-    # Type cleanup for known columns
+    skip_cols = {
+        "euris_nodes",
+        "geometry_wkt",
+    }  # Skip non-serializable and duplicated cols
     schema = load_schema(pathlib.Path("config/schema.toml"))
     id_cols = schema.get("identifiers", {}).get("columns", [])
 
     for node_id, attrs in merged.nodes(data=True):
         row = {"node_id": node_id}
+
+        # 1. Extract geometry and enforce it is a shapely object
+        geom = attrs.get("geometry")
+        if isinstance(geom, str):
+            raise ValueError(
+                f"Node {node_id} has WKT string geometry. Expected Shapely object."
+            )
+
+        row["geometry"] = geom
+
+        # 2. Extract remaining attributes
         for k, v in attrs.items():
-            if k in skip_cols or isinstance(v, (list, dict)):
+            if k in skip_cols or k == "geometry" or isinstance(v, (list, dict)):
                 continue
-            if hasattr(v, "wkt"):  # Geometry object
-                if k == "geometry":
-                    row["geometry"] = v
-            elif k == "geometry_wkt":
-                row["geometry"] = wkt.loads(v)
-            else:
-                row[k] = v
+            row[k] = v
 
         # Standardize IDs
         for col in id_cols:
@@ -332,16 +339,17 @@ def merge(
 
         # Type cleanup for known columns
         if "vplnpoint" in row and row["vplnpoint"] is not None:
-            # Convert to string to handle mixed types (1.0, 2.0, True) consistently
-            row["vplnpoint"] = str(row["vplnpoint"]).split(".")[0]  # Remove .0 if float
+            row["vplnpoint"] = str(row["vplnpoint"]).split(".")[0]
             if row["vplnpoint"].lower() in ["true", "yes"]:
                 row["vplnpoint"] = "1"
             elif row["vplnpoint"].lower() in ["false", "no"]:
                 row["vplnpoint"] = "0"
 
         node_data.append(row)
+
     if node_data:
-        nodes_gdf = gpd.GeoDataFrame(node_data, crs="EPSG:4326")
+        # Explicitly specify geometry column
+        nodes_gdf = gpd.GeoDataFrame(node_data, geometry="geometry", crs="EPSG:4326")
         nodes_gdf.to_parquet(output_dir / "nodes.geoparquet")
         nodes_gdf.to_file(output_dir / "nodes.geojson", driver="GeoJSON")
         logger.info("Exported %d harmonized nodes", len(nodes_gdf))
@@ -349,11 +357,22 @@ def merge(
     # Export edges as geoparquet and geojson
     edge_data = []
     for u, v, attrs in merged.edges(data=True):
-        row = {"source": u, "target": v, **attrs}
-        if "geometry_wkt" in row:
-            row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
-        elif "geometry" in row and isinstance(row["geometry"], str):
-            row["geometry"] = wkt.loads(row["geometry"])
+        row = {"source": u, "target": v}
+
+        # 1. Extract geometry and enforce it is a shapely object
+        geom = attrs.get("geometry")
+        if isinstance(geom, str):
+            raise ValueError(
+                f"Edge ({u}, {v}) has WKT string geometry. Expected Shapely object."
+            )
+
+        row["geometry"] = geom
+
+        # 2. Extract remaining attributes
+        for k, v in attrs.items():
+            if k in skip_cols or k == "geometry" or isinstance(v, (list, dict)):
+                continue
+            row[k] = v
 
         # Standardize IDs
         for col in id_cols:
@@ -363,8 +382,9 @@ def merge(
                 row[col] = stringify_id(row[col])
 
         edge_data.append(row)
+
     if edge_data:
-        edges_gdf = gpd.GeoDataFrame(edge_data, crs="EPSG:4326")
+        edges_gdf = gpd.GeoDataFrame(edge_data, geometry="geometry", crs="EPSG:4326")
         edges_gdf.to_parquet(output_dir / "edges.geoparquet")
         edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
         logger.info("Exported %d harmonized edges", len(edges_gdf))

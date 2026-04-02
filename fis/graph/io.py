@@ -27,11 +27,25 @@ def load_fis_data(
 
     logger.info("Loading sections from %s", export_dir / "section.geoparquet")
     sections = gpd.read_parquet(export_dir / "section.geoparquet")
+    if "geometry" not in sections.columns and "Geometry" in sections.columns:
+        sections = sections.rename(columns={"Geometry": "geometry"}).set_geometry(
+            "geometry"
+        )
+    elif "geometry" in sections.columns:
+        sections = sections.set_geometry("geometry")
+
     if sections.crs is None:
         sections = sections.set_crs("EPSG:4326")
 
     logger.info("Loading junctions from %s", export_dir / "sectionjunction.geoparquet")
     junctions = gpd.read_parquet(export_dir / "sectionjunction.geoparquet")
+    if "geometry" not in junctions.columns and "Geometry" in junctions.columns:
+        junctions = junctions.rename(columns={"Geometry": "geometry"}).set_geometry(
+            "geometry"
+        )
+    elif "geometry" in junctions.columns:
+        junctions = junctions.set_geometry("geometry")
+
     if junctions.crs is None:
         junctions = junctions.set_crs("EPSG:4326")
 
