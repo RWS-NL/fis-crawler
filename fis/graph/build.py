@@ -99,12 +99,13 @@ def build_graph(
     for node_id in graph.nodes():
         if node_id in junction_dict:
             attrs = junction_dict[node_id]
-            # Convert geometry to WKT
+            # Ensure x, y and WKT are present for serialization fallbacks,
+            # but KEEP the geometry object for easy use in GeoDataFrames.
             if "geometry" in attrs:
-                attrs["geometry_wkt"] = attrs["geometry"].wkt
-                attrs["x"] = attrs["geometry"].x
-                attrs["y"] = attrs["geometry"].y
-                del attrs["geometry"]
+                geom = attrs["geometry"]
+                attrs["geometry_wkt"] = geom.wkt
+                attrs["x"] = geom.x
+                attrs["y"] = geom.y
             graph.nodes[node_id].update(attrs)
 
     # Log graph statistics
