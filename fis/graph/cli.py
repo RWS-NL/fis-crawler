@@ -115,6 +115,7 @@ def enrich_fis(
     # Load base graph
     with open(fis_graph / "graph.pickle", "rb") as f:
         graph = pickle.load(f)
+    junctions = gpd.read_parquet(fis_graph / "nodes.geoparquet")
     logger.info(
         "Loaded graph with %d nodes, %d edges",
         graph.number_of_nodes(),
@@ -124,7 +125,9 @@ def enrich_fis(
     # Load enrichment data and apply
     datasets = load_fis_enrichment_data(fis_export)
     enrichment = build_fis_section_enrichment(datasets)
-    graph = enrich_fis_graph(graph, datasets["section"], enrichment)
+    graph = enrich_fis_graph(
+        graph, datasets["section"], junctions, datasets, enrichment
+    )
 
     # Export
     output_dir = pathlib.Path(output_dir)
