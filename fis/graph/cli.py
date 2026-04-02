@@ -18,8 +18,8 @@ from .integrate import find_geometric_border_connections, merge_graphs
 from .validation import GraphValidator
 from .schema import load_schema, apply_schema_mapping
 from .enrich import (
-    load_fis_enrichment_data,
-    build_fis_section_enrichment,
+    load_fis_node_enrichments,
+    build_fis_edge_enrichments,
     enrich_fis_graph,
     load_euris_sailing_speed,
     enrich_euris_with_speed,
@@ -122,9 +122,14 @@ def enrich_fis(
     )
 
     # Load enrichment data and apply
-    datasets = load_fis_enrichment_data(fis_export)
-    enrichment = build_fis_section_enrichment(datasets)
-    graph = enrich_fis_graph(graph, datasets["section"], enrichment, datasets)
+    datasets = load_fis_node_enrichments(fis_export)
+    enrichment = build_fis_edge_enrichments(datasets)
+    graph = enrich_fis_graph(
+        graph,
+        datasets["section"],
+        edge_enrichments=enrichment,
+        node_enrichments=datasets,
+    )
 
     # Export
     output_dir = pathlib.Path(output_dir)

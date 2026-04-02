@@ -5,10 +5,10 @@ Re-exports enrichment functions from source-specific modules.
 
 # FIS enrichment
 from .enrich_fis import (
-    load_fis_enrichment_data,
+    load_fis_node_enrichments,
     match_by_geometry,
     match_by_route_km,
-    build_fis_section_enrichment,
+    build_fis_edge_enrichments,
     enrich_fis_graph,
 )
 
@@ -20,10 +20,10 @@ from .enrich_euris import (
 
 __all__ = [
     # FIS
-    "load_fis_enrichment_data",
+    "load_fis_node_enrichments",
     "match_by_geometry",
     "match_by_route_km",
-    "build_fis_section_enrichment",
+    "build_fis_edge_enrichments",
     "enrich_fis_graph",
     # EURIS
     "load_euris_sailing_speed",
