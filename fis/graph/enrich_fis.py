@@ -464,7 +464,13 @@ def enrich_fis_graph(
         return graph
 
     # We use routejunction to map sectionjunctions to locodes
-    route_junc = node_enrichments["routejunction"]
+    route_junc = node_enrichments.get("routejunction")
+    if route_junc is None:
+        logger.warning(
+            "Node enrichment requested but 'routejunction' dataset is missing; skipping."
+        )
+        return graph
+
     enriched_nodes_count = 0
 
     logger.info(

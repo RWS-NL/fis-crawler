@@ -63,6 +63,11 @@ class TestUnlocodeLookup(unittest.TestCase):
         zen_point = zenodo_match.geometry.iloc[0]
 
         # Find nearest node in network starting with NLRTM
+        self.assertIn(
+            "locode",
+            self.nodes_gdf.columns,
+            "Merged graph nodes missing 'locode' attribute",
+        )
         node_matches = self.nodes_gdf[
             self.nodes_gdf["locode"].str.startswith(loc, na=False)
         ]

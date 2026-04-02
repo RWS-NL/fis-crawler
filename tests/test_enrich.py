@@ -379,7 +379,7 @@ class TestEnrichFisGraph:
         # Edge 1002-1004 (section 2)
         assert result[1002][1004]["cemt_class"] == "III"
 
-    def test_handles_missing_sections(self, sample_graph, sample_sections):
+    def test_handles_missing_sections(self, sample_sections):
         """Should handle edges not matching any section."""
         G = nx.Graph()
         G.add_edge(9999, 9998)  # Non-existent junction IDs

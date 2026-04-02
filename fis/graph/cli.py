@@ -108,7 +108,7 @@ def euris(euris_export: pathlib.Path, output_dir: pathlib.Path) -> None:
 def enrich_fis(
     fis_graph: pathlib.Path, fis_export: pathlib.Path, output_dir: pathlib.Path
 ) -> None:
-    """Enrich FIS graph with maximumdimensions and navigability (CEMT class)."""
+    """Enrich FIS graph with edge dimensions and node ISRS codes."""
 
     logger.info("Enriching FIS graph")
 
