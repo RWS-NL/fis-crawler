@@ -387,3 +387,23 @@ class TestEnrichFisGraph:
 
         # Should not crash, edge should have no enrichment
         assert "cemt_class" not in result[9999][9998]
+
+    def test_enriches_nodes_with_locode(self, sample_graph, sample_sections):
+        """Should add locode to graph nodes from routejunction data."""
+        datasets = {
+            "routejunction": pd.DataFrame(
+                {
+                    "SectionJunctionId": [1001, 1002],
+                    "Code": ["NLRTM...", "NLAMS..."],
+                }
+            )
+        }
+        enrichment = pd.DataFrame(index=[1, 2, 3])
+
+        result = enrich_fis_graph(
+            sample_graph, sample_sections, enrichment, datasets=datasets
+        )
+
+        assert result.nodes[1001]["locode"] == "NLRTM..."
+        assert result.nodes[1002]["locode"] == "NLAMS..."
+        assert "locode" not in result.nodes[1004]

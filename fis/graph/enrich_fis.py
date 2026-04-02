@@ -404,18 +404,16 @@ def build_fis_section_enrichment(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Da
 def enrich_fis_graph(
     graph: nx.Graph,
     sections: gpd.GeoDataFrame,
-    junctions: gpd.GeoDataFrame,
-    datasets: dict[str, gpd.GeoDataFrame],
     enrichment: pd.DataFrame,
+    datasets: Optional[dict[str, gpd.GeoDataFrame]] = None,
 ) -> nx.Graph:
     """Add enrichment attributes to FIS graph edges and nodes.
 
     Args:
         graph: FIS networkx graph (nodes are junction IDs).
         sections: Sections GeoDataFrame with junction ID columns.
-        junctions: Junctions GeoDataFrame.
-        datasets: Dict of all FIS datasets.
         enrichment: DataFrame indexed by section Id with enrichment attrs.
+        datasets: Optional dict of all FIS datasets for node enrichment.
 
     Returns:
         Graph with enriched attributes.
@@ -453,34 +451,36 @@ def enrich_fis_graph(
     logger.info("Enriched %d / %d edges", enriched_edges_count, graph.number_of_edges())
 
     # 2. Enrich Nodes (Locode / ISRS)
-    # We use routejunction to map sectionjunctions to locodes
-    route_junc = datasets["routejunction"]
-    enriched_nodes_count = 0
+    if datasets is not None:
+        # We use routejunction to map sectionjunctions to locodes
+        route_junc = datasets["routejunction"]
+        enriched_nodes_count = 0
 
-    logger.info(
-        "Enriching nodes using routejunction dataset, records: %d",
-        len(route_junc),
-    )
-    # Map section_junction_id -> first locode found
-    # Ensure SectionJunctionId is integer for matching
-    node_locode_map = (
-        route_junc.dropna(subset=["SectionJunctionId", "Code"])
-        .groupby("SectionJunctionId")["Code"]
-        .first()
-        .to_dict()
-    )
+        logger.info(
+            "Enriching nodes using routejunction dataset, records: %d",
+            len(route_junc),
+        )
+        # Map section_junction_id -> first locode found
+        # Ensure SectionJunctionId is integer for matching with graph nodes
+        node_locode_map = (
+            route_junc.dropna(subset=["SectionJunctionId", "Code"])
+            .assign(sid=lambda df: df["SectionJunctionId"].astype(int))
+            .groupby("sid")["Code"]
+            .first()
+            .to_dict()
+        )
 
-    for node_id in graph.nodes():
-        # node_id in graph is the junction Id (int)
-        locode = node_locode_map.get(node_id)
-        if locode:
-            graph.nodes[node_id]["locode"] = locode
-            enriched_nodes_count += 1
+        for node_id in graph.nodes():
+            # node_id in graph is the junction Id (int)
+            locode = node_locode_map.get(node_id)
+            if locode:
+                graph.nodes[node_id]["locode"] = locode
+                enriched_nodes_count += 1
 
-    logger.info(
-        "Enriched %d / %d nodes with locode",
-        enriched_nodes_count,
-        graph.number_of_nodes(),
-    )
+        logger.info(
+            "Enriched %d / %d nodes with locode",
+            enriched_nodes_count,
+            graph.number_of_nodes(),
+        )
 
     return graph

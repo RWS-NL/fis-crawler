@@ -21,22 +21,22 @@ class TestUnlocodeLookup(unittest.TestCase):
             cls.graph.nodes.values(), index=cls.graph.nodes.keys()
         )
 
-        # Load Zenodo reference data (fetch if not present)
+        # Load Zenodo reference data from local file ONLY (CI robustness)
         cls.zenodo_path = pathlib.Path("reference/unlo-geocoded-v0.1.gpkg")
-        zenodo_url = "https://zenodo.org/records/11191511/files/unlo-geocoded-v0.1.gpkg?download=1"
-
-        if not cls.zenodo_path.exists():
-            try:
-                # We don't want to force a 28MB download during every test run if not present
-                # but for this specific validation we try to read it directly or skip
-                cls.zenodo_gdf = gpd.read_file(zenodo_url)
-            except Exception:
-                cls.zenodo_gdf = None
-        else:
+        if cls.zenodo_path.exists():
             cls.zenodo_gdf = gpd.read_file(cls.zenodo_path)
+        else:
+            cls.zenodo_gdf = None
 
     def test_top_unlocodes_in_network(self):
         """Verify that top Dutch UN/LOCODEs map to nodes in the network."""
+        # Fail-fast: ensure 'locode' column exists
+        self.assertIn(
+            "locode",
+            self.nodes_gdf.columns,
+            "Merged graph nodes missing 'locode' attribute",
+        )
+
         top_unlocodes = ["NLAMS", "NLRTM", "NLDOR", "NLUTC"]
 
         for loc in top_unlocodes:
@@ -49,9 +49,7 @@ class TestUnlocodeLookup(unittest.TestCase):
     def test_zenodo_proximity(self):
         """Verify that network nodes for a UN/LOCODE are near the Zenodo geocoded point."""
         if self.zenodo_gdf is None:
-            self.skipTest(
-                "Zenodo reference data not available (URL inaccessible or file missing)."
-            )
+            self.skipTest("Zenodo reference data file not available locally.")
 
         # Example: Rotterdam (NLRTM)
         loc = "NLRTM"
@@ -59,21 +57,34 @@ class TestUnlocodeLookup(unittest.TestCase):
             (self.zenodo_gdf["country_code"] == "NL")
             & (self.zenodo_gdf["location_code"] == "RTM")
         ]
-        self.assertFalse(zenodo_match.empty)
+        self.assertFalse(
+            zenodo_match.empty, f"{loc} not found in Zenodo reference data"
+        )
         zen_point = zenodo_match.geometry.iloc[0]
 
         # Find nearest node in network starting with NLRTM
         node_matches = self.nodes_gdf[
             self.nodes_gdf["locode"].str.startswith(loc, na=False)
         ]
+        self.assertFalse(node_matches.empty, f"No nodes found in network for {loc}")
 
         geod = Geod(ellps="WGS84")
-        min_dist = float("inf")
+        distances = []
 
         for _, node in node_matches.iterrows():
-            if "x" in node and "y" in node:
+            if (
+                "x" in node
+                and "y" in node
+                and node["x"] is not None
+                and node["y"] is not None
+            ):
                 _, _, dist = geod.inv(zen_point.x, zen_point.y, node["x"], node["y"])
-                min_dist = min(min_dist, dist)
+                distances.append(dist)
+
+        self.assertTrue(
+            len(distances) > 0, f"No network nodes for {loc} have valid x/y coordinates"
+        )
+        min_dist = min(distances)
 
         # Distance should be reasonably small (e.g. within 10km for a large port area)
         self.assertLess(
