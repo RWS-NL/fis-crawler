@@ -310,16 +310,14 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
         fairway_df = (
             sections[["Id", "FairwayId"]]
             .merge(
-                fairway[["Id", "FairwayNumber"]].rename(
-                    columns={"Id": "FairwayId", "FairwayNumber": "fairway_number"}
-                ),
+                fairway[["Id", "FairwayNumber"]].rename(columns={"Id": "FairwayId"}),
                 on="FairwayId",
                 how="left",
             )
-            .set_index("Id")[["fairway_number"]]
+            .set_index("Id")[["FairwayNumber"]]
         )
     else:
-        fairway_df = pd.DataFrame(index=sections["Id"], columns=["fairway_number"])
+        fairway_df = pd.DataFrame(index=sections["Id"], columns=["FairwayNumber"])
 
     # Route code and WaterName (join by RouteId)
     route = datasets.get("route")
@@ -332,22 +330,14 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
         route_df = (
             sections[["Id", "RouteId"]]
             .merge(
-                route[["Id", "Code", "WaterName"]].rename(
-                    columns={
-                        "Id": "RouteId",
-                        "Code": "route_code",
-                        "WaterName": "water_name",
-                    }
-                ),
+                route[["Id", "Code", "WaterName"]].rename(columns={"Id": "RouteId"}),
                 on="RouteId",
                 how="left",
             )
-            .set_index("Id")[["route_code", "water_name"]]
+            .set_index("Id")[["Code", "WaterName"]]
         )
     else:
-        route_df = pd.DataFrame(
-            index=sections["Id"], columns=["route_code", "water_name"]
-        )
+        route_df = pd.DataFrame(index=sections["Id"], columns=["Code", "WaterName"])
 
     # Combine all enrichment
     enrichment = pd.concat(
