@@ -442,45 +442,51 @@ def enrich_fis_graph(
     enriched_edges_count = 0
     for u, v, data in graph.edges(data=True):
         section_id = edge_to_section.get((u, v))
-        if section_id is not None and section_id in edge_enrichments.index:
-            attrs = edge_enrichments.loc[section_id].dropna().to_dict()
-            data.update(attrs)
-            if attrs:
-                enriched_edges_count += 1
+        if section_id is None or section_id not in edge_enrichments.index:
+            continue
+
+        attrs = edge_enrichments.loc[section_id].dropna().to_dict()
+        data.update(attrs)
+        if attrs:
+            enriched_edges_count += 1
 
     logger.info("Enriched %d / %d edges", enriched_edges_count, graph.number_of_edges())
 
     # 2. Enrich Nodes (Locode / ISRS)
-    if node_enrichments is not None:
-        # We use routejunction to map sectionjunctions to locodes
-        route_junc = node_enrichments["routejunction"]
-        enriched_nodes_count = 0
+    if node_enrichments is None:
+        return graph
 
-        logger.info(
-            "Enriching nodes using routejunction dataset, records: %d",
-            len(route_junc),
-        )
-        # Map section_junction_id -> first locode found
-        # Ensure SectionJunctionId is integer for matching with graph nodes
-        node_locode_map = (
-            route_junc.dropna(subset=["SectionJunctionId", "Code"])
-            .assign(sid=lambda df: df["SectionJunctionId"].astype(int))
-            .groupby("sid")["Code"]
-            .first()
-            .to_dict()
-        )
+    # We use routejunction to map sectionjunctions to locodes
+    route_junc = node_enrichments["routejunction"]
+    enriched_nodes_count = 0
 
-        for node_id in graph.nodes():
-            # node_id in graph is the junction Id (int)
-            locode = node_locode_map.get(node_id)
-            if locode:
-                graph.nodes[node_id]["locode"] = locode
-                enriched_nodes_count += 1
+    logger.info(
+        "Enriching nodes using routejunction dataset, records: %d",
+        len(route_junc),
+    )
+    # Map section_junction_id -> first locode found
+    # Ensure SectionJunctionId is integer for matching with graph nodes
+    node_locode_map = (
+        route_junc.dropna(subset=["SectionJunctionId", "Code"])
+        .assign(sid=lambda df: df["SectionJunctionId"].astype(int))
+        .groupby("sid")["Code"]
+        .first()
+        .to_dict()
+    )
 
-        logger.info(
-            "Enriched %d / %d nodes with locode",
-            enriched_nodes_count,
-            graph.number_of_nodes(),
-        )
+    for node_id in graph.nodes():
+        # node_id in graph is the junction Id (int)
+        locode = node_locode_map.get(node_id)
+        if not locode:
+            continue
+
+        graph.nodes[node_id]["locode"] = locode
+        enriched_nodes_count += 1
+
+    logger.info(
+        "Enriched %d / %d nodes with locode",
+        enriched_nodes_count,
+        graph.number_of_nodes(),
+    )
 
     return graph
