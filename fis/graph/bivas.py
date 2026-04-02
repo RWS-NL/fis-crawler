@@ -37,6 +37,15 @@ def load_bivas_network(db_path, branch_set_id=337):
             params=(branch_set_id,),
         )
 
+        # Ensure we always return properly-formed nodes_gdf even if arcs are missing
+        nodes_gdf = gpd.GeoDataFrame(
+            nodes_df,
+            geometry=[
+                Point(x, y) for x, y in zip(nodes_df.XCoordinate, nodes_df.YCoordinate)
+            ],
+            crs="EPSG:28992",
+        )
+
         # Merge geometries
         merged = arcs_df.merge(nodes_df, left_on="FromNodeID", right_on="NodeID")
         merged = merged.rename(
@@ -46,9 +55,10 @@ def load_bivas_network(db_path, branch_set_id=337):
         merged = merged.rename(columns={"XCoordinate": "X_to", "YCoordinate": "Y_to"})
 
         if merged.empty:
-            return gpd.GeoDataFrame(), gpd.GeoDataFrame(
+            arcs_gdf = gpd.GeoDataFrame(
                 columns=arcs_df.columns, geometry=[], crs="EPSG:28992"
             )
+            return nodes_gdf, arcs_gdf
 
         lines = [
             LineString(
@@ -58,13 +68,6 @@ def load_bivas_network(db_path, branch_set_id=337):
         ]
         arcs_gdf = gpd.GeoDataFrame(arcs_df, geometry=lines, crs="EPSG:28992")
 
-        nodes_gdf = gpd.GeoDataFrame(
-            nodes_df,
-            geometry=[
-                Point(x, y) for x, y in zip(nodes_df.XCoordinate, nodes_df.YCoordinate)
-            ],
-            crs="EPSG:28992",
-        )
         return nodes_gdf, arcs_gdf
     finally:
         conn.close()
