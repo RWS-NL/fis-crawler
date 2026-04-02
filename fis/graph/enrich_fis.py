@@ -321,27 +321,33 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
     else:
         fairway_df = pd.DataFrame(index=sections["Id"], columns=["fairway_number"])
 
-    # Route code (join by RouteId)
+    # Route code and WaterName (join by RouteId)
     route = datasets.get("route")
     if (
         route is not None
         and not route.empty
-        and {"Id", "Code"}.issubset(route.columns)
+        and {"Id", "Code", "WaterName"}.issubset(route.columns)
         and "RouteId" in sections.columns
     ):
         route_df = (
             sections[["Id", "RouteId"]]
             .merge(
-                route[["Id", "Code"]].rename(
-                    columns={"Id": "RouteId", "Code": "route_code"}
+                route[["Id", "Code", "WaterName"]].rename(
+                    columns={
+                        "Id": "RouteId",
+                        "Code": "route_code",
+                        "WaterName": "water_name",
+                    }
                 ),
                 on="RouteId",
                 how="left",
             )
-            .set_index("Id")[["route_code"]]
+            .set_index("Id")[["route_code", "water_name"]]
         )
     else:
-        route_df = pd.DataFrame(index=sections["Id"], columns=["route_code"])
+        route_df = pd.DataFrame(
+            index=sections["Id"], columns=["route_code", "water_name"]
+        )
 
     # Combine all enrichment
     enrichment = pd.concat(
@@ -392,6 +398,7 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
         ("mgd_", "MGD"),
         ("fairway_number", "fairway_number"),
         ("route_code", "route_code"),
+        ("water_name", "water_name"),
     ]:
         cols = [c for c in enrichment.columns if c.startswith(prefix)]
         if cols:
