@@ -77,17 +77,13 @@ class TestUnlocodeLookup(unittest.TestCase):
         distances = []
 
         for _, node in node_matches.iterrows():
-            if (
-                "x" in node
-                and "y" in node
-                and node["x"] is not None
-                and node["y"] is not None
-            ):
-                _, _, dist = geod.inv(zen_point.x, zen_point.y, node["x"], node["y"])
+            geom = node.get("geometry")
+            if geom and not geom.is_empty:
+                _, _, dist = geod.inv(zen_point.x, zen_point.y, geom.x, geom.y)
                 distances.append(dist)
 
         self.assertTrue(
-            len(distances) > 0, f"No network nodes for {loc} have valid x/y coordinates"
+            len(distances) > 0, f"No network nodes for {loc} have valid geometries"
         )
         min_dist = min(distances)
 

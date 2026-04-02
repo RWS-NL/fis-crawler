@@ -33,6 +33,8 @@ def load_fis_data(
         )
     elif "geometry" in sections.columns:
         sections = sections.set_geometry("geometry")
+        if "Geometry" in sections.columns:
+            sections = sections.drop(columns=["Geometry"])
 
     if sections.crs is None:
         sections = sections.set_crs("EPSG:4326")
@@ -45,6 +47,8 @@ def load_fis_data(
         )
     elif "geometry" in junctions.columns:
         junctions = junctions.set_geometry("geometry")
+        if "Geometry" in junctions.columns:
+            junctions = junctions.drop(columns=["Geometry"])
 
     if junctions.crs is None:
         junctions = junctions.set_crs("EPSG:4326")

@@ -120,7 +120,7 @@ class TestPublishZenodo(unittest.TestCase):
             result = self.runner.invoke(
                 publish_cli,
                 ["zenodo", "--output-dir", "output"],
-                env={"ZENODO_KEY": "test-token"},
+                env={"ZENODO_KEY": "test-token", "ZENODO_BASE_ID": "19389587"},
             )
 
             self.assertEqual(result.exit_code, 0)
@@ -128,9 +128,16 @@ class TestPublishZenodo(unittest.TestCase):
             logger_calls = [call.args[0] for call in mock_logger.info.call_args_list]
             self.assertTrue(
                 any(
+                    "Using default Zenodo base record ID: 19389587" in msg
+                    for msg in logger_calls
+                )
+            )
+            self.assertTrue(
+                any(
                     "Created new draft version ID: 12345" in msg for msg in logger_calls
                 )
             )
+
             self.assertTrue(
                 any("Successfully updated metadata" in msg for msg in logger_calls)
             )

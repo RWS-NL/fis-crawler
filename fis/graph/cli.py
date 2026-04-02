@@ -308,6 +308,7 @@ def merge(
     skip_cols = {
         "euris_nodes",
         "geometry_wkt",
+        "Geometry",
     }  # Skip non-serializable and duplicated cols
     schema = load_schema(pathlib.Path("config/schema.toml"))
     id_cols = schema.get("identifiers", {}).get("columns", [])

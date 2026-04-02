@@ -52,7 +52,7 @@ def _md_to_html(md_text: str) -> str:
     "--base-id",
     default=None,
     callback=_validate_mutually_exclusive_ids,
-    help="Base deposition ID to create a new version from. Defaults to 19389587 if no draft-id is provided.",
+    help="Base deposition ID to create a new version from. Can be set via ZENODO_BASE_ID environment variable.",
 )
 @click.option(
     "--draft-id",
@@ -96,8 +96,9 @@ def publish_zenodo(
 
     # Apply default main record ID if nothing else provided
     if not base_id and not draft_id:
-        base_id = "19389587"
-        logger.info(f"Using default main Zenodo record ID: {base_id}")
+        base_id = os.environ.get("ZENODO_BASE_ID")
+        if base_id:
+            logger.info(f"Using default Zenodo base record ID: {base_id}")
 
     # Load description from Markdown file
     desc_path = pathlib.Path("docs/ZENODO_DESCRIPTION.md")
