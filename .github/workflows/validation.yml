@@ -14,7 +14,7 @@ on:
       base_id:
         description: 'Base Zenodo deposition ID (for new versions)'
         required: false
-        default: '19371716'
+        default: '19389587'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -622,5 +622,5 @@ jobs:
           uv run python -m fis.cli publish zenodo $BASE_ID_ARG --publish
         env:
           ZENODO_KEY: ${{ secrets.ZENODO_KEY }}
-          ZENODO_BASE_ID: ${{ github.event.inputs.base_id || vars.ZENODO_BASE_ID }}
+          ZENODO_BASE_ID: ${{ github.event.inputs.base_id || vars.ZENODO_BASE_ID || '19389587' }}
 
