@@ -4,13 +4,13 @@ import networkx as nx
 import pytest
 
 pytestmark = pytest.mark.skipif(
-    not Path("output/dropins-schematization/edges.geoparquet").exists(),
+    not Path("output/dropins-fis-detailed/edges.geoparquet").exists(),
     reason="Required test data not generated in output/dropins-schematization/",
 )
 
 
 def load_graph():
-    edges = gpd.read_parquet("output/dropins-schematization/edges.geoparquet")
+    edges = gpd.read_parquet("output/dropins-fis-detailed/edges.geoparquet")
     G = nx.DiGraph()
     for _, edge in edges.iterrows():
         if edge.source_node is not None and edge.target_node is not None:
@@ -157,3 +157,120 @@ def test_scenario_4_krammersluizen():
         assert nx.has_path(G, op_end, ch_start), (
             f"Chamber {ch_id} should be after opening {op_id}"
         )
+
+
+@pytest.mark.xfail(reason="Issue #143: Incorrect topology for Sluis Weurt")
+def test_scenario_5_weurt_lock():
+    """
+    Scenario 5: Sluis Weurt (Lock 49032).
+    Expected topological order of nodes:
+    8864666 -> lock_49032_split -> chamber_47538_start -> 8864190 ->
+    opening_5835_start -> opening_5835_end -> chamber_47538_end ->
+    lock_49032_merge -> 8865102
+    """
+    G = load_graph()
+
+    required_nodes = [
+        "8864666",
+        "lock_49032_split",
+        "chamber_47538_start",
+        "8864190",
+        "opening_5835_start",
+        "opening_5835_end",
+        "chamber_47538_end",
+        "lock_49032_merge",
+        "8865102",
+    ]
+
+    missing_nodes = [node for node in required_nodes if node not in G]
+    if missing_nodes:
+        pytest.skip(f"Missing expected nodes for Weurt lock in graph: {missing_nodes}")
+
+    # Check the ordered path sequence
+    for i in range(len(required_nodes) - 1):
+        source = required_nodes[i]
+        target = required_nodes[i + 1]
+        assert nx.has_path(G, source, target), f"No path from {source} to {target}"
+
+
+@pytest.mark.xfail(reason="Issue #143: Incorrect topology for Oranjesluizen")
+def test_scenario_6_oranjesluizen():
+    """
+    Scenario 6: Oranjesluizen (Complex 50750 / 59464015).
+    Bridge should be outside lock chambers.
+    Junction 30985116 -> node 59275858 (splits two locks).
+    Left branch: chamber_11446.
+    Right branch: 8861427 -> lock_50750_split -> chambers 3127, 55419, 21002 -> lock_50750_merge -> 59274799
+    Merge back at 8864384.
+    """
+    G = load_graph()
+
+    junction_start = "30985116"
+    split_node = "59275858"
+    merge_node = "8864384"
+
+    # Left branch nodes
+    left_nodes = ["59275918", "chamber_11446_start", "chamber_11446_end", "59275369"]
+
+    # Right branch nodes
+    right_nodes_pre = ["8861427", "lock_50750_split"]
+    right_chambers = [
+        ("chamber_3127_start", "chamber_3127_end"),
+        ("chamber_55419_start", "chamber_55419_end"),
+        ("chamber_21002_start", "chamber_21002_end"),
+    ]
+    right_nodes_post = ["lock_50750_merge", "59274799"]
+
+    # Quick check if main graph features exist
+    if junction_start not in G or split_node not in G or merge_node not in G:
+        pytest.skip("Oranjesluizen baseline nodes missing from graph.")
+
+    # 1. Start junction to split
+    assert nx.has_path(G, junction_start, split_node), (
+        "No path from junction to split node"
+    )
+
+    # 2. Left branch topology
+    prev_node = split_node
+    for node in left_nodes:
+        assert node in G, f"Left branch node missing: {node}"
+        assert nx.has_path(G, prev_node, node), (
+            f"Left branch: no path {prev_node} -> {node}"
+        )
+        prev_node = node
+    assert nx.has_path(G, prev_node, merge_node), (
+        f"Left branch: no path {prev_node} -> merge {merge_node}"
+    )
+
+    # 3. Right branch topology
+    prev_node = split_node
+    for node in right_nodes_pre:
+        assert node in G, f"Right branch pre-node missing: {node}"
+        assert nx.has_path(G, prev_node, node), (
+            f"Right branch: no path {prev_node} -> {node}"
+        )
+        prev_node = node
+
+    for start_c, end_c in right_chambers:
+        assert start_c in G and end_c in G, f"Chamber nodes missing: {start_c}, {end_c}"
+        assert nx.has_path(G, prev_node, start_c), (
+            f"Right branch: no path {prev_node} -> {start_c}"
+        )
+        assert nx.has_path(G, start_c, end_c), (
+            f"Right branch: no path {start_c} -> {end_c}"
+        )
+        assert nx.has_path(G, end_c, right_nodes_post[0]), (
+            f"Right branch: no path {end_c} -> {right_nodes_post[0]}"
+        )
+
+    prev_node = right_nodes_post[0]
+    for node in right_nodes_post[1:]:
+        assert node in G, f"Right branch post-node missing: {node}"
+        assert nx.has_path(G, prev_node, node), (
+            f"Right branch: no path {prev_node} -> {node}"
+        )
+        prev_node = node
+
+    assert nx.has_path(G, prev_node, merge_node), (
+        f"Right branch: no path {prev_node} -> merge {merge_node}"
+    )
