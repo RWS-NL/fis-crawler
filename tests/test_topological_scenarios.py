@@ -3,14 +3,22 @@ import geopandas as gpd
 import networkx as nx
 import pytest
 
+_KNOWN_OUTPUT_PATHS = [
+    Path("output/dropins-fis-detailed/edges.geoparquet"),
+    Path("output/dropins-schematization/edges.geoparquet"),
+]
+_EDGES_PATH = next(
+    (p for p in _KNOWN_OUTPUT_PATHS if p.exists()), _KNOWN_OUTPUT_PATHS[0]
+)
+
 pytestmark = pytest.mark.skipif(
-    not Path("output/dropins-fis-detailed/edges.geoparquet").exists(),
-    reason="Required test data not generated in output/dropins-schematization/",
+    not _EDGES_PATH.exists(),
+    reason=f"Required test data not generated in any of: {[str(p.parent) for p in _KNOWN_OUTPUT_PATHS]}",
 )
 
 
 def load_graph():
-    edges = gpd.read_parquet("output/dropins-fis-detailed/edges.geoparquet")
+    edges = gpd.read_parquet(_EDGES_PATH)
     G = nx.DiGraph()
     for _, edge in edges.iterrows():
         if edge.source_node is not None and edge.target_node is not None:
@@ -159,7 +167,7 @@ def test_scenario_4_krammersluizen():
         )
 
 
-@pytest.mark.xfail(reason="Issue #143: Incorrect topology for Sluis Weurt")
+@pytest.mark.xfail(reason="Issue #143: Incorrect topology for Sluis Weurt", strict=True)
 def test_scenario_5_weurt_lock():
     """
     Scenario 5: Sluis Weurt (Lock 49032).
@@ -193,7 +201,9 @@ def test_scenario_5_weurt_lock():
         assert nx.has_path(G, source, target), f"No path from {source} to {target}"
 
 
-@pytest.mark.xfail(reason="Issue #143: Incorrect topology for Oranjesluizen")
+@pytest.mark.xfail(
+    reason="Issue #143: Incorrect topology for Oranjesluizen", strict=True
+)
 def test_scenario_6_oranjesluizen():
     """
     Scenario 6: Oranjesluizen (Complex 50750 / 59464015).
