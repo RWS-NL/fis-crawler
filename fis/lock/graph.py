@@ -269,43 +269,53 @@ def _process_fairway_connections(
 
     # Process split points
     split_points = c.get("split_points", {})
+    split_nodes_assigned = c.get("split_nodes", {})
     for sec_id, wkt_str in split_points.items():
         if wkt_str:
             geom = wkt.loads(wkt_str)
-            split_node_id = f"lock_{lock_id}_{sec_id}_split"
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(geom),
-                    "properties": {
-                        "id": split_node_id,
-                        "feature_type": "node",
-                        "node_type": "lock_split",
-                        "node_id": split_node_id,
-                        "lock_id": c["id"],
-                    },
-                }
+            split_node_id = split_nodes_assigned.get(
+                sec_id, f"lock_{lock_id}_{sec_id}_split"
             )
+            # Only create a node feature if it's not a pre-existing junction
+            # Junction nodes are created separately via _yield_junction_nodes
+            if not split_node_id.isdigit() and "junction" not in split_node_id:
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(geom),
+                        "properties": {
+                            "id": split_node_id,
+                            "feature_type": "node",
+                            "node_type": "lock_split",
+                            "node_id": split_node_id,
+                            "lock_id": c["id"],
+                        },
+                    }
+                )
 
     # Process merge points
     merge_points = c.get("merge_points", {})
+    merge_nodes_assigned = c.get("merge_nodes", {})
     for sec_id, wkt_str in merge_points.items():
         if wkt_str:
             geom = wkt.loads(wkt_str)
-            merge_node_id = f"lock_{lock_id}_{sec_id}_merge"
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(geom),
-                    "properties": {
-                        "id": merge_node_id,
-                        "feature_type": "node",
-                        "node_type": "lock_merge",
-                        "node_id": merge_node_id,
-                        "lock_id": c["id"],
-                    },
-                }
+            merge_node_id = merge_nodes_assigned.get(
+                sec_id, f"lock_{lock_id}_{sec_id}_merge"
             )
+            if not merge_node_id.isdigit() and "junction" not in merge_node_id:
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(geom),
+                        "properties": {
+                            "id": merge_node_id,
+                            "feature_type": "node",
+                            "node_type": "lock_merge",
+                            "node_id": merge_node_id,
+                            "lock_id": c["id"],
+                        },
+                    }
+                )
 
     # Fallback to single split/merge if split_points/merge_points not populated (e.g. not via splicing)
     if not split_points and c.get("geometry_before_wkt"):
@@ -567,6 +577,10 @@ def _find_best_section_id(line, sections, context=""):
             if dist < min_dist:
                 min_dist = dist
                 best_sid = sid
+            elif abs(dist - min_dist) < 1e-3:
+                # If distances are equal, pick the one that touches the line endpoints
+                if line.intersects(s_geom):
+                    best_sid = sid
 
     # 4. Final fallback to the first valid section
     if best_sid is None:
@@ -642,7 +656,9 @@ def _build_chamber_route_features(
     split_node_id = f"lock_{lock_id}_split"
     split_point = global_split_point
     if best_sec_app and "split_points" in c and best_sec_app in c["split_points"]:
-        split_node_id = f"lock_{lock_id}_{best_sec_app}_split"
+        split_node_id = c.get("split_nodes", {}).get(
+            best_sec_app, f"lock_{lock_id}_{best_sec_app}_split"
+        )
         split_point = wkt.loads(c["split_points"][best_sec_app])
 
     approach_line = LineString([split_point, door_start])
@@ -664,9 +680,10 @@ def _build_chamber_route_features(
     merge_node_id = f"lock_{lock_id}_merge"
     merge_point = global_merge_point
     if best_sec_exit and "merge_points" in c and best_sec_exit in c["merge_points"]:
-        merge_node_id = f"lock_{lock_id}_{best_sec_exit}_merge"
+        merge_node_id = c.get("merge_nodes", {}).get(
+            best_sec_exit, f"lock_{lock_id}_{best_sec_exit}_merge"
+        )
         merge_point = wkt.loads(c["merge_points"][best_sec_exit])
-
     exit_line = LineString([door_end, merge_point])
 
     # Chamber (Start -> End)

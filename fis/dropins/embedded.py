@@ -33,7 +33,16 @@ def identify_embedded_structures(
     # Use spatial index for optimization
     for _, op_row in openings_rd.iterrows():
         op_id = str(op_row["id"])
-        op_name = str(op_row.get("name", op_row.get("Name", ""))).lower()
+
+        # We need the opening's parent bridge to check section/fairway IDs
+        b_id = str(op_row.get("bridge_id", ""))
+        bridge_section_id = ""
+        bridge_fairway_id = ""
+        for b in bridge_complexes:
+            if str(b.get("id")) == b_id:
+                bridge_section_id = str(b.get("section_id", ""))
+                bridge_fairway_id = str(b.get("fairway_id", ""))
+                break
 
         # Buffer the opening to find nearby chambers
         buffer_geom = op_row.geometry.buffer(settings.EMBEDDED_STRUCTURE_MAX_DIST_M)
@@ -44,52 +53,52 @@ def identify_embedded_structures(
 
         for _, ch_row in nearby_chambers.iterrows():
             ch_id = str(ch_row["id"])
-            ch_name = str(ch_row.get("name", ch_row.get("Name", ""))).lower()
             dist = op_row.geometry.distance(ch_row.geometry)
-            if dist > settings.EMBEDDED_STRUCTURE_MAX_DIST_M:
-                continue
-            score = _calculate_semantic_spatial_score(op_name, ch_name, dist)
-            if score > 1.0:
-                all_candidates.append((score, dist, op_id, ch_id, ch_row))
 
-    all_candidates.sort(key=lambda x: (-x[0], x[1]))
+            # Check for intersection or strict topology-aware proximity
+            is_embedded = False
+            if dist < 1.0:  # Basically intersecting or touching
+                is_embedded = True
+            elif dist < 100.0:
+                # If not intersecting, they must be reasonably close AND share the same fairway or section
+                ch_lock_id = str(ch_row.get("lock_id", ""))
+
+                # A lock complex can span multiple sections. Check all of them.
+                lock_sections = set()
+                lock_fairways = set()
+                for c in lock_complexes:
+                    # Check if this complex contains the lock for this chamber
+                    if any(
+                        str(lk.get("id")) == ch_lock_id for lk in c.get("locks", [])
+                    ):
+                        for s in c.get("sections", []):
+                            lock_sections.add(str(s.get("id", "")))
+                            lock_fairways.add(str(s.get("fairway_id", "")))
+                        # Also check the complex-level fields
+                        lock_sections.add(str(c.get("section_id", "")))
+                        lock_fairways.add(str(c.get("fairway_id", "")))
+                        break
+
+                if (bridge_section_id and bridge_section_id in lock_sections) or (
+                    bridge_fairway_id and bridge_fairway_id in lock_fairways
+                ):
+                    is_embedded = True
+
+            if is_embedded:
+                all_candidates.append((dist, op_id, ch_id, ch_row))
+
+    # Sort purely by distance (closest first)
+    all_candidates.sort(key=lambda x: x[0])
 
     matches = {}
     matched_chs = set()
 
-    for score, dist, op_id, ch_id, ch_row in all_candidates:
+    for dist, op_id, ch_id, ch_row in all_candidates:
         if op_id not in matches and ch_id not in matched_chs:
             matches[op_id] = {"ch_id": ch_id, "ch_row": ch_row}
             matched_chs.add(ch_id)
 
     return matches
-
-
-def _calculate_semantic_spatial_score(op_name: str, ch_name: str, dist: float) -> float:
-    score = 0.0
-    if op_name and ch_name:
-        keywords = [
-            "oost",
-            "west",
-            "midden",
-            "zuid",
-            "noord",
-            "klein",
-            "groot",
-            "boven",
-            "beneden",
-            "hoofd",
-            "jacht",
-            "spui",
-        ]
-        for kw in keywords:
-            if kw in op_name and kw in ch_name:
-                score += 10.0
-        if op_name in ch_name or ch_name in op_name:
-            score += 5.0
-    dist_score = max(0.0, 5.0 - (dist / 100.0))
-    score += dist_score
-    return score
 
 
 def inject_embedded_bridges(
@@ -133,9 +142,12 @@ def inject_embedded_bridges(
         )
 
         if not best_edge:
-            raise ValueError(
-                f"Could not find a suitable lock chamber edge to splice embedded opening {op_id} into Chamber {ch_id}"
+            logger.warning(
+                "Could not find a suitable lock chamber edge to splice embedded opening %s into Chamber %s",
+                op_id,
+                ch_id,
             )
+            continue
 
         items_to_remove.add(best_edge["properties"]["id"])
 

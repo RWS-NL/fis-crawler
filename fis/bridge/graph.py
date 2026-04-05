@@ -120,42 +120,50 @@ def build_graph_features(complexes):
         bridge_id = utils.stringify_id(c["id"])
 
         split_points = c.get("split_points", {})
+        split_nodes_assigned = c.get("split_nodes", {})
         for sec_id, wkt_str in split_points.items():
             if wkt_str:
                 geom = wkt.loads(wkt_str)
-                split_node_id = f"bridge_{bridge_id}_{sec_id}_split"
-                features.append(
-                    {
-                        "type": "Feature",
-                        "geometry": mapping(geom),
-                        "properties": {
-                            "id": split_node_id,
-                            "feature_type": "node",
-                            "node_type": "bridge_split",
-                            "node_id": split_node_id,
-                            "bridge_id": bridge_id,
-                        },
-                    }
+                split_node_id = split_nodes_assigned.get(
+                    sec_id, f"bridge_{bridge_id}_{sec_id}_split"
                 )
+                if not split_node_id.isdigit() and "junction" not in split_node_id:
+                    features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(geom),
+                            "properties": {
+                                "id": split_node_id,
+                                "feature_type": "node",
+                                "node_type": "bridge_split",
+                                "node_id": split_node_id,
+                                "bridge_id": bridge_id,
+                            },
+                        }
+                    )
 
         merge_points = c.get("merge_points", {})
+        merge_nodes_assigned = c.get("merge_nodes", {})
         for sec_id, wkt_str in merge_points.items():
             if wkt_str:
                 geom = wkt.loads(wkt_str)
-                merge_node_id = f"bridge_{bridge_id}_{sec_id}_merge"
-                features.append(
-                    {
-                        "type": "Feature",
-                        "geometry": mapping(geom),
-                        "properties": {
-                            "id": merge_node_id,
-                            "feature_type": "node",
-                            "node_type": "bridge_merge",
-                            "node_id": merge_node_id,
-                            "bridge_id": bridge_id,
-                        },
-                    }
+                merge_node_id = merge_nodes_assigned.get(
+                    sec_id, f"bridge_{bridge_id}_{sec_id}_merge"
                 )
+                if not merge_node_id.isdigit() and "junction" not in merge_node_id:
+                    features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": mapping(geom),
+                            "properties": {
+                                "id": merge_node_id,
+                                "feature_type": "node",
+                                "node_type": "bridge_merge",
+                                "node_id": merge_node_id,
+                                "bridge_id": bridge_id,
+                            },
+                        }
+                    )
 
         # Fallback points if splicing dicts are not present
         global_split_point = None
@@ -237,13 +245,17 @@ def build_graph_features(complexes):
             split_node_id = f"bridge_{bridge_id}_split"
             split_point = global_split_point
             if best_sec_id and split_points and best_sec_id in split_points:
-                split_node_id = f"bridge_{bridge_id}_{best_sec_id}_split"
+                split_node_id = split_nodes_assigned.get(
+                    best_sec_id, f"bridge_{bridge_id}_{best_sec_id}_split"
+                )
                 split_point = wkt.loads(split_points[best_sec_id])
 
             merge_node_id = f"bridge_{bridge_id}_merge"
             merge_point = global_merge_point
             if best_sec_id and merge_points and best_sec_id in merge_points:
-                merge_node_id = f"bridge_{bridge_id}_{best_sec_id}_merge"
+                merge_node_id = merge_nodes_assigned.get(
+                    best_sec_id, f"bridge_{bridge_id}_{best_sec_id}_merge"
+                )
                 merge_point = wkt.loads(merge_points[best_sec_id])
 
             # Calculate orientation and offset points to give the passage a real length
