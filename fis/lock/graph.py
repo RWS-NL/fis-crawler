@@ -218,27 +218,11 @@ def build_graph_features(complexes):
 
         # Nodes and Fairway Segments
         lock_id = utils.stringify_id(c["id"])
-        split_node_id = f"lock_{lock_id}_split"
-        merge_node_id = f"lock_{lock_id}_merge"
-
-        # Pre-calculate points
-        split_point = None
-        if c.get("geometry_before_wkt"):
-            g_before = wkt.loads(c["geometry_before_wkt"])
-            split_point = Point(g_before.coords[-1])
-
-        merge_point = None
-        if c.get("geometry_after_wkt"):
-            g_after = wkt.loads(c["geometry_after_wkt"])
-            merge_point = Point(g_after.coords[0])
 
         features.extend(
             _process_fairway_connections(
                 c,
-                split_node_id,
-                merge_node_id,
-                split_point,
-                merge_point,
+                lock_id,
             )
         )
 
@@ -265,9 +249,7 @@ def build_graph_features(complexes):
                 )
 
         # Chambers and Chamber Routes
-        features.extend(
-            _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
-        )
+        features.extend(_process_chambers(c, lock_id))
 
         # Berths
         features.extend(_process_berths(c))
@@ -277,29 +259,24 @@ def build_graph_features(complexes):
 
 def _process_fairway_connections(
     c,
-    split_node_id,
-    merge_node_id,
-    split_point,
-    merge_point,
+    lock_id,
 ):
     """
     Helper to process fairway connections (upstream/downstream) and key nodes.
-    Only generates the internal split/merge nodes.
-
-    Note: "split" and "merge" are determined by the geometry direction of the fairway;
-    "split" is where the fairway enters the complex and "merge" is where it exits.
+    Only generates the internal split/merge nodes for each section.
     """
     features = []
 
-    if c.get("geometry_before_wkt"):
-        wkt.loads(c["geometry_before_wkt"])
-
-        # Split Node
-        if split_point:
+    # Process split points
+    split_points = c.get("split_points", {})
+    for sec_id, wkt_str in split_points.items():
+        if wkt_str:
+            geom = wkt.loads(wkt_str)
+            split_node_id = f"lock_{lock_id}_{sec_id}_split"
             features.append(
                 {
                     "type": "Feature",
-                    "geometry": mapping(split_point),
+                    "geometry": mapping(geom),
                     "properties": {
                         "id": split_node_id,
                         "feature_type": "node",
@@ -310,13 +287,16 @@ def _process_fairway_connections(
                 }
             )
 
-    if c.get("geometry_after_wkt"):
-        # Merge Node
-        if merge_point:
+    # Process merge points
+    merge_points = c.get("merge_points", {})
+    for sec_id, wkt_str in merge_points.items():
+        if wkt_str:
+            geom = wkt.loads(wkt_str)
+            merge_node_id = f"lock_{lock_id}_{sec_id}_merge"
             features.append(
                 {
                     "type": "Feature",
-                    "geometry": mapping(merge_point),
+                    "geometry": mapping(geom),
                     "properties": {
                         "id": merge_node_id,
                         "feature_type": "node",
@@ -326,6 +306,43 @@ def _process_fairway_connections(
                     },
                 }
             )
+
+    # Fallback to single split/merge if split_points/merge_points not populated (e.g. not via splicing)
+    if not split_points and c.get("geometry_before_wkt"):
+        g_before = wkt.loads(c["geometry_before_wkt"])
+        split_point = Point(g_before.coords[-1])
+        split_node_id = f"lock_{lock_id}_split"
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(split_point),
+                "properties": {
+                    "id": split_node_id,
+                    "feature_type": "node",
+                    "node_type": "lock_split",
+                    "node_id": split_node_id,
+                    "lock_id": c["id"],
+                },
+            }
+        )
+
+    if not merge_points and c.get("geometry_after_wkt"):
+        g_after = wkt.loads(c["geometry_after_wkt"])
+        merge_point = Point(g_after.coords[0])
+        merge_node_id = f"lock_{lock_id}_merge"
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(merge_point),
+                "properties": {
+                    "id": merge_node_id,
+                    "feature_type": "node",
+                    "node_type": "lock_merge",
+                    "node_id": merge_node_id,
+                    "lock_id": c["id"],
+                },
+            }
+        )
 
     return features
 
@@ -359,7 +376,7 @@ def _process_berths(c):
     return features
 
 
-def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point):
+def _process_chambers(c, lock_id):
     """
     Helper to process chambers and generate related graph features.
 
@@ -367,8 +384,16 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
     (relative to the split and merge points).
     """
     features = []
-    lock_id = utils.stringify_id(c["id"])
     fairway_id = utils.stringify_id(c.get("fairway_id"))
+
+    # Determine global split and merge points for generic calculations
+    global_split_point = None
+    if c.get("geometry_before_wkt"):
+        global_split_point = Point(wkt.loads(c["geometry_before_wkt"]).coords[-1])
+
+    global_merge_point = None
+    if c.get("geometry_after_wkt"):
+        global_merge_point = Point(wkt.loads(c["geometry_after_wkt"]).coords[0])
 
     for l_obj in c.get("locks", []):
         for chamber in l_obj.get("chambers", []):
@@ -384,12 +409,12 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                     else chamber["geometry"]
                 )
 
-            # Try to find doors
+            # Try to find doors using global points as reference vector
             door_start = None
             door_end = None
-            if c_geom and split_point and merge_point:
+            if c_geom and global_split_point and global_merge_point:
                 door_start, door_end = find_chamber_doors(
-                    c_geom, split_point, merge_point
+                    c_geom, global_split_point, global_merge_point
                 )
 
             # Chamber Nodes
@@ -405,10 +430,6 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                         chamber_node_end_id,
                         door_start,
                         door_end,
-                        split_point,
-                        merge_point,
-                        split_node_id,
-                        merge_node_id,
                     )
                 )
 
@@ -438,6 +459,19 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                     )
 
                 if chamber.get("route_geometry"):
+                    # Fallback to some valid split/merge node
+                    split_nodes = list(c.get("split_points", {}).keys())
+                    split_node_id = (
+                        f"lock_{lock_id}_{split_nodes[0]}_split"
+                        if split_nodes
+                        else f"lock_{lock_id}_split"
+                    )
+                    merge_nodes = list(c.get("merge_points", {}).keys())
+                    merge_node_id = (
+                        f"lock_{lock_id}_{merge_nodes[0]}_merge"
+                        if merge_nodes
+                        else f"lock_{lock_id}_merge"
+                    )
                     features.append(
                         {
                             "type": "Feature",
@@ -551,10 +585,6 @@ def _build_chamber_route_features(
     chamber_node_end_id,
     door_start,
     door_end,
-    split_point,
-    merge_point,
-    split_node_id,
-    merge_node_id,
 ):
     """
     Helper to extract routing lines from split nodes to doors and through chambers.
@@ -593,9 +623,62 @@ def _build_chamber_route_features(
         }
     )
 
+    # Temporary construction of approach line to find the best section
+    # Use global split point to estimate the approach trajectory for section matching
+    global_split_point = None
+    if c.get("geometry_before_wkt"):
+        global_split_point = Point(wkt.loads(c["geometry_before_wkt"]).coords[-1])
+    else:
+        global_split_point = door_start
+
+    temp_app_line = LineString([global_split_point, door_start])
+    best_sec_app = _find_best_section_id(
+        temp_app_line,
+        c.get("sections", []),
+        context=f"Approach for Chamber {chamber_id} (Lock {lock_id})",
+    )
+
+    # Determine dynamic split_point and split_node_id based on matched section
+    split_node_id = f"lock_{lock_id}_split"
+    split_point = global_split_point
+    if best_sec_app and "split_points" in c and best_sec_app in c["split_points"]:
+        split_node_id = f"lock_{lock_id}_{best_sec_app}_split"
+        split_point = wkt.loads(c["split_points"][best_sec_app])
+
+    approach_line = LineString([split_point, door_start])
+
+    # Temporary construction of exit line
+    global_merge_point = None
+    if c.get("geometry_after_wkt"):
+        global_merge_point = Point(wkt.loads(c["geometry_after_wkt"]).coords[0])
+    else:
+        global_merge_point = door_end
+
+    temp_exit_line = LineString([door_end, global_merge_point])
+    best_sec_exit = _find_best_section_id(
+        temp_exit_line,
+        c.get("sections", []),
+        context=f"Exit for Chamber {chamber_id} (Lock {lock_id})",
+    )
+
+    merge_node_id = f"lock_{lock_id}_merge"
+    merge_point = global_merge_point
+    if best_sec_exit and "merge_points" in c and best_sec_exit in c["merge_points"]:
+        merge_node_id = f"lock_{lock_id}_{best_sec_exit}_merge"
+        merge_point = wkt.loads(c["merge_points"][best_sec_exit])
+
+    exit_line = LineString([door_end, merge_point])
+
+    # Chamber (Start -> End)
+    chamber_line = LineString([door_start, door_end])
+    best_sec_route = _find_best_section_id(
+        chamber_line,
+        c.get("sections", []),
+        context=f"Route for Chamber {chamber_id} (Lock {lock_id})",
+    )
+
     # Edges
     # Approach (Split -> Start)
-    approach_line = LineString([split_point, door_start])
     features.append(
         {
             "type": "Feature",
@@ -610,11 +693,7 @@ def _build_chamber_route_features(
                 "chamber_id": chamber_id,
                 "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": _find_best_section_id(
-                    approach_line,
-                    c.get("sections", []),
-                    context=f"Approach for Chamber {chamber_id} (Lock {lock_id})",
-                ),
+                "section_id": best_sec_app,
                 "source_node": split_node_id,
                 "target_node": chamber_node_start_id,
                 "length_m": geod.geometry_length(approach_line),
@@ -622,8 +701,7 @@ def _build_chamber_route_features(
         }
     )
 
-    # Chamber (Start -> End)
-    chamber_line = LineString([door_start, door_end])
+    # Chamber Route
     features.append(
         {
             "type": "Feature",
@@ -638,11 +716,7 @@ def _build_chamber_route_features(
                 "chamber_id": chamber_id,
                 "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": _find_best_section_id(
-                    chamber_line,
-                    c.get("sections", []),
-                    context=f"Route for Chamber {chamber_id} (Lock {lock_id})",
-                ),
+                "section_id": best_sec_route,
                 "dim_length": chamber.get("dim_length"),
                 "dim_width": chamber.get("dim_width"),
                 "source_node": chamber_node_start_id,
@@ -653,7 +727,6 @@ def _build_chamber_route_features(
     )
 
     # Exit (End -> Merge)
-    exit_line = LineString([door_end, merge_point])
     features.append(
         {
             "type": "Feature",
@@ -668,11 +741,7 @@ def _build_chamber_route_features(
                 "chamber_id": chamber_id,
                 "fairway_id": fairway_id,
                 "name": c.get("fairway_name"),
-                "section_id": _find_best_section_id(
-                    exit_line,
-                    c.get("sections", []),
-                    context=f"Exit for Chamber {chamber_id} (Lock {lock_id})",
-                ),
+                "section_id": best_sec_exit,
                 "source_node": chamber_node_end_id,
                 "target_node": merge_node_id,
                 "length_m": geod.geometry_length(exit_line),

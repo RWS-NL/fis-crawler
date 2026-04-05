@@ -5,7 +5,11 @@ from typing import List, Dict, Any
 import pandas as pd
 
 from fis.dropins.io import export_graph
-from fis.dropins.embedded import identify_embedded_structures, inject_embedded_bridges
+from fis.dropins.embedded import (
+    identify_embedded_structures,
+    inject_embedded_bridges,
+    inject_embedded_junctions,
+)
 from fis.dropins.splicing import splice_fairways
 from fis.dropins.graph import generate_simplified_passages
 from fis.dropins.terminals import generate_terminal_graph_features
@@ -78,6 +82,7 @@ def build_integrated_dropins_graph(
     all_features.extend(generate_simplified_passages(simplified_bridges, "bridge"))
 
     if mode == "detailed":
+        all_features = inject_embedded_junctions(all_features, lock_complexes, sections)
         all_features = inject_embedded_bridges(
             all_features, lock_complexes, bridge_complexes, embedded_bridges
         )

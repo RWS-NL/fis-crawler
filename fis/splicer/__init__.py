@@ -27,7 +27,8 @@ class StructureCut:
     # Distance from the start of the line (in units of the CRS)
     projected_distance: float
     # The coordinate buffer to slice out around the structure (units of the CRS)
-    buffer_distance: float
+    buffer_before: float
+    buffer_after: float
 
 
 class FairwaySplicer:
@@ -63,11 +64,9 @@ class FairwaySplicer:
         EPSILON = 0.001
 
         for struct in sorted_structures:
-            split_distance = max(
-                0.0, struct.projected_distance - struct.buffer_distance
-            )
+            split_distance = max(0.0, struct.projected_distance - struct.buffer_before)
             merge_distance = min(
-                self.total_length, struct.projected_distance + struct.buffer_distance
+                self.total_length, struct.projected_distance + struct.buffer_after
             )
 
             # Ensure we don't go backwards or overlap negatively

@@ -119,47 +119,82 @@ def build_graph_features(complexes):
     for c in complexes:
         bridge_id = utils.stringify_id(c["id"])
 
-        split_node_id = f"bridge_{bridge_id}_split"
-        merge_node_id = f"bridge_{bridge_id}_merge"
+        split_points = c.get("split_points", {})
+        for sec_id, wkt_str in split_points.items():
+            if wkt_str:
+                geom = wkt.loads(wkt_str)
+                split_node_id = f"bridge_{bridge_id}_{sec_id}_split"
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(geom),
+                        "properties": {
+                            "id": split_node_id,
+                            "feature_type": "node",
+                            "node_type": "bridge_split",
+                            "node_id": split_node_id,
+                            "bridge_id": bridge_id,
+                        },
+                    }
+                )
 
-        split_point = None
+        merge_points = c.get("merge_points", {})
+        for sec_id, wkt_str in merge_points.items():
+            if wkt_str:
+                geom = wkt.loads(wkt_str)
+                merge_node_id = f"bridge_{bridge_id}_{sec_id}_merge"
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(geom),
+                        "properties": {
+                            "id": merge_node_id,
+                            "feature_type": "node",
+                            "node_type": "bridge_merge",
+                            "node_id": merge_node_id,
+                            "bridge_id": bridge_id,
+                        },
+                    }
+                )
+
+        # Fallback points if splicing dicts are not present
+        global_split_point = None
         if c.get("geometry_before_wkt"):
-            g_before = wkt.loads(c["geometry_before_wkt"])
-            split_point = Point(g_before.coords[-1])
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(split_point),
-                    "properties": {
-                        "id": split_node_id,
-                        "feature_type": "node",
-                        "node_type": "bridge_split",
-                        "node_id": split_node_id,
-                        "bridge_id": bridge_id,
-                    },
-                }
-            )
+            global_split_point = Point(wkt.loads(c["geometry_before_wkt"]).coords[-1])
+            if not split_points:
+                split_node_id = f"bridge_{bridge_id}_split"
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(global_split_point),
+                        "properties": {
+                            "id": split_node_id,
+                            "feature_type": "node",
+                            "node_type": "bridge_split",
+                            "node_id": split_node_id,
+                            "bridge_id": bridge_id,
+                        },
+                    }
+                )
 
-        merge_point = None
+        global_merge_point = None
         if c.get("geometry_after_wkt"):
-            g_after = wkt.loads(c["geometry_after_wkt"])
-            merge_point = Point(g_after.coords[0])
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(merge_point),
-                    "properties": {
-                        "id": merge_node_id,
-                        "feature_type": "node",
-                        "node_type": "bridge_merge",
-                        "node_id": merge_node_id,
-                        "bridge_id": bridge_id,
-                    },
-                }
-            )
-
-        if split_point and merge_point and not split_point.equals(merge_point):
-            LineString([split_point, merge_point])
+            global_merge_point = Point(wkt.loads(c["geometry_after_wkt"]).coords[0])
+            if not merge_points:
+                merge_node_id = f"bridge_{bridge_id}_merge"
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(global_merge_point),
+                        "properties": {
+                            "id": merge_node_id,
+                            "feature_type": "node",
+                            "node_type": "bridge_merge",
+                            "node_id": merge_node_id,
+                            "bridge_id": bridge_id,
+                        },
+                    }
+                )
 
         openings = c.get("openings", [])
         if not openings:
@@ -187,6 +222,30 @@ def build_graph_features(complexes):
 
             op_geom = op_geom_raw
 
+            sections = c.get("sections", [])
+            best_sec_id = None
+            if sections:
+                best_sec = next(
+                    (s for s in sections if s.get("relation") == "direct"),
+                    next(
+                        (s for s in sections if s.get("relation") == "overlap"),
+                        sections[0],
+                    ),
+                )
+                best_sec_id = utils.stringify_id(best_sec.get("id"))
+
+            split_node_id = f"bridge_{bridge_id}_split"
+            split_point = global_split_point
+            if best_sec_id and split_points and best_sec_id in split_points:
+                split_node_id = f"bridge_{bridge_id}_{best_sec_id}_split"
+                split_point = wkt.loads(split_points[best_sec_id])
+
+            merge_node_id = f"bridge_{bridge_id}_merge"
+            merge_point = global_merge_point
+            if best_sec_id and merge_points and best_sec_id in merge_points:
+                merge_node_id = f"bridge_{bridge_id}_{best_sec_id}_merge"
+                merge_point = wkt.loads(merge_points[best_sec_id])
+
             # Calculate orientation and offset points to give the passage a real length
             azimuth = 0.0
             if split_point and merge_point and not split_point.equals(merge_point):
@@ -203,18 +262,6 @@ def build_graph_features(complexes):
 
             op_start_node = f"opening_{op_id}_start"
             op_end_node = f"opening_{op_id}_end"
-
-            sections = c.get("sections", [])
-            best_sec_id = None
-            if sections:
-                best_sec = next(
-                    (s for s in sections if s.get("relation") == "direct"),
-                    next(
-                        (s for s in sections if s.get("relation") == "overlap"),
-                        sections[0],
-                    ),
-                )
-                best_sec_id = utils.stringify_id(best_sec.get("id"))
 
             features.append(
                 {
