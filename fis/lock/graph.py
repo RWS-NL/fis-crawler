@@ -637,54 +637,125 @@ def _build_chamber_route_features(
         }
     )
 
-    # Temporary construction of approach line to find the best section
-    # Use global split point to estimate the approach trajectory for section matching
-    global_split_point = None
-    if c.get("geometry_before_wkt"):
-        global_split_point = Point(wkt.loads(c["geometry_before_wkt"]).coords[-1])
-    else:
-        global_split_point = door_start
+    # Approach
+    best_app_sec = None
+    best_app_overlap = -1
+    best_app_line = None
+    best_split_node = None
 
-    temp_app_line = LineString([global_split_point, door_start])
-    best_sec_app = _find_best_section_id(
-        temp_app_line,
-        c.get("sections", []),
-        context=f"Approach for Chamber {chamber_id} (Lock {lock_id})",
-    )
+    split_points = c.get("split_points", {})
+    split_nodes = c.get("split_nodes", {})
 
-    # Determine dynamic split_point and split_node_id based on matched section
-    split_node_id = f"lock_{lock_id}_split"
-    split_point = global_split_point
-    if best_sec_app and "split_points" in c and best_sec_app in c["split_points"]:
-        split_node_id = c.get("split_nodes", {}).get(
-            best_sec_app, f"lock_{lock_id}_{best_sec_app}_split"
+    if not split_points and c.get("geometry_before_wkt"):
+        # Fallback
+        sp = Point(wkt.loads(c["geometry_before_wkt"]).coords[-1])
+        split_points = {"fallback": sp.wkt}
+        split_nodes = {"fallback": f"lock_{lock_id}_split"}
+
+    for sec_id, wkt_str in split_points.items():
+        sp = wkt.loads(wkt_str)
+        app_line = LineString([sp, door_start]) if not sp.equals(door_start) else None
+
+        overlap = 0
+        if app_line:
+            for sec in c.get("sections", []):
+                if utils.stringify_id(sec.get("id")) == sec_id or sec_id == "fallback":
+                    sec_geom = (
+                        wkt.loads(sec["geometry"])
+                        if isinstance(sec["geometry"], str)
+                        else sec["geometry"]
+                    )
+                    if app_line.intersects(sec_geom):
+                        intersection = app_line.intersection(sec_geom)
+                        if intersection.geom_type in ("LineString", "MultiLineString"):
+                            overlap = geod.geometry_length(intersection)
+                        elif intersection.geom_type == "GeometryCollection":
+                            overlap = sum(
+                                geod.geometry_length(p)
+                                for p in intersection.geoms
+                                if p.geom_type in ("LineString", "MultiLineString")
+                            )
+                    break
+
+        if not app_line:
+            best_app_overlap = float("inf")
+            best_app_sec = sec_id
+            best_app_line = app_line
+            best_split_node = split_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_split")
+            break
+
+        if overlap > best_app_overlap:
+            best_app_overlap = overlap
+            best_app_sec = sec_id
+            best_app_line = app_line
+            best_split_node = split_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_split")
+
+    if best_app_sec == "fallback":
+        best_app_sec = (
+            _find_best_section_id(best_app_line, c.get("sections", []))
+            if best_app_line
+            else ""
         )
-        split_point = wkt.loads(c["split_points"][best_sec_app])
 
-    approach_line = LineString([split_point, door_start])
+    # Exit
+    best_ex_sec = None
+    best_ex_overlap = -1
+    best_ex_line = None
+    best_merge_node = None
 
-    # Temporary construction of exit line
-    global_merge_point = None
-    if c.get("geometry_after_wkt"):
-        global_merge_point = Point(wkt.loads(c["geometry_after_wkt"]).coords[0])
-    else:
-        global_merge_point = door_end
+    merge_points = c.get("merge_points", {})
+    merge_nodes = c.get("merge_nodes", {})
 
-    temp_exit_line = LineString([door_end, global_merge_point])
-    best_sec_exit = _find_best_section_id(
-        temp_exit_line,
-        c.get("sections", []),
-        context=f"Exit for Chamber {chamber_id} (Lock {lock_id})",
-    )
+    if not merge_points and c.get("geometry_after_wkt"):
+        # Fallback
+        mp = Point(wkt.loads(c["geometry_after_wkt"]).coords[0])
+        merge_points = {"fallback": mp.wkt}
+        merge_nodes = {"fallback": f"lock_{lock_id}_merge"}
 
-    merge_node_id = f"lock_{lock_id}_merge"
-    merge_point = global_merge_point
-    if best_sec_exit and "merge_points" in c and best_sec_exit in c["merge_points"]:
-        merge_node_id = c.get("merge_nodes", {}).get(
-            best_sec_exit, f"lock_{lock_id}_{best_sec_exit}_merge"
+    for sec_id, wkt_str in merge_points.items():
+        mp = wkt.loads(wkt_str)
+        ex_line = LineString([door_end, mp]) if not door_end.equals(mp) else None
+
+        overlap = 0
+        if ex_line:
+            for sec in c.get("sections", []):
+                if utils.stringify_id(sec.get("id")) == sec_id or sec_id == "fallback":
+                    sec_geom = (
+                        wkt.loads(sec["geometry"])
+                        if isinstance(sec["geometry"], str)
+                        else sec["geometry"]
+                    )
+                    if ex_line.intersects(sec_geom):
+                        intersection = ex_line.intersection(sec_geom)
+                        if intersection.geom_type in ("LineString", "MultiLineString"):
+                            overlap = geod.geometry_length(intersection)
+                        elif intersection.geom_type == "GeometryCollection":
+                            overlap = sum(
+                                geod.geometry_length(p)
+                                for p in intersection.geoms
+                                if p.geom_type in ("LineString", "MultiLineString")
+                            )
+                    break
+
+        if not ex_line:
+            best_ex_overlap = float("inf")
+            best_ex_sec = sec_id
+            best_ex_line = ex_line
+            best_merge_node = merge_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_merge")
+            break
+
+        if overlap > best_ex_overlap:
+            best_ex_overlap = overlap
+            best_ex_sec = sec_id
+            best_ex_line = ex_line
+            best_merge_node = merge_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_merge")
+
+    if best_ex_sec == "fallback":
+        best_ex_sec = (
+            _find_best_section_id(best_ex_line, c.get("sections", []))
+            if best_ex_line
+            else ""
         )
-        merge_point = wkt.loads(c["merge_points"][best_sec_exit])
-    exit_line = LineString([door_end, merge_point])
 
     # Chamber (Start -> End)
     chamber_line = LineString([door_start, door_end])
@@ -696,27 +767,28 @@ def _build_chamber_route_features(
 
     # Edges
     # Approach (Split -> Start)
-    features.append(
-        {
-            "type": "Feature",
-            "geometry": mapping(approach_line),
-            "properties": {
-                "id": f"fairway_segment_{lock_id}_{chamber_id}_approach",
-                "feature_type": "fairway_segment",
-                "segment_type": "chamber_approach",
-                "structure_type": "lock",
-                "structure_id": lock_id,
-                "lock_id": lock_id,
-                "chamber_id": chamber_id,
-                "fairway_id": fairway_id,
-                "name": c.get("fairway_name"),
-                "section_id": best_sec_app,
-                "source_node": split_node_id,
-                "target_node": chamber_node_start_id,
-                "length_m": geod.geometry_length(approach_line),
-            },
-        }
-    )
+    if best_app_line:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(best_app_line),
+                "properties": {
+                    "id": f"fairway_segment_{lock_id}_{chamber_id}_approach",
+                    "feature_type": "fairway_segment",
+                    "segment_type": "chamber_approach",
+                    "structure_type": "lock",
+                    "structure_id": lock_id,
+                    "lock_id": lock_id,
+                    "chamber_id": chamber_id,
+                    "fairway_id": fairway_id,
+                    "name": c.get("fairway_name"),
+                    "section_id": best_app_sec,
+                    "source_node": best_split_node,
+                    "target_node": chamber_node_start_id,
+                    "length_m": geod.geometry_length(best_app_line),
+                },
+            }
+        )
 
     # Chamber Route
     features.append(
@@ -744,26 +816,27 @@ def _build_chamber_route_features(
     )
 
     # Exit (End -> Merge)
-    features.append(
-        {
-            "type": "Feature",
-            "geometry": mapping(exit_line),
-            "properties": {
-                "id": f"fairway_segment_{lock_id}_{chamber_id}_exit",
-                "feature_type": "fairway_segment",
-                "segment_type": "chamber_exit",
-                "structure_type": "lock",
-                "structure_id": lock_id,
-                "lock_id": lock_id,
-                "chamber_id": chamber_id,
-                "fairway_id": fairway_id,
-                "name": c.get("fairway_name"),
-                "section_id": best_sec_exit,
-                "source_node": chamber_node_end_id,
-                "target_node": merge_node_id,
-                "length_m": geod.geometry_length(exit_line),
-            },
-        }
-    )
+    if best_ex_line:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(best_ex_line),
+                "properties": {
+                    "id": f"fairway_segment_{lock_id}_{chamber_id}_exit",
+                    "feature_type": "fairway_segment",
+                    "segment_type": "chamber_exit",
+                    "structure_type": "lock",
+                    "structure_id": lock_id,
+                    "lock_id": lock_id,
+                    "chamber_id": chamber_id,
+                    "fairway_id": fairway_id,
+                    "name": c.get("fairway_name"),
+                    "section_id": best_ex_sec,
+                    "source_node": chamber_node_end_id,
+                    "target_node": best_merge_node,
+                    "length_m": geod.geometry_length(best_ex_line),
+                },
+            }
+        )
 
     return features

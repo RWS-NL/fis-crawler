@@ -25,7 +25,8 @@ def test_splicer_single_structure(straight_fairway):
         id="L1",
         geometry=Point(50, 0),
         projected_distance=50.0,
-        buffer_distance=10.0,
+        buffer_before=10.0,
+        buffer_after=10.0,
     )
     segments = splicer.splice([obs])
 
@@ -43,10 +44,18 @@ def test_splicer_single_structure(straight_fairway):
 def test_splicer_consecutive_structures(straight_fairway):
     splicer = FairwaySplicer(straight_fairway)
     obs1 = StructureCut(
-        id="L1", geometry=Point(30, 0), projected_distance=30.0, buffer_distance=5.0
+        id="L1",
+        geometry=Point(30, 0),
+        projected_distance=30.0,
+        buffer_before=5.0,
+        buffer_after=5.0,
     )
     obs2 = StructureCut(
-        id="B1", geometry=Point(70, 0), projected_distance=70.0, buffer_distance=5.0
+        id="B1",
+        geometry=Point(70, 0),
+        projected_distance=70.0,
+        buffer_before=5.0,
+        buffer_after=5.0,
     )
     segments = splicer.splice([obs1, obs2])
 
@@ -68,11 +77,19 @@ def test_splicer_structures_overlapping_buffer(straight_fairway):
     splicer = FairwaySplicer(straight_fairway)
     # L1 at 30 with 10m buffer ends at 40
     obs1 = StructureCut(
-        id="L1", geometry=Point(30, 0), projected_distance=30.0, buffer_distance=10.0
+        id="L1",
+        geometry=Point(30, 0),
+        projected_distance=30.0,
+        buffer_before=10.0,
+        buffer_after=10.0,
     )
     # L2 at 45 with 10m buffer starts at 35 (overlaps L1 buffer)
     obs2 = StructureCut(
-        id="L2", geometry=Point(45, 0), projected_distance=45.0, buffer_distance=10.0
+        id="L2",
+        geometry=Point(45, 0),
+        projected_distance=45.0,
+        buffer_before=10.0,
+        buffer_after=10.0,
     )
     segments = splicer.splice([obs1, obs2])
 
