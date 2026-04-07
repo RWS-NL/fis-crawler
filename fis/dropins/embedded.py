@@ -30,19 +30,19 @@ def identify_embedded_structures(
 
     all_candidates = []
 
+    # Pre-index bridge information for O(1) lookup
+    bridge_info = {
+        str(b.get("id")): (str(b.get("section_id", "")), str(b.get("fairway_id", "")))
+        for b in bridge_complexes
+    }
+
     # Use spatial index for optimization
     for _, op_row in openings_rd.iterrows():
         op_id = str(op_row["id"])
 
         # We need the opening's parent bridge to check section/fairway IDs
         b_id = str(op_row.get("bridge_id", ""))
-        bridge_section_id = ""
-        bridge_fairway_id = ""
-        for b in bridge_complexes:
-            if str(b.get("id")) == b_id:
-                bridge_section_id = str(b.get("section_id", ""))
-                bridge_fairway_id = str(b.get("fairway_id", ""))
-                break
+        bridge_section_id, bridge_fairway_id = bridge_info.get(b_id, ("", ""))
 
         # Buffer the opening to find nearby chambers
         buffer_geom = op_row.geometry.buffer(settings.EMBEDDED_STRUCTURE_MAX_DIST_M)
@@ -228,13 +228,17 @@ def inject_embedded_junctions(
                 )
 
                 # Tolerance check in meters (UTM)
-                if edge_geom_rd.distance(j_pt_rd) < 0.1:  # 10cm tolerance
+                if (
+                    edge_geom_rd.distance(j_pt_rd) < 10.0
+                ):  # 10m tolerance for centerline
                     # Check if already endpoint
                     if (
                         j_pt_rd.distance(Point(edge_geom_rd.coords[0])) < 0.1
                         or j_pt_rd.distance(Point(edge_geom_rd.coords[-1])) < 0.1
                     ):
                         continue
+                else:
+                    continue
 
                 logger.info("Injecting junction %s into chamber %s", j_id, ch_id)
                 items_to_remove.add(edge["properties"]["id"])

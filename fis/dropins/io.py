@@ -46,19 +46,13 @@ def load_dropins_with_spatial_matching(
 
         # Normalize geometry column: handle uppercase "Geometry" WKT and ensure GeoDataFrame.
         if "geometry" not in df.columns and "Geometry" in df.columns:
-            geom_series = df["Geometry"]
-            # If the geometry is stored as WKT strings, parse to geometries.
-            if geom_series.dtype == "object":
-                try:
-                    # from_wkt handles a lot of the boilerplate
-                    geom = gpd.GeoSeries.from_wkt(geom_series)
-                except Exception:
-                    # If parsing fails, fall back to the original series.
-                    geom = geom_series
+            if isinstance(df["Geometry"].iloc[0], str):
+                df["geometry"] = gpd.GeoSeries.from_wkt(df["Geometry"])
             else:
-                geom = geom_series
-            df = df.copy()
-            df["geometry"] = geom
+                df["geometry"] = df["Geometry"]
+        elif "geometry" in df.columns:
+            if isinstance(df["geometry"].iloc[0], str):
+                df["geometry"] = gpd.GeoSeries.from_wkt(df["geometry"])
 
         # Ensure we return a GeoDataFrame when a geometry column is present.
         if "geometry" in df.columns and not isinstance(df, gpd.GeoDataFrame):

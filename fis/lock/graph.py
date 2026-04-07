@@ -251,6 +251,11 @@ def build_graph_features(complexes):
         # Chambers and Chamber Routes
         features.extend(_process_chambers(c, lock_id))
 
+        # Embedded Bridges
+        for ch in c.get("chambers_with_bridges", []):
+            for br in ch.get("embedded_bridges", []):
+                features.extend(br.get("graph_features", []))
+
         # Berths
         features.extend(_process_berths(c))
 
@@ -296,12 +301,18 @@ def _process_fairway_connections(
     # Process merge points
     merge_points = c.get("merge_points", {})
     merge_nodes_assigned = c.get("merge_nodes", {})
+    logger.debug(
+        "Processing fairway connections for lock %s. Merge points: %s",
+        lock_id,
+        list(merge_points.keys()),
+    )
     for sec_id, wkt_str in merge_points.items():
         if wkt_str:
             geom = wkt.loads(wkt_str)
             merge_node_id = merge_nodes_assigned.get(
                 sec_id, f"lock_{lock_id}_{sec_id}_merge"
             )
+            logger.debug("  Merge node for sec %s: %s", sec_id, merge_node_id)
             if not merge_node_id.isdigit() and "junction" not in merge_node_id:
                 features.append(
                     {
@@ -639,7 +650,7 @@ def _build_chamber_route_features(
 
     # Approach
     best_app_sec = None
-    best_app_overlap = -1
+    best_app_overlap = -1.0
     best_app_line = None
     best_split_node = None
 
@@ -656,36 +667,67 @@ def _build_chamber_route_features(
         sp = wkt.loads(wkt_str)
         app_line = LineString([sp, door_start]) if not sp.equals(door_start) else None
 
-        overlap = 0
+        overlap = -1.0
         if app_line:
             for sec in c.get("sections", []):
                 if utils.stringify_id(sec.get("id")) == sec_id or sec_id == "fallback":
-                    sec_geom = (
+                    sec_geom_4326 = (
                         wkt.loads(sec["geometry"])
                         if isinstance(sec["geometry"], str)
                         else sec["geometry"]
                     )
-                    if app_line.intersects(sec_geom):
-                        intersection = app_line.intersection(sec_geom)
-                        if intersection.geom_type in ("LineString", "MultiLineString"):
-                            overlap = geod.geometry_length(intersection)
-                        elif intersection.geom_type == "GeometryCollection":
-                            overlap = sum(
-                                geod.geometry_length(p)
-                                for p in intersection.geoms
-                                if p.geom_type in ("LineString", "MultiLineString")
-                            )
-                    break
 
-        if not app_line:
-            best_app_overlap = float("inf")
-            best_app_sec = sec_id
-            best_app_line = app_line
-            best_split_node = split_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_split")
-            break
+                    # Convert to local UTM for accurate distance and projection
+                    utm_crs = gpd.GeoSeries(
+                        [sec_geom_4326], crs="EPSG:4326"
+                    ).estimate_utm_crs()
+                    sec_geom_utm = (
+                        gpd.GeoSeries([sec_geom_4326], crs="EPSG:4326")
+                        .to_crs(utm_crs)
+                        .iloc[0]
+                    )
+                    split_point_utm = (
+                        gpd.GeoSeries([sp], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+                    )
+                    door_start_utm = (
+                        gpd.GeoSeries([door_start], crs="EPSG:4326")
+                        .to_crs(utm_crs)
+                        .iloc[0]
+                    )
+
+                    projected_split = sec_geom_utm.project(split_point_utm)
+                    projected_door = sec_geom_utm.project(door_start_utm)
+
+                    dist_split = sec_geom_utm.distance(split_point_utm)
+                    dist_door = sec_geom_utm.distance(door_start_utm)
+
+                    # 200m tolerance for matching sections to accommodate staggered parallel chambers
+                    if dist_split < 200.0 and dist_door < 200.0:
+                        # Use signed projection to prefer forward direction relative to geometry
+                        overlap = projected_door - projected_split
+
+                    logger.debug(
+                        "Approach check: chamber=%s, sec=%s, dist_door=%.1fm, dist_split=%.1fm, overlap=%.1fm",
+                        chamber_id,
+                        sec_id,
+                        dist_door,
+                        dist_split,
+                        overlap,
+                    )
+                    break
 
         if overlap > best_app_overlap:
             best_app_overlap = overlap
+            best_app_sec = sec_id
+            best_app_line = app_line
+            best_split_node = split_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_split")
+
+            assert best_split_node, (
+                f"No split node ID found for section {sec_id} in lock {lock_id}"
+            )
+
+        if (not app_line or overlap == 0) and best_app_overlap < 0:
+            best_app_overlap = 0
             best_app_sec = sec_id
             best_app_line = app_line
             best_split_node = split_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_split")
@@ -699,7 +741,7 @@ def _build_chamber_route_features(
 
     # Exit
     best_ex_sec = None
-    best_ex_overlap = -1
+    best_ex_overlap = -1000.0  # Allow negative overlaps but prefer positive
     best_ex_line = None
     best_merge_node = None
 
@@ -716,36 +758,67 @@ def _build_chamber_route_features(
         mp = wkt.loads(wkt_str)
         ex_line = LineString([door_end, mp]) if not door_end.equals(mp) else None
 
-        overlap = 0
+        overlap = -1000.0
         if ex_line:
             for sec in c.get("sections", []):
                 if utils.stringify_id(sec.get("id")) == sec_id or sec_id == "fallback":
-                    sec_geom = (
+                    sec_geom_4326 = (
                         wkt.loads(sec["geometry"])
                         if isinstance(sec["geometry"], str)
                         else sec["geometry"]
                     )
-                    if ex_line.intersects(sec_geom):
-                        intersection = ex_line.intersection(sec_geom)
-                        if intersection.geom_type in ("LineString", "MultiLineString"):
-                            overlap = geod.geometry_length(intersection)
-                        elif intersection.geom_type == "GeometryCollection":
-                            overlap = sum(
-                                geod.geometry_length(p)
-                                for p in intersection.geoms
-                                if p.geom_type in ("LineString", "MultiLineString")
-                            )
-                    break
 
-        if not ex_line:
-            best_ex_overlap = float("inf")
-            best_ex_sec = sec_id
-            best_ex_line = ex_line
-            best_merge_node = merge_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_merge")
-            break
+                    # Convert to local UTM for accurate distance and projection
+                    utm_crs = gpd.GeoSeries(
+                        [sec_geom_4326], crs="EPSG:4326"
+                    ).estimate_utm_crs()
+                    sec_geom_utm = (
+                        gpd.GeoSeries([sec_geom_4326], crs="EPSG:4326")
+                        .to_crs(utm_crs)
+                        .iloc[0]
+                    )
+                    merge_point_utm = (
+                        gpd.GeoSeries([mp], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+                    )
+                    door_end_utm = (
+                        gpd.GeoSeries([door_end], crs="EPSG:4326")
+                        .to_crs(utm_crs)
+                        .iloc[0]
+                    )
+
+                    projected_merge = sec_geom_utm.project(merge_point_utm)
+                    projected_door = sec_geom_utm.project(door_end_utm)
+
+                    dist_merge = sec_geom_utm.distance(merge_point_utm)
+                    dist_door = sec_geom_utm.distance(door_end_utm)
+
+                    # 200m tolerance for matching sections
+                    if dist_merge < 200.0 and dist_door < 200.0:
+                        # Forward route should have positive overlap
+                        overlap = projected_merge - projected_door
+
+                    logger.debug(
+                        "Exit check: chamber=%s, sec=%s, dist_door=%.1fm, dist_merge=%.1fm, overlap=%.1fm",
+                        chamber_id,
+                        sec_id,
+                        dist_door,
+                        dist_merge,
+                        overlap,
+                    )
+                    break
 
         if overlap > best_ex_overlap:
             best_ex_overlap = overlap
+            best_ex_sec = sec_id
+            best_ex_line = ex_line
+            best_merge_node = merge_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_merge")
+
+            assert best_merge_node, (
+                f"No merge node ID found for section {sec_id} in lock {lock_id}"
+            )
+
+        if (not ex_line or overlap == 0) and best_ex_overlap < -999:
+            best_ex_overlap = 0
             best_ex_sec = sec_id
             best_ex_line = ex_line
             best_merge_node = merge_nodes.get(sec_id, f"lock_{lock_id}_{sec_id}_merge")

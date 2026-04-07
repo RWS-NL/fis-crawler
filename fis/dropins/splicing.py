@@ -198,7 +198,7 @@ def _handle_consumed_junctions(
                     original_dropins_on_sec,
                     dtype,
                     did,
-                    "split_points",
+                    "merge_points",
                     pt_4326.wkt,
                     sec_id=sec_id,
                 )
@@ -206,7 +206,7 @@ def _handle_consumed_junctions(
                     original_dropins_on_sec,
                     dtype,
                     did,
-                    "split_nodes",
+                    "merge_nodes",
                     sj_id,
                     sec_id=sec_id,
                 )
@@ -227,7 +227,7 @@ def _handle_consumed_junctions(
                     original_dropins_on_sec,
                     dtype,
                     did,
-                    "merge_points",
+                    "split_points",
                     pt_4326.wkt,
                     sec_id=sec_id,
                 )
@@ -235,7 +235,7 @@ def _handle_consumed_junctions(
                     original_dropins_on_sec,
                     dtype,
                     did,
-                    "merge_nodes",
+                    "split_nodes",
                     ej_id,
                     sec_id=sec_id,
                 )
