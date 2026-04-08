@@ -1,11 +1,12 @@
 import logging
-from typing import List, Dict, Tuple, Any, Optional
+from typing import List, Dict, Tuple, Optional
 
 import geopandas as gpd
 from shapely import wkt
 from shapely.geometry import Point, LineString, mapping
 
 from fis import settings
+from fis.utils import stringify_id
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,17 @@ def identify_embedded_structures(
         for b in bridge_complexes
     }
 
+    # Pre-index lock complex information for O(1) lookup
+    lock_lookup = {}
+    for c in lock_complexes:
+        l_sects = {str(s.get("id", "")) for s in c.get("sections", [])}
+        l_sects.add(str(c.get("section_id", "")))
+        l_fws = {str(s.get("fairway_id", "")) for s in c.get("sections", [])}
+        l_fws.add(str(c.get("fairway_id", "")))
+
+        for lk in c.get("locks", []):
+            lock_lookup[str(lk.get("id"))] = (l_sects, l_fws)
+
     # Use spatial index for optimization
     for _, op_row in openings_rd.iterrows():
         op_id = str(op_row["id"])
@@ -62,22 +74,9 @@ def identify_embedded_structures(
             elif dist < 100.0:
                 # If not intersecting, they must be reasonably close AND share the same fairway or section
                 ch_lock_id = str(ch_row.get("lock_id", ""))
-
-                # A lock complex can span multiple sections. Check all of them.
-                lock_sections = set()
-                lock_fairways = set()
-                for c in lock_complexes:
-                    # Check if this complex contains the lock for this chamber
-                    if any(
-                        str(lk.get("id")) == ch_lock_id for lk in c.get("locks", [])
-                    ):
-                        for s in c.get("sections", []):
-                            lock_sections.add(str(s.get("id", "")))
-                            lock_fairways.add(str(s.get("fairway_id", "")))
-                        # Also check the complex-level fields
-                        lock_sections.add(str(c.get("section_id", "")))
-                        lock_fairways.add(str(c.get("fairway_id", "")))
-                        break
+                lock_sections, lock_fairways = lock_lookup.get(
+                    ch_lock_id, (set(), set())
+                )
 
                 if (bridge_section_id and bridge_section_id in lock_sections) or (
                     bridge_fairway_id and bridge_fairway_id in lock_fairways
@@ -205,9 +204,26 @@ def inject_embedded_junctions(
     new_features = []
     items_to_remove = set()
 
+    # Pre-build spatial index for junctions
+    j_ids = list(junctions.keys())
+    j_geoms = [junctions[jid] for jid in j_ids]
+    junctions_gdf = gpd.GeoDataFrame({"id": j_ids}, geometry=j_geoms, crs="EPSG:4326")
+
+    # Pre-index chamber polygons
+    chamber_polys = {}
+    for lc in lock_complexes:
+        for lock in lc.get("locks", []):
+            for ch in lock.get("chambers", []):
+                cid = stringify_id(ch["id"])
+                poly_wkt = ch.get("geometry")
+                if poly_wkt:
+                    chamber_polys[cid] = (
+                        wkt.loads(poly_wkt) if isinstance(poly_wkt, str) else poly_wkt
+                    )
+
     for edge in chamber_routes:
         ch_id = _extract_chamber_id(edge["properties"])
-        ch_poly = _get_chamber_polygon(lock_complexes, ch_id)
+        ch_poly = chamber_polys.get(ch_id)
         if not ch_poly:
             continue
 
@@ -221,60 +237,68 @@ def inject_embedded_junctions(
             gpd.GeoSeries([edge_geom_4326], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
         )
 
-        for j_id, j_pt_4326 in junctions.items():
-            if ch_poly.intersects(j_pt_4326):
-                j_pt_rd = (
-                    gpd.GeoSeries([j_pt_4326], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
-                )
+        # Query spatial index
+        possible_idx = junctions_gdf.sindex.query(ch_poly, predicate="intersects")
+        nearby_junctions = junctions_gdf.iloc[possible_idx]
 
-                # Tolerance check in meters (UTM)
-                if (
-                    edge_geom_rd.distance(j_pt_rd) < 10.0
-                ):  # 10m tolerance for centerline
-                    # Check if already endpoint
-                    if (
-                        j_pt_rd.distance(Point(edge_geom_rd.coords[0])) < 0.1
-                        or j_pt_rd.distance(Point(edge_geom_rd.coords[-1])) < 0.1
-                    ):
-                        continue
-                else:
+        for _, j_row in nearby_junctions.iterrows():
+            j_id = j_row["id"]
+            j_pt_4326 = j_row.geometry
+            j_pt_rd = (
+                gpd.GeoSeries([j_pt_4326], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+            )
+
+            # Tolerance check in meters (UTM)
+            if edge_geom_rd.distance(j_pt_rd) < 10.0:  # 10m tolerance for centerline
+                # Gate the injection on a tight tolerance (10cm)
+                distance_to_edge = edge_geom_rd.distance(j_pt_rd)
+                if distance_to_edge > 0.1:
                     continue
 
-                logger.info("Injecting junction %s into chamber %s", j_id, ch_id)
-                items_to_remove.add(edge["properties"]["id"])
+                # Check if already an endpoint
+                if (
+                    j_pt_rd.distance(Point(edge_geom_rd.coords[0])) < 0.1
+                    or j_pt_rd.distance(Point(edge_geom_rd.coords[-1])) < 0.1
+                ):
+                    continue
+            else:
+                continue
 
-                # Add junction node feature (in 4326)
-                new_features.append(
-                    {
-                        "type": "Feature",
-                        "geometry": mapping(j_pt_4326),
-                        "properties": {
-                            "id": j_id,
-                            "feature_type": "node",
-                            "node_type": "junction",
-                            "node_id": j_id,
-                        },
-                    }
-                )
+            logger.info("Injecting junction %s into chamber %s", j_id, ch_id)
+            items_to_remove.add(edge["properties"]["id"])
 
-                # Splice edge at junction
-                spliced = _splice_edge_at_point(
-                    edge, edge_geom_rd, j_pt_rd, utm_crs, node_start=j_id, node_end=j_id
-                )
-                new_features.extend(spliced)
+            # Add junction node feature (in 4326)
+            new_features.append(
+                {
+                    "type": "Feature",
+                    "geometry": mapping(j_pt_4326),
+                    "properties": {
+                        "id": j_id,
+                        "feature_type": "node",
+                        "node_type": "junction",
+                        "node_id": j_id,
+                    },
+                }
+            )
 
-                # Update current edge for potential multiple junctions in one chamber
-                part2 = next(
-                    (f for f in spliced if f["properties"]["id"].endswith("_part2")),
-                    None,
+            # Splice edge at junction
+            spliced = _splice_edge_at_point(
+                edge, edge_geom_rd, j_pt_rd, utm_crs, node_start=j_id, node_end=j_id
+            )
+            new_features.extend(spliced)
+
+            # Update current edge for potential multiple junctions in one chamber
+            part2 = next(
+                (f for f in spliced if f["properties"]["id"].endswith("_part2")),
+                None,
+            )
+            if part2:
+                edge = part2
+                edge_geom_rd = (
+                    gpd.GeoSeries([_parse_geom(edge["geometry"])], crs="EPSG:4326")
+                    .to_crs(utm_crs)
+                    .iloc[0]
                 )
-                if part2:
-                    edge = part2
-                    edge_geom_rd = (
-                        gpd.GeoSeries([_parse_geom(edge["geometry"])], crs="EPSG:4326")
-                        .to_crs(utm_crs)
-                        .iloc[0]
-                    )
 
     return _filter_and_merge_features(features, items_to_remove, new_features)
 
@@ -384,17 +408,6 @@ def _extract_all_junctions(sections_gdf) -> Dict[str, Point]:
         if ej and ej != "nan" and ej not in junctions:
             junctions[ej] = Point(geom.coords[-1])
     return junctions
-
-
-def _get_chamber_polygon(lock_complexes: List[Dict], ch_id: str) -> Optional[Any]:
-    for c in lock_complexes:
-        for child in c.get("locks", []):
-            for ch in child.get("chambers", []):
-                if str(ch.get("id")) == ch_id:
-                    g = ch.get("geometry")
-                    if g:
-                        return wkt.loads(g) if isinstance(g, str) else g
-    return None
 
 
 def _filter_and_merge_features(features, to_remove, new_features):
