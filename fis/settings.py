@@ -157,6 +157,9 @@ BRIDGE_SECTION_MATCH_BUFFER_M = 20.0
 # Increased to 0.005 (~500m) to ensure large/staggered complexes match relevant sections.
 LOCK_SECTION_MATCH_BUFFER_DEG = 0.005
 
+# Radius (meters) to consider a structure cut as consuming a fairway junction.
+SPLICING_JUNCTION_TOLERANCE_M = 10.0
+
 # Radius (meters) to match FIS bridge records to DISK physical bridge geometries.
 DISK_MATCH_BUFFER_BRIDGE_M = 200.0
 

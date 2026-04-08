@@ -224,6 +224,13 @@ def test_scenario_6_oranjesluizen():
         )
         assert nx.has_path(G, e, merge_node), f"No path from {e} to {merge_node}"
 
+        # Verify ordering
+        path = nx.shortest_path(G, junction_start, merge_node)
+        if s in path and e in path:
+            assert path.index(s) < path.index(e), (
+                f"Chamber {ch_id} start must come before end"
+            )
+
     left_chambers = ["11446"]
     for ch_id in left_chambers:
         s = f"chamber_{ch_id}_start"
@@ -232,6 +239,12 @@ def test_scenario_6_oranjesluizen():
             f"No path from {junction_start} to {s}"
         )
         assert nx.has_path(G, e, merge_node), f"No path from {e} to {merge_node}"
+
+        path = nx.shortest_path(G, junction_start, merge_node)
+        if s in path and e in path:
+            assert path.index(s) < path.index(e), (
+                f"Chamber {ch_id} start must come before end"
+            )
 
     # Bonus Extensions for Oranjesluizen
     if extended_start in G:

@@ -128,11 +128,9 @@ def _handle_clear_section(all_features, sec):
     source_id = utils.stringify_id(start_junc)
     target_id = utils.stringify_id(end_junc)
 
-    line_rd = (
-        gpd.GeoSeries([line_geom], crs="EPSG:4326")
-        .to_crs(gpd.GeoSeries([line_geom], crs="EPSG:4326").estimate_utm_crs())
-        .iloc[0]
-    )
+    line_series = gpd.GeoSeries([line_geom], crs="EPSG:4326")
+    utm_crs = line_series.estimate_utm_crs()
+    line_rd = line_series.to_crs(utm_crs).iloc[0]
 
     all_features.append(
         {
@@ -197,7 +195,10 @@ def _handle_consumed_junctions(
     # Start junction
     if sec.get("StartJunctionId") and pd.notna(sec.get("StartJunctionId")):
         first_cut = min(cuts, key=lambda c: c.projected_distance - c.buffer_before)
-        if first_cut.projected_distance - first_cut.buffer_before <= 10.0:
+        if (
+            first_cut.projected_distance - first_cut.buffer_before
+            <= settings.SPLICING_JUNCTION_TOLERANCE_M
+        ):
             sj_id = utils.stringify_id(sec["StartJunctionId"])
             dtype, did = first_cut.id.split("_", 1)
             did = utils.stringify_id(did)
@@ -226,7 +227,10 @@ def _handle_consumed_junctions(
     # End junction
     if sec.get("EndJunctionId") and pd.notna(sec.get("EndJunctionId")):
         last_cut = max(cuts, key=lambda c: c.projected_distance + c.buffer_after)
-        if last_cut.projected_distance + last_cut.buffer_after >= total_length - 10.0:
+        if (
+            last_cut.projected_distance + last_cut.buffer_after
+            >= total_length - settings.SPLICING_JUNCTION_TOLERANCE_M
+        ):
             ej_id = utils.stringify_id(sec["EndJunctionId"])
             dtype, did = last_cut.id.split("_", 1)
             did = utils.stringify_id(did)
@@ -478,12 +482,24 @@ def _generate_structure_cuts(
                             .iloc[0]
                         )
                         coords = []
-                        if c_geom_rd.geom_type in ("Polygon", "MultiPolygon"):
-                            coords = c_geom_rd.exterior.coords
-                        elif c_geom_rd.geom_type in ("LineString", "MultiLineString"):
-                            coords = c_geom_rd.coords
+                        if c_geom_rd.geom_type == "Polygon":
+                            coords = list(c_geom_rd.exterior.coords)
+                        elif c_geom_rd.geom_type == "MultiPolygon":
+                            for poly in c_geom_rd.geoms:
+                                coords.extend(poly.exterior.coords)
+                        elif c_geom_rd.geom_type == "LineString":
+                            coords = list(c_geom_rd.coords)
+                        elif c_geom_rd.geom_type == "MultiLineString":
+                            for line in c_geom_rd.geoms:
+                                coords.extend(line.coords)
+                        elif c_geom_rd.geom_type == "Point":
+                            coords = [c_geom_rd.coords[0]]
                         else:
-                            coords = [c_geom_rd]
+                            try:
+                                coords = list(c_geom_rd.coords)
+                            except (AttributeError, NotImplementedError):
+                                coords = []
+
                         for coord in coords:
                             proj = line_rd.project(Point(coord))
                             min_proj = min(min_proj, proj)
