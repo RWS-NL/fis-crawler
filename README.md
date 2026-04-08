@@ -1,10 +1,10 @@
 ## Repository Overview
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14956321.svg)](https://doi.org/10.5281/zenodo.14956321)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19389586.svg)](https://doi.org/10.5281/zenodo.19389586)
 
 This repository crawls, processes, and exports inland waterway network data for transport modelling of Dutch and European inland waterways. It produces consistent, ready-to-use network graphs and lock schematizations for use in navigation and traffic simulation tools.
 
-The resulting dataset is published on Zenodo: **[FIS-EURIS Inland Waterway Network Dataset](https://doi.org/10.5281/zenodo.14956321)**.
+The resulting dataset is published on Zenodo: **[FIS-EURIS Inland Waterway Network Dataset](https://doi.org/10.5281/zenodo.19389586)**.
 
 ## Prerequisites & Installation
 
