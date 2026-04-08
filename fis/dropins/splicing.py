@@ -75,6 +75,13 @@ def splice_fairways(
 
         sid = utils.stringify_id(sec["id"])
         dropins_on_sec = dropins_by_section.get(sid, [])
+        if dropins_on_sec:
+            logger.debug(
+                "Splicing section %s with %d dropins: %s",
+                sid,
+                len(dropins_on_sec),
+                [d["type"] for d in dropins_on_sec],
+            )
 
         visible_dropins = [
             d
@@ -156,7 +163,9 @@ def _slice_section_with_dropins(
     line_rd = line_rd_series.to_crs(utm_crs).iloc[0]
 
     splicer = FairwaySplicer(line_rd)
+    logger.debug("  Splicing with %d visible dropins", len(visible_dropins))
     cuts = _generate_structure_cuts(line_rd, visible_dropins, utm_crs, mode=mode)
+    logger.debug("  Generated %d cuts", len(cuts))
     segments = splicer.splice(cuts)
 
     _handle_consumed_junctions(
@@ -188,7 +197,7 @@ def _handle_consumed_junctions(
     # Start junction
     if sec.get("StartJunctionId") and pd.notna(sec.get("StartJunctionId")):
         first_cut = min(cuts, key=lambda c: c.projected_distance - c.buffer_before)
-        if first_cut.projected_distance - first_cut.buffer_before <= 1.0:
+        if first_cut.projected_distance - first_cut.buffer_before <= 10.0:
             sj_id = utils.stringify_id(sec["StartJunctionId"])
             dtype, did = first_cut.id.split("_", 1)
             did = utils.stringify_id(did)
@@ -217,7 +226,7 @@ def _handle_consumed_junctions(
     # End junction
     if sec.get("EndJunctionId") and pd.notna(sec.get("EndJunctionId")):
         last_cut = max(cuts, key=lambda c: c.projected_distance + c.buffer_after)
-        if last_cut.projected_distance + last_cut.buffer_after >= total_length - 1.0:
+        if last_cut.projected_distance + last_cut.buffer_after >= total_length - 10.0:
             ej_id = utils.stringify_id(sec["EndJunctionId"])
             dtype, did = last_cut.id.split("_", 1)
             did = utils.stringify_id(did)
@@ -254,27 +263,39 @@ def _generate_spliced_features(
     fairway_id = utils.stringify_id(sec.get("fairway_id"))
 
     for i, segment in enumerate(segments):
-        seg_4326 = (
-            gpd.GeoSeries([segment.geometry], crs=utm_crs).to_crs("EPSG:4326").iloc[0]
-        )
+        seg_4326 = None
+        if segment.geometry:
+            seg_4326 = (
+                gpd.GeoSeries([segment.geometry], crs=utm_crs)
+                .to_crs("EPSG:4326")
+                .iloc[0]
+            )
+
+        # We need a reference point for assigning geometry to nodes if segment.geometry is None
+        # Use the start of the section geometry as a fallback
+        ref_geom = seg_4326 if seg_4326 else Point(sec.geometry.coords[0])
+
         source_node, is_start_junc = _determine_source_node(
             segment,
             sec.get("StartJunctionId"),
             original_dropins_on_sec,
-            seg_4326,
+            ref_geom,
             sec_id,
         )
         target_node, is_end_junc = _determine_target_node(
-            segment, sec.get("EndJunctionId"), original_dropins_on_sec, seg_4326, sec_id
+            segment, sec.get("EndJunctionId"), original_dropins_on_sec, ref_geom, sec_id
         )
 
         if source_node == target_node:
             continue
 
+        # Use ref_geom if segment.geometry is None (zero-length connection)
+        geom_to_map = seg_4326 if seg_4326 else ref_geom
+
         all_features.append(
             {
                 "type": "Feature",
-                "geometry": mapping(seg_4326),
+                "geometry": mapping(geom_to_map),
                 "properties": {
                     "id": f"fairway_segment_section_{sec_id}_{i}",
                     "feature_type": "fairway_segment",
@@ -288,13 +309,13 @@ def _generate_spliced_features(
                     or sec.get("FairwayName"),
                     "source_node": source_node,
                     "target_node": target_node,
-                    "length_m": segment.geometry.length,
+                    "length_m": segment.geometry.length if segment.geometry else 0.0,
                 },
             }
         )
         _yield_junction_nodes(
             all_features,
-            seg_4326,
+            geom_to_map,
             is_start_junc,
             is_end_junc,
             sec.get("StartJunctionId"),
@@ -303,13 +324,19 @@ def _generate_spliced_features(
 
 
 def _determine_source_node(
-    segment: Any, start_junc: Any, dropins: List[Dict], seg_4326: Any, sec_id: str
+    segment: Any, start_junc: Any, dropins: List[Dict], ref_geom: Any, sec_id: str
 ) -> Tuple[Optional[str], bool]:
     is_start = True
     node = utils.stringify_id(start_junc)
     if segment.source_structure_id:
         dtype, did = segment.source_structure_id.split("_", 1)
         did = utils.stringify_id(did)
+
+        # Determine the physical point for this connection
+        conn_pt = (
+            ref_geom if ref_geom.geom_type == "Point" else Point(ref_geom.coords[0])
+        )
+
         if dtype in ("terminal", "berth"):
             node = f"{dtype}_{did}_connection"
             _assign_geom_wkt(
@@ -317,7 +344,7 @@ def _determine_source_node(
                 dtype,
                 did,
                 "connection_geometry",
-                Point(seg_4326.coords[0]).wkt,
+                conn_pt.wkt,
             )
         else:
             node = _get_assigned_node(dropins, dtype, did, "merge_nodes", sec_id)
@@ -332,7 +359,7 @@ def _determine_source_node(
                 dtype,
                 did,
                 "merge_points",
-                Point(seg_4326.coords[0]).wkt,
+                conn_pt.wkt,
                 sec_id=sec_id,
             )
         is_start = False
@@ -340,13 +367,19 @@ def _determine_source_node(
 
 
 def _determine_target_node(
-    segment: Any, end_junc: Any, dropins: List[Dict], seg_4326: Any, sec_id: str
+    segment: Any, end_junc: Any, dropins: List[Dict], ref_geom: Any, sec_id: str
 ) -> Tuple[Optional[str], bool]:
     is_end = True
     node = utils.stringify_id(end_junc)
     if segment.target_structure_id:
         dtype, did = segment.target_structure_id.split("_", 1)
         did = utils.stringify_id(did)
+
+        # Determine the physical point for this connection
+        conn_pt = (
+            ref_geom if ref_geom.geom_type == "Point" else Point(ref_geom.coords[-1])
+        )
+
         if dtype in ("terminal", "berth"):
             node = f"{dtype}_{did}_connection"
             _assign_geom_wkt(
@@ -354,7 +387,7 @@ def _determine_target_node(
                 dtype,
                 did,
                 "connection_geometry",
-                Point(seg_4326.coords[-1]).wkt,
+                conn_pt.wkt,
             )
         else:
             node = _get_assigned_node(dropins, dtype, did, "split_nodes", sec_id)
@@ -369,7 +402,7 @@ def _determine_target_node(
                 dtype,
                 did,
                 "split_points",
-                Point(seg_4326.coords[-1]).wkt,
+                conn_pt.wkt,
                 sec_id=sec_id,
             )
         is_end = False
@@ -406,7 +439,25 @@ def _generate_structure_cuts(
         if geom_rd.geom_type != "Point":
             geom_rd = geom_rd.centroid
 
+        # Proximity check: skip if physically too far from centerline (e.g. > 500m)
+        dist_to_center = line_rd.distance(geom_rd)
+        if dist_to_center > 500.0:
+            logger.debug(
+                "  Skipping %s %s: too far (%.1fm)",
+                dropin["type"],
+                obj.get("id", obj.get("Id")),
+                dist_to_center,
+            )
+            continue
+
         dist = line_rd.project(geom_rd)
+        logger.debug(
+            "  Generated cut for %s %s at distance %.1f (dist to center: %.1fm)",
+            dropin["type"],
+            obj.get("id", obj.get("Id")),
+            dist,
+            dist_to_center,
+        )
 
         if dropin["type"] == "lock" and mode == "detailed":
             min_proj = float("inf")

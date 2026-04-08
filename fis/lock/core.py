@@ -471,12 +471,23 @@ def _find_connected_sections_optimized(
     if complex_geoms:
         complex_union = unary_union([g for g in complex_geoms if g])
         if complex_union:
-            buffered_union = complex_union.buffer(
-                settings.LOCK_SECTION_MATCH_BUFFER_DEG
+            # Determine local UTM CRS for physical buffering
+            utm_crs = gpd.GeoSeries([complex_union], crs="EPSG:4326").estimate_utm_crs()
+            complex_union_utm = (
+                gpd.GeoSeries([complex_union], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
             )
+
+            # Use 500m buffer in UTM
+            buffered_union_utm = complex_union_utm.buffer(500.0)
+            buffered_union_4326 = (
+                gpd.GeoSeries([buffered_union_utm], crs=utm_crs)
+                .to_crs("EPSG:4326")
+                .iloc[0]
+            )
+
             # Use spatial index query for performance
             possible_matches_index = sections_gdf.sindex.query(
-                buffered_union, predicate="intersects"
+                buffered_union_4326, predicate="intersects"
             )
             intersecting = sections_gdf.iloc[possible_matches_index]
 

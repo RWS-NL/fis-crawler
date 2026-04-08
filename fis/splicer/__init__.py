@@ -55,6 +55,12 @@ class FairwaySplicer:
 
         # 1. Sort structures purely by projected sequential distance along the line
         sorted_structures = sorted(structures, key=lambda o: o.projected_distance)
+        logger.debug(
+            "Splicing line of length %.1f with %d structures: %s",
+            self.total_length,
+            len(sorted_structures),
+            [s.id for s in sorted_structures],
+        )
 
         segments = []
         current_distance = 0.0
@@ -64,25 +70,21 @@ class FairwaySplicer:
         EPSILON = 0.001
 
         for struct in sorted_structures:
+            logger.debug(
+                "  Processing structure %s at %.1f (buffer: %.1f/%.1f)",
+                struct.id,
+                struct.projected_distance,
+                struct.buffer_before,
+                struct.buffer_after,
+            )
             split_distance = max(0.0, struct.projected_distance - struct.buffer_before)
             merge_distance = min(
                 self.total_length, struct.projected_distance + struct.buffer_after
             )
 
             # Ensure we don't go backwards or overlap negatively
-            split_distance = max(current_distance + EPSILON, split_distance)
-
-            # Prevent going out of bounds
-            if split_distance >= self.total_length:
-                split_distance = max(
-                    current_distance + EPSILON, self.total_length - (EPSILON * 2)
-                )
-
-            merge_distance = max(split_distance + EPSILON, merge_distance)
-            if merge_distance >= self.total_length:
-                merge_distance = max(
-                    split_distance + EPSILON, self.total_length - EPSILON
-                )
+            split_distance = max(current_distance, split_distance)
+            merge_distance = max(split_distance, merge_distance)
 
             start_distance = current_distance
             source_id = current_source_id
@@ -93,6 +95,13 @@ class FairwaySplicer:
             if split_distance > start_distance + EPSILON:
                 geom = substring(self.line, start_distance, split_distance)
                 if not geom.is_empty:
+                    logger.debug(
+                        "    Added segment: %.1f -> %.1f (%s -> %s)",
+                        start_distance,
+                        split_distance,
+                        source_id,
+                        struct.id,
+                    )
                     segments.append(
                         SplicedSegment(
                             geometry=geom,
@@ -101,14 +110,28 @@ class FairwaySplicer:
                         )
                     )
             else:
+                # Segment is too small for geometry, but we still record the topological connection
                 logger.debug(
-                    f"Skipping segment between {source_id} and {struct.id} due to overlap or precision limit."
+                    "    Added zero-geom segment (%s -> %s)", source_id, struct.id
+                )
+                segments.append(
+                    SplicedSegment(
+                        geometry=None,
+                        source_structure_id=source_id,
+                        target_structure_id=struct.id,
+                    )
                 )
 
         # 3. Final trailing segment after the last structure
         if current_distance < self.total_length:
             geom = substring(self.line, current_distance, self.total_length)
             if not geom.is_empty:
+                logger.debug(
+                    "    Added trailing segment: %.1f -> %.1f (%s -> None)",
+                    current_distance,
+                    self.total_length,
+                    current_source_id,
+                )
                 segments.append(
                     SplicedSegment(
                         geometry=geom,

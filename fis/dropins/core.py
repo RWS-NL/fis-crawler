@@ -110,15 +110,17 @@ def _map_dropins_to_sections(
     """
     dropins_by_section = {}
     for lock in lock_complexes:
+        # Create a single wrapper for this lock to be shared across all its sections
+        wrapper = {"type": "lock", "obj": lock}
         for sec in lock.get("sections", []):
             sid = utils.stringify_id(sec["id"])
-            dropins_by_section.setdefault(sid, []).append({"type": "lock", "obj": lock})
+            dropins_by_section.setdefault(sid, []).append(wrapper)
     for bridge in bridge_complexes:
+        # Create a single wrapper for this bridge to be shared
+        wrapper = {"type": "bridge", "obj": bridge}
         for sec in bridge.get("sections", []):
             sid = utils.stringify_id(sec["id"])
-            dropins_by_section.setdefault(sid, []).append(
-                {"type": "bridge", "obj": bridge}
-            )
+            dropins_by_section.setdefault(sid, []).append(wrapper)
     for term in terminals:
         sid = utils.stringify_id(term.get("FairwaySectionId"))
         if not sid:

@@ -11,7 +11,7 @@ os.makedirs(target_dir, exist_ok=True)
 source_dir = pathlib.Path("output/fis-export")
 
 # 1. Target Lock IDs
-lock_ids = [42863, 49032, 50750, 59464015]
+lock_ids = [42863, 49032, 50750, 59464015, 52078]
 
 # 2. Extract Locks
 locks = pd.read_parquet(source_dir / "lock.parquet")
@@ -37,12 +37,17 @@ subset_fairways.to_parquet(target_dir / "fairway.parquet")
 
 sections = gpd.read_parquet(source_dir / "section.geoparquet")
 subset_sections = sections[sections["FairwayId"].isin(fairway_ids)]
+# Explicitly add 47138
+if 47138 not in subset_sections["Id"].values:
+    s47138 = sections[sections["Id"] == 47138]
+    subset_sections = pd.concat([subset_sections, s47138])
+
 subset_sections.to_parquet(target_dir / "section.geoparquet")
 
 # 5. Extract Bridges & Openings - Spatial lookup
 bridges_gdf = gpd.read_parquet(source_dir / "bridge.geoparquet")
 lock_geoms = [wkt.loads(g) for g in subset_locks["Geometry"]]
-lock_union = gpd.GeoSeries(lock_geoms).union_all().buffer(0.01)  # ~1km buffer
+lock_union = gpd.GeoSeries(lock_geoms).union_all().buffer(0.01)
 
 subset_bridges = bridges_gdf[bridges_gdf.geometry.intersects(lock_union)]
 subset_bridges.to_parquet(target_dir / "bridge.parquet")
@@ -63,4 +68,3 @@ terminals.to_parquet(target_dir / "terminal.parquet")
 shutil.copy(source_dir / "RisIndexNL.xlsx", target_dir / "RisIndexNL.xlsx")
 
 print(f"Subset created in {target_dir}")
-print(f"Bridges: {len(subset_bridges)}, Openings: {len(subset_openings)}")
