@@ -6,11 +6,44 @@ import geopandas as gpd
 from shapely import wkt
 from shapely.geometry import Point, mapping
 from tqdm import tqdm
+from pyproj import Transformer
 
 from fis.splicer import FairwaySplicer, StructureCut
 from fis import settings, utils
 
 logger = logging.getLogger(__name__)
+
+_UTM_CRS_CACHE = {}
+_TRANSFORMER_CACHE = {}
+
+
+def _get_cached_utm_crs(geom: Any) -> str:
+    """
+    Cache UTM CRS estimation based on rounded coordinates to avoid redundant calls.
+    """
+    if geom is None or geom.is_empty:
+        return "EPSG:32631"  # Fallback to UTM 31N
+
+    # Use centroid rounded to 0.5 degrees (~50km) as cache key
+    c = geom.centroid
+    key = (round(c.x * 2) / 2, round(c.y * 2) / 2)
+    if key not in _UTM_CRS_CACHE:
+        _UTM_CRS_CACHE[key] = gpd.GeoSeries([geom], crs="EPSG:4326").estimate_utm_crs()
+    return _UTM_CRS_CACHE[key]
+
+
+def _get_transformer(target_crs: str) -> Transformer:
+    if target_crs not in _TRANSFORMER_CACHE:
+        _TRANSFORMER_CACHE[target_crs] = Transformer.from_crs(
+            "EPSG:4326", target_crs, always_xy=True
+        )
+    return _TRANSFORMER_CACHE[target_crs]
+
+
+def _reproject_geom(geom: Any, transformer: Transformer) -> Any:
+    from shapely.ops import transform
+
+    return transform(transformer.transform, geom)
 
 
 def splice_fairways(
@@ -36,32 +69,27 @@ def splice_fairways(
         if needs_alias:
             sections = sections.copy()
 
-        if (
-            "StartJunctionId" not in sections.columns
-            and "start_junction_id" in sections.columns
-        ):
-            sections["StartJunctionId"] = sections["start_junction_id"]
-        if (
-            "EndJunctionId" not in sections.columns
-            and "end_junction_id" in sections.columns
-        ):
-            sections["EndJunctionId"] = sections["end_junction_id"]
-
-        if (
-            "start_junction_id" not in sections.columns
-            and "StartJunctionId" in sections.columns
-        ):
-            sections["start_junction_id"] = sections["StartJunctionId"]
-        if (
-            "end_junction_id" not in sections.columns
-            and "EndJunctionId" in sections.columns
-        ):
-            sections["end_junction_id"] = sections["EndJunctionId"]
+        for old, new in [
+            ("start_junction_id", "StartJunctionId"),
+            ("end_junction_id", "EndJunctionId"),
+            ("StartJunctionId", "start_junction_id"),
+            ("EndJunctionId", "end_junction_id"),
+        ]:
+            if old in sections.columns and new not in sections.columns:
+                sections[new] = sections[old]
 
     all_features = []
 
     sections_gdf = _prepare_sections_gdf(sections)
     embedded_ids = {str(k) for k in embedded_bridges.keys()}
+
+    # Performance: Pre-calculate string IDs for junctions and sections
+    sections_gdf["sid_str"] = sections_gdf["id"].apply(utils.stringify_id)
+    sections_gdf["sj_str"] = sections_gdf["StartJunctionId"].apply(utils.stringify_id)
+    sections_gdf["ej_str"] = sections_gdf["EndJunctionId"].apply(utils.stringify_id)
+    sections_gdf["fw_str"] = sections_gdf.get(
+        "fairway_id", pd.Series([None] * len(sections_gdf))
+    ).apply(utils.stringify_id)
 
     for _, sec in tqdm(
         sections_gdf.iterrows(),
@@ -73,14 +101,19 @@ def splice_fairways(
         if not line_geom or line_geom.is_empty:
             continue
 
-        sid = utils.stringify_id(sec["id"])
+        sid = sec["sid_str"]
         dropins_on_sec = dropins_by_section.get(sid, [])
+
+        # Pre-process dropins for this section into a lookup dictionary
+        dropin_lookup = {}
+        for d in dropins_on_sec:
+            if "id_str" not in d:
+                d["id_str"] = utils.stringify_id(d["obj"].get("id", d["obj"].get("Id")))
+            dropin_lookup[(d["type"], d["id_str"])] = d
+
         if dropins_on_sec:
             logger.debug(
-                "Splicing section %s with %d dropins: %s",
-                sid,
-                len(dropins_on_sec),
-                [d["type"] for d in dropins_on_sec],
+                "Splicing section %s with %d dropins", sid, len(dropins_on_sec)
             )
 
         visible_dropins = [
@@ -94,18 +127,36 @@ def splice_fairways(
             continue
 
         _slice_section_with_dropins(
-            all_features, sec, visible_dropins, dropins_on_sec, mode=mode
+            all_features, sec, visible_dropins, dropin_lookup, mode=mode
         )
+
+    # Performance Cleanup: Remove temporary attributes attached during splicing to allow Parquet export
+    # These attributes (like geom objects) cannot be serialized by pyarrow in the object column.
+    for dropins in dropins_by_section.values():
+        for d in dropins:
+            obj = d.get("obj", {})
+            for attr in ["id_str", "anchor_geom", "opening_ids_str"]:
+                if attr in d:
+                    del d[attr]
+                if attr in obj:
+                    del obj[attr]
+
+            # Deep cleanup for locks/chambers
+            if d.get("type") == "lock":
+                for lk in obj.get("locks", []):
+                    for ch in lk.get("chambers", []):
+                        if "geom_obj" in ch:
+                            del ch["geom_obj"]
+
     return all_features
 
 
 def _is_embedded(dropin: Dict, embedded_ids: Set[str]) -> bool:
     if dropin["type"] != "bridge":
         return False
-    for op in dropin["obj"]["openings"]:
-        if str(op["id"]) in embedded_ids:
-            return True
-    return False
+    if "opening_ids_str" not in dropin:
+        dropin["opening_ids_str"] = {str(op["id"]) for op in dropin["obj"]["openings"]}
+    return not dropin["opening_ids_str"].isdisjoint(embedded_ids)
 
 
 def _prepare_sections_gdf(sections: pd.DataFrame) -> gpd.GeoDataFrame:
@@ -118,19 +169,16 @@ def _prepare_sections_gdf(sections: pd.DataFrame) -> gpd.GeoDataFrame:
 
 
 def _handle_clear_section(all_features, sec):
-    sid = utils.stringify_id(sec["id"])
-    fairway_id = utils.stringify_id(sec.get("fairway_id"))
+    sid = sec["sid_str"]
+    fairway_id = sec["fw_str"]
     name = sec.get("name") or sec.get("Name") or sec.get("FairwayName")
-    start_junc = sec.get("StartJunctionId")
-    end_junc = sec.get("EndJunctionId")
+    sj_str = sec["sj_str"]
+    ej_str = sec["ej_str"]
     line_geom = sec.geometry
 
-    source_id = utils.stringify_id(start_junc)
-    target_id = utils.stringify_id(end_junc)
-
-    line_series = gpd.GeoSeries([line_geom], crs="EPSG:4326")
-    utm_crs = line_series.estimate_utm_crs()
-    line_rd = line_series.to_crs(utm_crs).iloc[0]
+    utm_crs = _get_cached_utm_crs(line_geom)
+    transformer = _get_transformer(utm_crs)
+    line_rd = _reproject_geom(line_geom, transformer)
 
     all_features.append(
         {
@@ -143,27 +191,25 @@ def _handle_clear_section(all_features, sec):
                 "section_id": sid,
                 "fairway_id": fairway_id,
                 "name": name,
-                "source_node": source_id,
-                "target_node": target_id,
+                "source_node": sj_str,
+                "target_node": ej_str,
                 "length_m": line_rd.length,
             },
         }
     )
-    _yield_junction_nodes(all_features, line_geom, True, True, start_junc, end_junc)
+    _yield_junction_nodes(all_features, line_geom, True, True, sj_str, ej_str)
 
 
 def _slice_section_with_dropins(
-    all_features, sec, visible_dropins, original_dropins_on_sec, mode="detailed"
+    all_features, sec, visible_dropins, dropin_lookup, mode="detailed"
 ):
     line_geom = sec.geometry
-    line_rd_series = gpd.GeoSeries([line_geom], crs="EPSG:4326")
-    utm_crs = line_rd_series.estimate_utm_crs()
-    line_rd = line_rd_series.to_crs(utm_crs).iloc[0]
+    utm_crs = _get_cached_utm_crs(line_geom)
+    transformer = _get_transformer(utm_crs)
+    line_rd = _reproject_geom(line_geom, transformer)
 
     splicer = FairwaySplicer(line_rd)
-    logger.debug("  Splicing with %d visible dropins", len(visible_dropins))
     cuts = _generate_structure_cuts(line_rd, visible_dropins, utm_crs, mode=mode)
-    logger.debug("  Generated %d cuts", len(cuts))
     segments = splicer.splice(cuts)
 
     _handle_consumed_junctions(
@@ -173,16 +219,14 @@ def _slice_section_with_dropins(
         line_geom,
         utm_crs,
         splicer.total_length,
-        original_dropins_on_sec,
+        dropin_lookup,
     )
 
-    _generate_spliced_features(
-        all_features, sec, segments, original_dropins_on_sec, utm_crs
-    )
+    _generate_spliced_features(all_features, sec, segments, dropin_lookup, utm_crs)
 
 
 def _handle_consumed_junctions(
-    all_features, sec, cuts, line_geom, utm_crs, total_length, original_dropins_on_sec
+    all_features, sec, cuts, line_geom, utm_crs, total_length, dropin_lookup
 ):
     """
     Generate connecting edges if the structures consumed the start or end junctions.
@@ -190,22 +234,22 @@ def _handle_consumed_junctions(
     if not cuts:
         return
 
-    sec_id = utils.stringify_id(sec["id"])
+    sec_id = sec["sid_str"]
+    sj_str = sec["sj_str"]
+    ej_str = sec["ej_str"]
 
     # Start junction
-    if sec.get("StartJunctionId") and pd.notna(sec.get("StartJunctionId")):
+    if sj_str and sj_str != "None":
         first_cut = min(cuts, key=lambda c: c.projected_distance - c.buffer_before)
         if (
             first_cut.projected_distance - first_cut.buffer_before
             <= settings.SPLICING_JUNCTION_TOLERANCE_M
         ):
-            sj_id = utils.stringify_id(sec["StartJunctionId"])
             dtype, did = first_cut.id.split("_", 1)
-            did = utils.stringify_id(did)
             if dtype not in ("terminal", "berth"):
                 pt_4326 = Point(line_geom.coords[0])
                 _assign_geom_wkt(
-                    original_dropins_on_sec,
+                    dropin_lookup,
                     dtype,
                     did,
                     "merge_points",
@@ -213,31 +257,29 @@ def _handle_consumed_junctions(
                     sec_id=sec_id,
                 )
                 _assign_geom_wkt(
-                    original_dropins_on_sec,
+                    dropin_lookup,
                     dtype,
                     did,
                     "merge_nodes",
-                    sj_id,
+                    sj_str,
                     sec_id=sec_id,
                 )
                 _yield_junction_nodes(
-                    all_features, line_geom, True, False, sec["StartJunctionId"], None
+                    all_features, line_geom, True, False, sj_str, None
                 )
 
     # End junction
-    if sec.get("EndJunctionId") and pd.notna(sec.get("EndJunctionId")):
+    if ej_str and ej_str != "None":
         last_cut = max(cuts, key=lambda c: c.projected_distance + c.buffer_after)
         if (
             last_cut.projected_distance + last_cut.buffer_after
             >= total_length - settings.SPLICING_JUNCTION_TOLERANCE_M
         ):
-            ej_id = utils.stringify_id(sec["EndJunctionId"])
             dtype, did = last_cut.id.split("_", 1)
-            did = utils.stringify_id(did)
             if dtype not in ("terminal", "berth"):
                 pt_4326 = Point(line_geom.coords[-1])
                 _assign_geom_wkt(
-                    original_dropins_on_sec,
+                    dropin_lookup,
                     dtype,
                     did,
                     "split_points",
@@ -245,26 +287,26 @@ def _handle_consumed_junctions(
                     sec_id=sec_id,
                 )
                 _assign_geom_wkt(
-                    original_dropins_on_sec,
+                    dropin_lookup,
                     dtype,
                     did,
                     "split_nodes",
-                    ej_id,
+                    ej_str,
                     sec_id=sec_id,
                 )
                 _yield_junction_nodes(
-                    all_features, line_geom, False, True, None, sec["EndJunctionId"]
+                    all_features, line_geom, False, True, None, ej_str
                 )
 
 
-def _generate_spliced_features(
-    all_features, sec, segments, original_dropins_on_sec, utm_crs
-):
+def _generate_spliced_features(all_features, sec, segments, dropin_lookup, utm_crs):
     """
     Convert spliced segments into GeoJSON features.
     """
-    sec_id = utils.stringify_id(sec["id"])
-    fairway_id = utils.stringify_id(sec.get("fairway_id"))
+    sec_id = sec["sid_str"]
+    fairway_id = sec["fw_str"]
+    sj_str = sec["sj_str"]
+    ej_str = sec["ej_str"]
 
     for i, segment in enumerate(segments):
         seg_4326 = None
@@ -275,19 +317,18 @@ def _generate_spliced_features(
                 .iloc[0]
             )
 
-        # We need a reference point for assigning geometry to nodes if segment.geometry is None
         # Use the start of the section geometry as a fallback
         ref_geom = seg_4326 if seg_4326 else Point(sec.geometry.coords[0])
 
         source_node, is_start_junc = _determine_source_node(
             segment,
-            sec.get("StartJunctionId"),
-            original_dropins_on_sec,
+            sj_str,
+            dropin_lookup,
             ref_geom,
             sec_id,
         )
         target_node, is_end_junc = _determine_target_node(
-            segment, sec.get("EndJunctionId"), original_dropins_on_sec, ref_geom, sec_id
+            segment, ej_str, dropin_lookup, ref_geom, sec_id
         )
 
         if source_node == target_node:
@@ -322,19 +363,18 @@ def _generate_spliced_features(
             geom_to_map,
             is_start_junc,
             is_end_junc,
-            sec.get("StartJunctionId"),
-            sec.get("EndJunctionId"),
+            sj_str,
+            ej_str,
         )
 
 
 def _determine_source_node(
-    segment: Any, start_junc: Any, dropins: List[Dict], ref_geom: Any, sec_id: str
+    segment: Any, sj_str: Optional[str], dropin_lookup: Dict, ref_geom: Any, sec_id: str
 ) -> Tuple[Optional[str], bool]:
     is_start = True
-    node = utils.stringify_id(start_junc)
+    node = sj_str
     if segment.source_structure_id:
         dtype, did = segment.source_structure_id.split("_", 1)
-        did = utils.stringify_id(did)
 
         # Determine the physical point for this connection
         conn_pt = (
@@ -344,22 +384,22 @@ def _determine_source_node(
         if dtype in ("terminal", "berth"):
             node = f"{dtype}_{did}_connection"
             _assign_geom_wkt(
-                dropins,
+                dropin_lookup,
                 dtype,
                 did,
                 "connection_geometry",
                 conn_pt.wkt,
             )
         else:
-            node = _get_assigned_node(dropins, dtype, did, "merge_nodes", sec_id)
+            node = _get_assigned_node(dropin_lookup, dtype, did, "merge_nodes", sec_id)
             if not node:
                 node = f"{dtype}_{did}_{sec_id}_merge"
                 _assign_geom_wkt(
-                    dropins, dtype, did, "merge_nodes", node, sec_id=sec_id
+                    dropin_lookup, dtype, did, "merge_nodes", node, sec_id=sec_id
                 )
 
             _assign_geom_wkt(
-                dropins,
+                dropin_lookup,
                 dtype,
                 did,
                 "merge_points",
@@ -371,13 +411,12 @@ def _determine_source_node(
 
 
 def _determine_target_node(
-    segment: Any, end_junc: Any, dropins: List[Dict], ref_geom: Any, sec_id: str
+    segment: Any, ej_str: Optional[str], dropin_lookup: Dict, ref_geom: Any, sec_id: str
 ) -> Tuple[Optional[str], bool]:
     is_end = True
-    node = utils.stringify_id(end_junc)
+    node = ej_str
     if segment.target_structure_id:
         dtype, did = segment.target_structure_id.split("_", 1)
-        did = utils.stringify_id(did)
 
         # Determine the physical point for this connection
         conn_pt = (
@@ -387,22 +426,22 @@ def _determine_target_node(
         if dtype in ("terminal", "berth"):
             node = f"{dtype}_{did}_connection"
             _assign_geom_wkt(
-                dropins,
+                dropin_lookup,
                 dtype,
                 did,
                 "connection_geometry",
                 conn_pt.wkt,
             )
         else:
-            node = _get_assigned_node(dropins, dtype, did, "split_nodes", sec_id)
+            node = _get_assigned_node(dropin_lookup, dtype, did, "split_nodes", sec_id)
             if not node:
                 node = f"{dtype}_{did}_{sec_id}_split"
                 _assign_geom_wkt(
-                    dropins, dtype, did, "split_nodes", node, sec_id=sec_id
+                    dropin_lookup, dtype, did, "split_nodes", node, sec_id=sec_id
                 )
 
             _assign_geom_wkt(
-                dropins,
+                dropin_lookup,
                 dtype,
                 did,
                 "split_points",
@@ -413,55 +452,37 @@ def _determine_target_node(
     return node, is_end
 
 
-def _get_assigned_node(dropins, dtype, did, key, sec_id):
-    did_str = utils.stringify_id(did)
-    for dropin in dropins:
-        if (
-            dropin["type"] == dtype
-            and utils.stringify_id(dropin["obj"].get("id", dropin["obj"].get("Id")))
-            == did_str
-        ):
-            return dropin["obj"].get(key, {}).get(sec_id)
+def _get_assigned_node(dropin_lookup, dtype, did, key, sec_id):
+    dropin = dropin_lookup.get((dtype, did))
+    if dropin:
+        return dropin["obj"].get(key, {}).get(sec_id)
     return None
 
 
 def _generate_structure_cuts(
-    line_rd: Any, dropins_on_sec: List[Dict], utm_crs: str, mode: str = "detailed"
+    line_rd: Any, visible_dropins: List[Dict], utm_crs: str, mode: str = "detailed"
 ) -> List[StructureCut]:
     cuts = []
-    for dropin in dropins_on_sec:
+    transformer = _get_transformer(utm_crs)
+    for dropin in visible_dropins:
         obj = dropin["obj"]
-        geom_val = obj.get("topological_anchor") or obj.get("geometry")
-        if not geom_val:
-            raise ValueError(
-                f"Drop-in {dropin['type']} {obj.get('id', obj.get('Id'))} has no geometry or topological_anchor. "
-                "Cannot calculate splicing position."
-            )
+        did_str = dropin["id_str"]
 
-        geom = wkt.loads(geom_val) if isinstance(geom_val, str) else geom_val
-        geom_rd = gpd.GeoSeries([geom], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+        if "anchor_geom" not in dropin:
+            gv = obj.get("topological_anchor") or obj.get("geometry")
+            if not gv:
+                raise ValueError(f"Drop-in {dropin['type']} {did_str} has no geometry.")
+            dropin["anchor_geom"] = wkt.loads(gv) if isinstance(gv, str) else gv
+
+        geom_rd = _reproject_geom(dropin["anchor_geom"], transformer)
         if geom_rd.geom_type != "Point":
             geom_rd = geom_rd.centroid
 
-        # Proximity check: skip if physically too far from centerline (e.g. > 500m)
         dist_to_center = line_rd.distance(geom_rd)
         if dist_to_center > 500.0:
-            logger.debug(
-                "  Skipping %s %s: too far (%.1fm)",
-                dropin["type"],
-                obj.get("id", obj.get("Id")),
-                dist_to_center,
-            )
             continue
 
         dist = line_rd.project(geom_rd)
-        logger.debug(
-            "  Generated cut for %s %s at distance %.1f (dist to center: %.1fm)",
-            dropin["type"],
-            obj.get("id", obj.get("Id")),
-            dist,
-            dist_to_center,
-        )
 
         if dropin["type"] == "lock" and mode == "detailed":
             min_proj = float("inf")
@@ -469,18 +490,15 @@ def _generate_structure_cuts(
             valid = False
             for child in obj.get("locks", []):
                 for ch in child.get("chambers", []):
-                    c_geom_val = ch.get("route_geometry") or ch.get("geometry")
-                    if c_geom_val:
-                        c_geom = (
-                            wkt.loads(c_geom_val)
-                            if isinstance(c_geom_val, str)
-                            else c_geom_val
-                        )
-                        c_geom_rd = (
-                            gpd.GeoSeries([c_geom], crs="EPSG:4326")
-                            .to_crs(utm_crs)
-                            .iloc[0]
-                        )
+                    if "geom_obj" not in ch:
+                        gv = ch.get("route_geometry") or ch.get("geometry")
+                        if gv:
+                            ch["geom_obj"] = (
+                                wkt.loads(gv) if isinstance(gv, str) else gv
+                            )
+
+                    if "geom_obj" in ch:
+                        c_geom_rd = _reproject_geom(ch["geom_obj"], transformer)
                         coords = []
                         if c_geom_rd.geom_type == "Polygon":
                             coords = list(c_geom_rd.exterior.coords)
@@ -537,7 +555,7 @@ def _generate_structure_cuts(
 
         cuts.append(
             StructureCut(
-                id=f"{dropin['type']}_{utils.stringify_id(obj.get('id', obj.get('Id')))}",
+                id=f"{dropin['type']}_{did_str}",
                 geometry=geom_rd,
                 projected_distance=dist,
                 buffer_before=buffer_before,
@@ -547,49 +565,41 @@ def _generate_structure_cuts(
     return cuts
 
 
-def _yield_junction_nodes(all_features, line, is_start, is_end, start_junc, end_junc):
-    if is_start and pd.notna(start_junc):
-        node_id = utils.stringify_id(start_junc)
+def _yield_junction_nodes(all_features, line, is_start, is_end, sj_str, ej_str):
+    if is_start and sj_str and sj_str != "None":
         all_features.append(
             {
                 "type": "Feature",
                 "geometry": mapping(Point(line.coords[0])),
                 "properties": {
-                    "id": node_id,
+                    "id": sj_str,
                     "feature_type": "node",
                     "node_type": "junction",
-                    "node_id": node_id,
+                    "node_id": sj_str,
                 },
             }
         )
-    if is_end and pd.notna(end_junc):
-        node_id = utils.stringify_id(end_junc)
+    if is_end and ej_str and ej_str != "None":
         all_features.append(
             {
                 "type": "Feature",
                 "geometry": mapping(Point(line.coords[-1])),
                 "properties": {
-                    "id": node_id,
+                    "id": ej_str,
                     "feature_type": "node",
                     "node_type": "junction",
-                    "node_id": node_id,
+                    "node_id": ej_str,
                 },
             }
         )
 
 
-def _assign_geom_wkt(dropins_list, dtype, did, key, wkt_str, sec_id=None):
-    did_str = utils.stringify_id(did)
-    for dropin in dropins_list:
-        if (
-            dropin["type"] == dtype
-            and utils.stringify_id(dropin["obj"].get("id", dropin["obj"].get("Id")))
-            == did_str
-        ):
-            if sec_id:
-                if key not in dropin["obj"]:
-                    dropin["obj"][key] = {}
-                dropin["obj"][key][sec_id] = wkt_str
-            else:
-                dropin["obj"][key] = wkt_str
-            break
+def _assign_geom_wkt(dropin_lookup, dtype, did_str, key, wkt_str, sec_id=None):
+    dropin = dropin_lookup.get((dtype, did_str))
+    if dropin:
+        if sec_id:
+            if key not in dropin["obj"]:
+                dropin["obj"][key] = {}
+            dropin["obj"][key][sec_id] = wkt_str
+        else:
+            dropin["obj"][key] = wkt_str

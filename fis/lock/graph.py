@@ -278,8 +278,8 @@ def _process_fairway_connections(
     for sec_id, wkt_str in split_points.items():
         if wkt_str:
             geom = wkt.loads(wkt_str)
-            split_node_id = split_nodes_assigned.get(
-                sec_id, f"lock_{lock_id}_{sec_id}_split"
+            split_node_id = str(
+                split_nodes_assigned.get(sec_id, f"lock_{lock_id}_{sec_id}_split")
             )
             # Only create a node feature if it's not a pre-existing junction
             # Junction nodes are created separately via _yield_junction_nodes
@@ -309,8 +309,8 @@ def _process_fairway_connections(
     for sec_id, wkt_str in merge_points.items():
         if wkt_str:
             geom = wkt.loads(wkt_str)
-            merge_node_id = merge_nodes_assigned.get(
-                sec_id, f"lock_{lock_id}_{sec_id}_merge"
+            merge_node_id = str(
+                merge_nodes_assigned.get(sec_id, f"lock_{lock_id}_{sec_id}_merge")
             )
             logger.debug("  Merge node for sec %s: %s", sec_id, merge_node_id)
             if not merge_node_id.isdigit() and "junction" not in merge_node_id:

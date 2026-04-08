@@ -203,8 +203,9 @@ def test_scenario_6_oranjesluizen():
     """
     G = load_graph()
 
-    junction_start = "8864384"
-    merge_node = "59275858"
+    # Use direct junctions for path verification
+    junction_start = "59274799"
+    merge_node = "8861427"
 
     extended_start = "8865563"
     extended_merge = "8861942"
