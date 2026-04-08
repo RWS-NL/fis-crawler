@@ -5,7 +5,11 @@ from typing import List, Dict, Any
 import pandas as pd
 
 from fis.dropins.io import export_graph
-from fis.dropins.embedded import identify_embedded_structures, inject_embedded_bridges
+from fis.dropins.embedded import (
+    identify_embedded_structures,
+    inject_embedded_bridges,
+    inject_embedded_junctions,
+)
 from fis.dropins.splicing import splice_fairways
 from fis.dropins.graph import generate_simplified_passages
 from fis.dropins.terminals import generate_terminal_graph_features
@@ -78,6 +82,7 @@ def build_integrated_dropins_graph(
     all_features.extend(generate_simplified_passages(simplified_bridges, "bridge"))
 
     if mode == "detailed":
+        all_features = inject_embedded_junctions(all_features, lock_complexes, sections)
         all_features = inject_embedded_bridges(
             all_features, lock_complexes, bridge_complexes, embedded_bridges
         )
@@ -105,15 +110,17 @@ def _map_dropins_to_sections(
     """
     dropins_by_section = {}
     for lock in lock_complexes:
+        # Create a single wrapper for this lock to be shared across all its sections
+        wrapper = {"type": "lock", "obj": lock}
         for sec in lock.get("sections", []):
             sid = utils.stringify_id(sec["id"])
-            dropins_by_section.setdefault(sid, []).append({"type": "lock", "obj": lock})
+            dropins_by_section.setdefault(sid, []).append(wrapper)
     for bridge in bridge_complexes:
+        # Create a single wrapper for this bridge to be shared
+        wrapper = {"type": "bridge", "obj": bridge}
         for sec in bridge.get("sections", []):
             sid = utils.stringify_id(sec["id"])
-            dropins_by_section.setdefault(sid, []).append(
-                {"type": "bridge", "obj": bridge}
-            )
+            dropins_by_section.setdefault(sid, []).append(wrapper)
     for term in terminals:
         sid = utils.stringify_id(term.get("FairwaySectionId"))
         if not sid:

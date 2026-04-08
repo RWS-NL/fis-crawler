@@ -85,11 +85,18 @@ Functions like `process_fairway_geometry` were duplicated across modules with di
 Enrichment modules added prefixes like `speed_Speed` which created "Double CamelCase".
 - **Solution:** `apply_schema_mapping` in `fis/graph/schema.py` renames these to flat canonical names (e.g., `speed_Speed` → `maxspeed`) before final graph export.
 
-## 5. Lock-Specific Refinements
-The splitting of fairways for lock complexes involves specialized logic to ensure topological integrity when bridge openings are present:
-- **Dynamic Buffering:** If bridge openings are parented to a lock or its chambers, the `buffer_dist` is automatically expanded to encompass the farthest opening plus a 100m safety margin.
-- **Metric Projection:** All calculations for splitting and buffering use the **RD New (EPSG:28992)** projected coordinate system to ensure accurate distances in meters.
-- **Centralization:** This logic is implemented in `utils.process_fairway_geometry` and shared across lock and bridge modules.
+## 5. Topological Naming Rules
+To ensure a consistent and direction-neutral (relative to traffic) representation, the project defines topological roles relative to the **fairway geometry direction** (increasing coordinate distance / route km).
+
+| Term | Rule | Description |
+| :--- | :--- | :--- |
+| **`_split`** | Upstream Interface | The node where the fairway section enters a structure complex (lower projected distance). |
+| **`_merge`** | Downstream Interface | The node where the fairway section exits a structure complex (higher projected distance). |
+| **`_start`** | Upstream Endpoint | The entrance door of a chamber or the start of a bridge opening (lower projected distance). |
+| **`_end`** | Downstream Endpoint | The exit door of a chamber or the end of a bridge opening (higher projected distance). |
+
+### Important Note on Direction
+"Upstream" and "Downstream" in this context refer strictly to the mathematical direction of the LineString geometry in the source data, which is invariant regardless of traffic flow. 
 
 ## 6. Maintenance
 When adding new FIS data sources:
