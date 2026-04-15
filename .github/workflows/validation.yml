@@ -487,7 +487,7 @@ jobs:
           retention-days: 30
 
   validate-bivas:
-    needs: [build-fis-graph]
+    needs: [crawl-fis, crawl-euris, build-fis-graph]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -508,6 +508,16 @@ jobs:
         with:
           name: fis-enriched
           path: output/fis-enriched/
+      - name: Download FIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: fis-export
+          path: output/fis-export/
+      - name: Download EURIS Export
+        uses: actions/download-artifact@v4
+        with:
+          name: euris-export
+          path: output/euris-export/
       - name: Run BIVAS Comparison
         run: make validate-bivas
       - name: Upload BIVAS Validation Artifacts

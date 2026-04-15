@@ -253,8 +253,14 @@ def _resolve_fairway_data(
             "fairway_id": stringify_id(fw_obj["id"]),
         }
         max_length = 0
-        if not lock_chambers.empty and "dim_length" in lock_chambers.columns:
-            max_length = lock_chambers["dim_length"].max()
+        if not lock_chambers.empty:
+            # Prioritize usable length for calculation buffer, fallback to structural
+            possible_len_cols = ["dim_usable_length", "dim_structural_length"]
+            actual_len_col = next(
+                (c for c in possible_len_cols if c in lock_chambers.columns), None
+            )
+            if actual_len_col:
+                max_length = lock_chambers[actual_len_col].max()
         if pd.isna(max_length):
             max_length = 0
 
@@ -370,15 +376,32 @@ def _build_chamber_objects_optimized(
             op_id = stringify_id(chamber["operating_times_id"])
             chamber_op_times = op_times_map.get(op_id)
 
+        # Determine functional dimensions for generic navigation (length/width)
+        # Prioritize usable bounds, fallback to structural
+        usable_len = chamber.get("dim_usable_length")
+        if pd.isna(usable_len):
+            usable_len = chamber.get("dim_structural_length")
+
+        gate_width = chamber.get("dim_gate_width")
+        if pd.isna(gate_width):
+            gate_width = chamber.get("dim_structural_width")
+
         c_obj = {
             **chamber_attrs,
             "id": chamber_id,
             "name": chamber["name"],
-            "length": float(chamber["dim_length"])
-            if pd.notna(chamber["dim_length"])
+            # Primary navigation dimensions
+            "length": float(usable_len) if pd.notna(usable_len) else None,
+            "width": float(gate_width) if pd.notna(gate_width) else None,
+            # Explicitly preserved measurements
+            "structural_length": float(chamber.get("dim_structural_length"))
+            if pd.notna(chamber.get("dim_structural_length"))
             else None,
-            "width": float(chamber["dim_width"])
-            if pd.notna(chamber["dim_width"])
+            "structural_width": float(chamber.get("dim_structural_width"))
+            if pd.notna(chamber.get("dim_structural_width"))
+            else None,
+            "gate_width": float(chamber.get("dim_gate_width"))
+            if pd.notna(chamber.get("dim_gate_width"))
             else None,
             "route_geometry": route_wkt,
             "operating_times": chamber_op_times,
@@ -426,8 +449,8 @@ def _find_connected_sections_optimized(
                         "id": sid,
                         "name": s_row["name"],
                         "fairway_id": fid,
-                        "length": float(s_row["dim_length"])
-                        if pd.notna(s_row.get("dim_length"))
+                        "length": float(s_row["dim_structural_length"])
+                        if pd.notna(s_row.get("dim_structural_length"))
                         else None,
                         "geometry": s_row.geometry.wkt
                         if hasattr(s_row, "geometry") and s_row.geometry
@@ -496,8 +519,8 @@ def _find_connected_sections_optimized(
                         "id": sid,
                         "name": s_row["name"],
                         "fairway_id": fid,
-                        "length": float(s_row["dim_length"])
-                        if pd.notna(s_row.get("dim_length"))
+                        "length": float(s_row["dim_structural_length"])
+                        if pd.notna(s_row.get("dim_structural_length"))
                         else None,
                         "geometry": s_row.geometry.wkt
                         if hasattr(s_row, "geometry") and s_row.geometry

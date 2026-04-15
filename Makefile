@@ -89,16 +89,20 @@ validate-merged: merge-graphs logs-dir
 
 FIS_ENRICHED = output/fis-enriched/edges.geoparquet
 
-validate-bivas: reference/Bivas.5.10.1.sqlite logs-dir
+validate-bivas: reference/Bivas.5.10.1.sqlite crawl-fis crawl-euris logs-dir
 	@if [ ! -f $(FIS_ENRICHED) ]; then \
 		$(MAKE) build-fis-graph; \
 	fi
+	@echo "Running BIVAS network comparison..."
 	uv run python scripts/bivas/compare_networks.py \
 		--bivas-db reference/Bivas.5.10.1.sqlite \
 		--bivas-version 5.10.1 \
 		--fis-edges $(FIS_ENRICHED) \
 		--fis-version $$(date +%Y%m%d) \
 		--output-dir output/bivas-validation 2>&1 | tee output/logs/validate-bivas.log
+	@echo "Running lock chamber consistency check..."
+	uv run python scripts/lock_chamber_consistency.py \
+		--output-dir output/bivas-validation 2>&1 | tee -a output/logs/validate-bivas.log
 
 
 # --- Utilities ---

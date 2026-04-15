@@ -23,7 +23,7 @@ def test_build_chamber_route_features():
     split_node_id = f"lock_{c['id']}_split"
     merge_node_id = f"lock_{c['id']}_merge"
 
-    chamber = {"dim_length": 100, "dim_width": 12}
+    chamber = {"dim_usable_length": 100, "dim_gate_width": 12}
 
     from fis import utils
 
@@ -130,8 +130,8 @@ def test_lock_overlapping_multiple_sections():
                         "geometry": Polygon(
                             [(20, -5), (80, -5), (80, 5), (20, 5), (20, -5)]
                         ).wkt,
-                        "dim_length": 60,
-                        "dim_width": 10,
+                        "dim_usable_length": 60,
+                        "dim_gate_width": 10,
                     }
                 ],
             }
@@ -211,8 +211,8 @@ def test_lock_section_fallback_proximity():
                         "geometry": Polygon(
                             [(20, -5), (80, -5), (80, 5), (20, 5), (20, -5)]
                         ).wkt,
-                        "dim_length": 60,
-                        "dim_width": 10,
+                        "dim_usable_length": 60,
+                        "dim_gate_width": 10,
                     }
                 ],
             }
@@ -270,8 +270,8 @@ def test_lock_section_point_touch_ignored():
                         "geometry": Polygon(
                             [(20, -5), (80, -5), (80, 5), (20, 5), (20, -5)]
                         ).wkt,
-                        "dim_length": 60,
-                        "dim_width": 10,
+                        "dim_usable_length": 60,
+                        "dim_gate_width": 10,
                     }
                 ],
             }

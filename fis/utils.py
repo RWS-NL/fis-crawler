@@ -208,12 +208,53 @@ def normalize_attributes(
         )
 
     # 3. Standardize common ID columns as STRINGS
-    # Load list from identifiers section in schema.toml
     id_cols = schema.get("identifiers", {}).get("columns", [])
-
     for col in id_cols:
         if col in new_df.columns:
             new_df[col] = new_df[col].apply(stringify_id)
+
+    # 3b. Apply unit conversions (e.g. cm to meters)
+    # Check for fields known to be in centimeters from EURIS/generic sources
+    cm_to_m_cols = [
+        "dim_usable_length",
+        "dim_structural_length",
+        "dim_gate_width",
+        "dim_structural_width",
+        "dim_height_cm",
+        "dim_usable_length_convoy",
+        "dim_gate_width_convoy",
+        "dim_length_cm",
+        "dim_width_cm",
+    ]
+    for col in new_df.columns:
+        if col in cm_to_m_cols:
+            is_cm = False
+            # Hint 1: Explicit name suffix
+            if col.endswith("_cm"):
+                is_cm = True
+            # Hint 2: Unusually large values for these specific navigation fields
+            elif new_df[col].max() > 1000:
+                is_cm = True
+
+            if is_cm:
+                logger.info("Converting %s from cm to meters", col)
+                new_df[col] = new_df[col] / 100.0
+
+    # 4. Final cast back to GeoDataFrame if input was one or has geometry to preserve methods/CRS
+    if isinstance(df, gpd.GeoDataFrame) or "geometry" in new_df.columns:
+        # Ensure geometry is actually geometry objects and not WKT strings
+        if "geometry" in new_df.columns:
+            from shapely import wkt
+
+            first_val = new_df["geometry"].iloc[0] if not new_df.empty else None
+            if isinstance(first_val, str):
+                new_df["geometry"] = new_df["geometry"].apply(
+                    lambda x: wkt.loads(x) if isinstance(x, str) else x
+                )
+
+        # If df had CRS, preserve it
+        crs = df.crs if hasattr(df, "crs") else "EPSG:4326"
+        new_df = gpd.GeoDataFrame(new_df, geometry="geometry", crs=crs)
 
     return new_df
 

@@ -162,7 +162,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                             "id": s_row["id"],
                             "name": s_row["name"],
                             "fairway_id": s_row.get("fairway_id"),
-                            "dim_length": float(s_row["length"])
+                            "dim_structural_length": float(s_row["length"])
                             if pd.notna(s_row.get("length"))
                             else None,
                             "relation": "overlap",
@@ -213,11 +213,17 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
                 {
                     "id": chamber["id"],
                     "name": chamber["name"],
-                    "dim_length": float(chamber["dim_length"])
-                    if pd.notna(chamber.get("dim_length"))
+                    "dim_usable_length": float(chamber["dim_usable_length"])
+                    if pd.notna(chamber.get("dim_usable_length"))
                     else None,
-                    "dim_width": float(chamber["dim_width"])
-                    if pd.notna(chamber.get("dim_width"))
+                    "dim_gate_width": float(chamber["dim_gate_width"])
+                    if pd.notna(chamber.get("dim_gate_width"))
+                    else None,
+                    "dim_structural_length": float(chamber["dim_structural_length"])
+                    if pd.notna(chamber.get("dim_structural_length"))
+                    else None,
+                    "dim_structural_width": float(chamber["dim_structural_width"])
+                    if pd.notna(chamber.get("dim_structural_width"))
                     else None,
                     "route_geometry": route_wkt,
                 }

@@ -469,8 +469,12 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
                             "name": chamber.get("name"),
                             "lock_id": lock_id,
                             "chamber_id": chamber_id,
-                            "dim_length": chamber.get("dim_length"),
-                            "dim_width": chamber.get("dim_width"),
+                            "dim_usable_length": chamber.get("dim_usable_length"),
+                            "dim_gate_width": chamber.get("dim_gate_width"),
+                            "dim_structural_length": chamber.get(
+                                "dim_structural_length"
+                            ),
+                            "dim_structural_width": chamber.get("dim_structural_width"),
                         },
                     }
                 )
@@ -643,8 +647,10 @@ def _build_chamber_route_features(
                     c.get("sections", []),
                     context=f"Route for Chamber {chamber_id} (Lock {lock_id})",
                 ),
-                "dim_length": chamber.get("dim_length"),
-                "dim_width": chamber.get("dim_width"),
+                "dim_usable_length": chamber.get("dim_usable_length"),
+                "dim_gate_width": chamber.get("dim_gate_width"),
+                "dim_structural_length": chamber.get("dim_structural_length"),
+                "dim_structural_width": chamber.get("dim_structural_width"),
                 "source_node": chamber_node_start_id,
                 "target_node": chamber_node_end_id,
                 "length_m": geod.geometry_length(chamber_line),

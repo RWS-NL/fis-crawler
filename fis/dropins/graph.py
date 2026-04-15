@@ -83,14 +83,16 @@ def generate_simplified_passages(
             widths, heights = [], []
             for op in comp.get("openings", []):
                 constituent_ids.append(str(op["id"]))
-                w, h = op.get("dim_width"), op.get("dim_height")
+                # Opening dimensions are now dim_structural_width and dim_gate_width
+                # Bridge passage constraints typically look at the bottleneck (min width/height)
+                w, h = op.get("dim_gate_width"), op.get("dim_height")
                 if pd.notna(w):
                     widths.append(float(w))
                 if pd.notna(h):
                     heights.append(float(h))
 
             if widths:
-                agg_constraints["dim_width"] = min(widths)
+                agg_constraints["dim_gate_width"] = min(widths)
             if heights:
                 agg_constraints["dim_height"] = min(heights)
 
@@ -99,16 +101,17 @@ def generate_simplified_passages(
             for child in comp.get("locks", []):
                 for ch in child.get("chambers", []):
                     constituent_ids.append(str(ch["id"]))
-                    w, ch_len = ch.get("dim_width"), ch.get("dim_length")
+                    w, ch_len = ch.get("dim_gate_width"), ch.get("dim_usable_length")
                     if pd.notna(w):
                         widths.append(float(w))
                     if pd.notna(ch_len):
                         lengths.append(float(ch_len))
 
             if widths:
-                agg_constraints["dim_width"] = max(widths)
+                # For simplified passages, we represent the capacity of the complex
+                agg_constraints["dim_gate_width"] = max(widths)
             if lengths:
-                agg_constraints["dim_length"] = max(lengths)
+                agg_constraints["dim_usable_length"] = max(lengths)
 
         # 3. Create passage edge
         sections = comp.get("sections", [])
