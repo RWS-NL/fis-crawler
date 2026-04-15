@@ -1,348 +1,272 @@
+import pandas as pd
+import geopandas as gpd
+import os
 import argparse
 import logging
-import pathlib
 import sqlite3
-import zipfile
+from shapely.geometry import Point, LineString
+from fis import utils
 
-import geopandas as gpd
-import pandas as pd
-from shapely import wkt
-
-from fis import settings, utils
-from fis.graph.bivas import normalize_code
-from fis.lock.core import group_complexes, load_data
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Constants for spatial matching
-EURIS_SPATIAL_BUFFER_M = 15
-BIVAS_SPATIAL_BUFFER_M = 50
+# Set up logger
+logger = logging.getLogger("lock_consistency")
 
 
-def extract_euris_chambers(euris_zip_path: pathlib.Path, output_dir: pathlib.Path):
-    """Extract LockChamber geojson from EURIS zip."""
-    if not output_dir.exists():
-        output_dir.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(euris_zip_path, "r") as z:
-        for name in z.namelist():
-            if "LockChamber_" in name and name.endswith(".geojson"):
-                z.extract(name, output_dir)
-                return output_dir / name
-    return None
+def load_bivas_locks(db_path, branch_set_id=337):
+    """Load locks from BIVAS SQLite, joined with arc geometries."""
+    conn = sqlite3.connect(db_path)
+    try:
+        # 1. Load nodes for geometry building
+        nodes_df = pd.read_sql_query(
+            "SELECT ID as NodeID, XCoordinate, YCoordinate FROM nodes WHERE BranchSetId = ?",
+            conn,
+            params=(branch_set_id,),
+        )
 
+        # 2. Load locks and join with arcs
+        query = """
+        SELECT 
+            l.ArcID as id,
+            a.Name as name,
+            l.LockLength__m as bivas_length,
+            l.LockWidth__m as bivas_width,
+            a.FromNodeID,
+            a.ToNodeID
+        FROM locks l
+        JOIN arcs a ON l.ArcID = a.ID AND l.BranchSetId = a.BranchSetId
+        WHERE l.BranchSetId = ?
+        """
+        locks_df = pd.read_sql_query(query, conn, params=(branch_set_id,))
 
-def load_bivas_locks(db_path: pathlib.Path):
-    """Load BIVAS locks and their geometries, including TrajectCode for ID matching."""
-    # Load arcs that are locks, with their trajectory info
-    query = """
-    SELECT a.ID as bivas_id, a.Name as bivas_name, l.LockLength__m, l.LockWidth__m,
-           l.NumberOfLocks as bivas_number_of_locks,
-           a.MaximumDepth__m as bivas_depth,
-           t.TrajectCode, t.StartKilometer, t.EndKilometer,
-           n1.XCoordinate as x1, n1.YCoordinate as y1,
-           n2.XCoordinate as x2, n2.YCoordinate as y2
-    FROM arcs a
-    JOIN locks l ON a.ID = l.ArcID AND a.BranchSetId = l.BranchSetId
-    LEFT JOIN arc_vin_trajectory_connection t ON a.ID = t.ArcID
-    JOIN nodes n1 ON a.FromNodeID = n1.ID AND a.BranchSetId = n1.BranchSetId
-    JOIN nodes n2 ON a.ToNodeID = n2.ID AND a.BranchSetId = n2.BranchSetId
-    WHERE a.BranchSetId = 337
-    """
-    with sqlite3.connect(db_path) as conn:
-        df = pd.read_sql_query(query, conn)
+        if locks_df.empty:
+            return gpd.GeoDataFrame(
+                columns=["id", "name", "bivas_length", "bivas_width"],
+                geometry=[],
+                crs="EPSG:28992",
+            )
 
-    from shapely.geometry import LineString
+        # 3. Create geometries
+        merged = locks_df.merge(nodes_df, left_on="FromNodeID", right_on="NodeID")
+        merged = merged.rename(
+            columns={"XCoordinate": "X_from", "YCoordinate": "Y_from"}
+        )
+        merged = merged.merge(nodes_df, left_on="ToNodeID", right_on="NodeID")
+        merged = merged.rename(columns={"XCoordinate": "X_to", "YCoordinate": "Y_to"})
 
-    geoms = [LineString([(r.x1, r.y1), (r.x2, r.y2)]) for r in df.itertuples()]
-    gdf = gpd.GeoDataFrame(df, geometry=geoms, crs="EPSG:28992")
-    gdf = gdf.to_crs("EPSG:4326")
+        lines = [
+            LineString(
+                [Point(row["X_from"], row["Y_from"]), Point(row["X_to"], row["Y_to"])]
+            )
+            for _, row in merged.iterrows()
+        ]
 
-    # Normalize trajectory code for matching
-    gdf["TrajectCode_norm"] = gdf["TrajectCode"].apply(normalize_code)
-    return gdf
+        # Build GDF in RD (since BIVAS is RD)
+        gdf = gpd.GeoDataFrame(
+            merged[["id", "name", "bivas_length", "bivas_width"]],
+            geometry=lines,
+            crs="EPSG:28992",
+        )
+        return gdf
+    finally:
+        conn.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Check lock chamber consistency.")
-    parser.add_argument(
-        "--export-dir",
-        type=pathlib.Path,
-        default="output/fis-export",
-        help="Path to FIS export directory",
+    parser = argparse.ArgumentParser(
+        description="Check lock chamber consistency across FIS, EURIS, and BIVAS."
     )
     parser.add_argument(
-        "--disk-dir",
-        type=pathlib.Path,
-        default="output/disk-export",
-        help="Path to DISK export directory",
+        "--fis-chambers", default="output/fis-export/chamber.geoparquet"
     )
     parser.add_argument(
-        "--euris-zip",
-        type=pathlib.Path,
-        default="output/euris-export/NL_NetworkData_20260224_v2.4.zip",
-        help="Path to EURIS network data zip",
+        "--euris-chambers",
+        default="output/euris-export/LockChamber_NL_20260224.geojson",
     )
-    parser.add_argument(
-        "--bivas-db",
-        type=pathlib.Path,
-        default="reference/Bivas.5.10.1.sqlite",
-        help="Path to BIVAS SQLite database",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=pathlib.Path,
-        default="output/bivas-validation",
-        help="Output directory",
-    )
+    parser.add_argument("--bivas-db", default="reference/Bivas.5.10.1.sqlite")
+    parser.add_argument("--branch-set-id", type=int, default=337)
+    parser.add_argument("--output-dir", default="output/bivas-validation")
 
     args = parser.parse_args()
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    export_dir = args.export_dir
-    disk_dir = args.disk_dir
-    euris_zip = args.euris_zip
-    bivas_db = args.bivas_db
-    output_dir = args.output_dir
+    # 1. Load Datasets
+    print("Loading FIS chambers...")
+    fis = gpd.read_parquet(args.fis_chambers)
+    # Normalize attributes using schema to get dim_* names
+    schema = utils.load_schema()
+    fis_norm = utils.normalize_attributes(fis, "chambers", schema)
 
-    output_file_gpq = output_dir / "lock_chamber_consistency.geoparquet"
-    output_file_geojson = output_dir / "lock_chamber_consistency.geojson"
+    print("Loading EURIS chambers...")
+    import glob
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    euris_search_path = os.path.join(
+        os.path.dirname(args.euris_chambers), "LockChamber_*.geojson"
+    )
+    euris_files = glob.glob(euris_search_path)
+    if not euris_files:
+        if os.path.exists(args.euris_chambers):
+            euris_files = [args.euris_chambers]
+        else:
+            raise FileNotFoundError(
+                f"No EURIS lock chamber files found matching: {euris_search_path}"
+            )
 
-    # Validate inputs
-    for p in [export_dir, disk_dir, euris_zip, bivas_db]:
-        if not p.exists():
-            logger.error(f"Input path does not exist: {p}")
-            return
+    euris = gpd.read_file(euris_files[0])
+    # EURIS fields mapping in schema
+    euris_norm = utils.normalize_attributes(euris, "chambers", schema)
 
-    # 1. Load FIS + DISK data
-    logger.info("Loading FIS and DISK data...")
-    data = load_data(export_dir, disk_dir)
-    complexes = group_complexes(data)
+    print("Loading BIVAS locks...")
+    bivas_rd = load_bivas_locks(args.bivas_db, args.branch_set_id)
 
-    # Extract chambers with extra FIS metadata
-    chambers_jsonl = export_dir / "chamber.jsonl"
-    chambers_raw = pd.read_json(chambers_jsonl, lines=True)
-    chambers_raw["Id"] = chambers_raw["Id"].apply(utils.stringify_id)
+    # 2. Re-project everything to RD (BIVAS is already RD)
+    print("Reprojecting...")
+    # Standardize FIS
+    if fis_norm.crs is None:
+        fis_norm.set_crs(epsg=4326, inplace=True)
+    fis_rd = fis_norm.to_crs(epsg=28992)
 
-    rows = []
-    for c in complexes:
-        lock_id = utils.stringify_id(c["id"])
-        lock_name = c.get("name")
-        route_code_norm = normalize_code(c.get("route_code"))
+    # Standardize EURIS
+    if euris_norm.crs is None:
+        euris_norm.set_crs(epsg=4326, inplace=True)
+    euris_rd = euris_norm.to_crs(epsg=28992)
 
-        disk_id = None
-        disk_complex_id = None
-        disk_name = None
-        if c.get("disk_locks"):
-            dl = c["disk_locks"][0]
-            disk_id = dl.get("id")
-            disk_complex_id = dl.get("complexid")
-            disk_name = dl.get("naam")
+    # 3. Spatial Match: FIS to EURIS
+    euris_buffered = euris_rd.copy()
+    euris_buffered.geometry = euris_rd.buffer(20)  # 20m buffer for matching
 
-        for l_obj in c.get("locks", []):
-            for chamber in l_obj.get("chambers", []):
-                geom_wkt = chamber.get("geometry")
-                if not geom_wkt:
-                    continue
-                geom = wkt.loads(geom_wkt)
+    print("Spatial join FIS -> EURIS...")
+    fis_euris = gpd.sjoin(fis_rd, euris_buffered, how="left", rsuffix="euris")
+    print(f"Col count after FIS-EURIS: {len(fis_euris.columns)}")
 
-                # Get raw row for missing sill depths if needed
-                cid = utils.stringify_id(chamber.get("id"))
-                raw_row = (
-                    chambers_raw[chambers_raw["Id"] == cid].iloc[0]
-                    if pd.notna(cid) and cid in chambers_raw["Id"].values
-                    else {}
-                )
+    # 4. Spatial Match: (FIS+EURIS) to BIVAS
+    print("Spatial join (FIS+EURIS) -> BIVAS...")
+    fis_euris_buffered = fis_euris.copy()
+    fis_euris_buffered.geometry = fis_euris_buffered.buffer(100)
 
-                rows.append(
-                    {
-                        "geometry": geom,
-                        "fis_chamber_id": cid,
-                        "fis_chamber_name": chamber.get("name"),
-                        "fis_lock_id": lock_id,
-                        "fis_lock_name": lock_name,
-                        "route_code_norm": route_code_norm,
-                        "route_km_begin": raw_row.get("RouteKmBegin"),
-                        "route_km_end": raw_row.get("RouteKmEnd"),
-                        "disk_id": disk_id,
-                        "disk_complex_id": disk_complex_id,
-                        "disk_name": disk_name,
-                        "fis_width": chamber.get("width"),
-                        "fis_length": chamber.get("length"),
-                        "fis_height": chamber.get("height"),
-                        "fis_sill_bebu": raw_row.get("SillDepthBeBu"),
-                        "fis_sill_bobi": raw_row.get("SillDepthBoBi"),
-                        "isrs_code": c.get("isrs_code"),
-                    }
-                )
+    # Drop colliding names from BIVAS before join
+    bivas_to_join = bivas_rd.rename(
+        columns={"id": "bivas_id_orig", "name": "bivas_name_orig"}
+    )
+    matches = gpd.sjoin(fis_euris_buffered, bivas_to_join, how="left", rsuffix="bivas")
 
-    fis_chambers_gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
+    # 5. Dimension Comparison
+    # After sjoin, if columns collided (like dim_usable_length), FIS ones might be suffixed with _left
+    def get_fis_col(base_name):
+        if f"{base_name}_left" in matches.columns:
+            return f"{base_name}_left"
+        return base_name
 
-    # Calculate max dimensions per lock for BIVAS comparison
-    lock_max_dims = (
-        fis_chambers_gdf.groupby("fis_lock_id")
-        .agg({"fis_length": "max", "fis_width": "max"})
-        .rename(
-            columns={
-                "fis_length": "fis_lock_max_length",
-                "fis_width": "fis_lock_max_width",
-            }
+    fis_usable_len_col = get_fis_col("dim_usable_length")
+    fis_gate_wid_col = get_fis_col("dim_gate_width")
+
+    # FIS to EURIS differences
+    if "dim_usable_length_euris" in matches.columns:
+        matches["diff_length_fis_euris"] = (
+            matches[fis_usable_len_col] - matches["dim_usable_length_euris"]
         )
-    )
+        matches["diff_width_fis_euris"] = (
+            matches[fis_gate_wid_col] - matches["dim_gate_width_euris"]
+        )
 
-    fis_chambers_gdf = fis_chambers_gdf.merge(
-        lock_max_dims, on="fis_lock_id", how="left"
-    )
+    # FIS to BIVAS differences
+    if "bivas_length" in matches.columns:
+        matches["diff_length_fis_bivas"] = (
+            matches[fis_usable_len_col] - matches["bivas_length"]
+        )
+        matches["diff_width_fis_bivas"] = (
+            matches[fis_gate_wid_col] - matches["bivas_width"]
+        )
 
-    # 2. Load EURIS chambers
-    logger.info("Loading EURIS chambers...")
-    tmp_dir = output_dir / "tmp"
-    euris_geojson = extract_euris_chambers(euris_zip, tmp_dir)
-    if euris_geojson:
-        euris_gdf = gpd.read_file(euris_geojson)
-        schema = utils.load_schema()
-        euris_gdf = utils.normalize_attributes(euris_gdf, "chambers", schema)
-    else:
-        logger.warning("EURIS chambers not found.")
-        euris_gdf = gpd.GeoDataFrame()
+    # 6. Flag Significant Discrepancies
+    # Tolerance: 2m for length, 0.5m for width
+    matches["flag_length"] = False
+    if "diff_length_fis_euris" in matches.columns:
+        matches["flag_length"] |= matches["diff_length_fis_euris"].abs() > 2.0
+    if "diff_length_fis_bivas" in matches.columns:
+        matches["flag_length"] |= matches["diff_length_fis_bivas"].abs() > 2.0
 
-    # 3. Load BIVAS locks
-    logger.info("Loading BIVAS locks...")
-    bivas_gdf = load_bivas_locks(bivas_db)
+    matches["flag_width"] = False
+    if "diff_width_fis_euris" in matches.columns:
+        matches["flag_width"] |= matches["diff_width_fis_euris"].abs() > 0.5
+    if "diff_width_fis_bivas" in matches.columns:
+        matches["flag_width"] |= matches["diff_width_fis_bivas"].abs() > 0.5
 
-    # 4. Matching and Merging
-    results = []
+    # 7. Output Result
+    out_path = os.path.join(args.output_dir, "lock_chamber_consistency.geoparquet")
+    # Clean up before export
+    id_col = get_fis_col("id")
+    name_col = get_fis_col("name")
 
-    # Project for spatial matching
-    fis_chambers_rd = fis_chambers_gdf.to_crs(settings.PROJECTED_CRS)
-    euris_rd = euris_gdf.to_crs(settings.PROJECTED_CRS) if not euris_gdf.empty else None
-    bivas_rd = bivas_gdf.to_crs(settings.PROJECTED_CRS)
+    results = matches.drop_duplicates(subset=id_col).copy()
 
-    for idx, row in fis_chambers_gdf.iterrows():
-        res = row.to_dict()
-
-        # Match EURIS
-        matched_euris = None
-        if euris_rd is not None and not euris_rd.empty:
-            isrs_code = row.get("isrs_code")
-            if isrs_code:
-                matches = euris_gdf[euris_gdf["id"] == isrs_code]
-                if not matches.empty:
-                    matched_euris = matches.iloc[0]
-
-            if matched_euris is None:
-                chamber_geom_rd = fis_chambers_rd.loc[idx].geometry
-                intersecting = euris_rd[
-                    euris_rd.intersects(chamber_geom_rd.buffer(EURIS_SPATIAL_BUFFER_M))
-                ]
-                if not intersecting.empty:
-                    matched_euris = intersecting.iloc[0]
-
-        if matched_euris is not None:
-            # Use explicit pd.notna checks for conversion
-            def cm_to_m(val):
-                return val / 100.0 if pd.notna(val) else None
-
-            res.update(
-                {
-                    "euris_id": matched_euris.get("id"),
-                    "euris_name": matched_euris.get("name"),
-                    "euris_width": cm_to_m(matched_euris.get("dim_width_cm")),
-                    "euris_length": cm_to_m(matched_euris.get("dim_length_cm")),
-                    "euris_height": cm_to_m(matched_euris.get("dim_height_cm")),
-                    "euris_depth": cm_to_m(matched_euris.get("mdraughtcm")),
-                }
-            )
-
-        # Match BIVAS
-        matched_bivas = None
-        # 1. Try ID + KM Match
-        rc_norm = row.get("route_code_norm")
-        km_begin = row.get("route_km_begin")
-        km_end = row.get("route_km_end")
-        if pd.isna(km_end):
-            km_end = km_begin
-
-        if pd.notna(rc_norm) and pd.notna(km_begin):
-            mask = bivas_gdf["TrajectCode_norm"] == rc_norm
-            potential_bivas = bivas_gdf[mask]
-            for _, b_row in potential_bivas.iterrows():
-                # Check KM overlap
-                b_min = min(b_row["StartKilometer"], b_row["EndKilometer"])
-                b_max = max(b_row["StartKilometer"], b_row["EndKilometer"])
-                f_min = min(km_begin, km_end)
-                f_max = max(km_begin, km_end)
-                # Simple overlap check
-                if not (f_max < b_min or f_min > b_max):
-                    matched_bivas = b_row
-                    break
-
-        # 2. Spatial fallback
-        if matched_bivas is None:
-            chamber_geom_rd = fis_chambers_rd.loc[idx].geometry
-            intersecting_bivas = bivas_rd[
-                bivas_rd.intersects(chamber_geom_rd.buffer(BIVAS_SPATIAL_BUFFER_M))
-            ]
-            if not intersecting_bivas.empty:
-                matched_bivas = intersecting_bivas.iloc[0]
-
-        if matched_bivas is not None:
-            res.update(
-                {
-                    "bivas_id": matched_bivas.get("bivas_id"),
-                    "bivas_name": matched_bivas.get("bivas_name"),
-                    "bivas_width": matched_bivas.get("LockWidth__m"),
-                    "bivas_length": matched_bivas.get("LockLength__m"),
-                    "bivas_depth": matched_bivas.get("bivas_depth"),
-                    "bivas_number_of_locks": matched_bivas.get("bivas_number_of_locks"),
-                }
-            )
-
-        results.append(res)
-
-    final_gdf = gpd.GeoDataFrame(results, crs="EPSG:4326")
-
-    # Ensure requested columns exist
-    requested_cols = [
-        "geometry",
-        "fis_chamber_id",
-        "fis_lock_id",
-        "disk_id",
-        "disk_complex_id",
-        "bivas_id",
-        "fis_width",
-        "fis_length",
-        "fis_height",
-        "fis_sill_bebu",
-        "fis_sill_bobi",
-        "fis_lock_max_length",
-        "fis_lock_max_width",
-        "euris_width",
-        "euris_length",
-        "euris_height",
-        "euris_depth",
-        "bivas_width",
+    # Select subset of interesting columns to avoid duplicates and bloat
+    export_cols = [
+        id_col,
+        name_col,
+        fis_usable_len_col,
+        fis_gate_wid_col,
+        get_fis_col("dim_structural_length"),
+        get_fis_col("dim_structural_width"),
+        "id_euris",
+        "name_euris",
+        "dim_usable_length_euris",
+        "dim_gate_width_euris",
+        "bivas_id_orig",
+        "bivas_name_orig",
         "bivas_length",
-        "bivas_depth",
-        "bivas_number_of_locks",
-        "fis_chamber_name",
-        "disk_name",
-        "euris_name",
-        "bivas_name",
+        "bivas_width",
+        "diff_length_fis_euris",
+        "diff_length_fis_bivas",
+        "diff_width_fis_euris",
+        "diff_width_fis_bivas",
+        "flag_length",
+        "flag_width",
+        "geometry",
     ]
+    # Filter for columns that actually exist
+    final_cols = [c for c in export_cols if c in results.columns]
+    results = results[final_cols].copy()
 
-    final_gdf = final_gdf[[c for c in requested_cols if c in final_gdf.columns]]
+    # Rename for clean output
+    results = results.rename(
+        columns={
+            id_col: "id",
+            name_col: "name",
+            fis_usable_len_col: "dim_usable_length",
+            fis_gate_wid_col: "dim_gate_width",
+            get_fis_col("dim_structural_length"): "dim_structural_length",
+            get_fis_col("dim_structural_width"): "dim_structural_width",
+            "bivas_id_orig": "id_bivas",
+            "bivas_name_orig": "name_bivas",
+        }
+    )
 
-    logger.info(f"Saving {len(final_gdf)} chambers to {output_file_gpq}")
-    final_gdf.to_parquet(output_file_gpq)
-    final_gdf.to_file(output_file_geojson, driver="GeoJSON")
+    # Convert to 4326 for portability
+    results = results.to_crs(epsg=4326)
+    results.to_parquet(out_path)
+    print(f"Results saved to {out_path}")
 
-    # Cleanup tmp
-    if tmp_dir.exists():
-        import shutil
+    # 8. Summary Report
+    flagged = results[results["flag_length"] | results["flag_width"]]
 
-        shutil.rmtree(tmp_dir)
+    report = f"""# Lock Chamber Consistency Report
+
+## Overall Statistics
+- Total Processed Chambers: {len(results)}
+- Chambers with Dimension Discrepancies: {len(flagged)} ({len(flagged) / len(results):.1%})
+
+## Key Discrepancies (FIS vs BIVAS/EURIS)
+*Note: Comparisons use FIS \`dim_usable_length\` (SchutLengte) and \`dim_gate_width\`.*
+
+### Top 10 Length Discrepancies
+{flagged[flagged["flag_length"]].sort_values("diff_length_fis_euris", key=lambda x: x.abs() if hasattr(x, "abs") else x, ascending=False).head(10)[["id", "name", "dim_usable_length", "dim_usable_length_euris", "bivas_length"]].to_markdown(index=False) if not flagged.empty else "No significant discrepancies found."}
+
+### Top 10 Width Discrepancies
+{flagged[flagged["flag_width"]].sort_values("diff_width_fis_euris", key=lambda x: x.abs() if hasattr(x, "abs") else x, ascending=False).head(10)[["id", "name", "dim_gate_width", "dim_gate_width_euris", "bivas_width"]].to_markdown(index=False) if not flagged.empty else "No significant discrepancies found."}
+"""
+    report_path = os.path.join(args.output_dir, "lock_chamber_consistency_report.md")
+    with open(report_path, "w") as f:
+        f.write(report)
+    print(f"Report saved to {report_path}")
 
 
 if __name__ == "__main__":

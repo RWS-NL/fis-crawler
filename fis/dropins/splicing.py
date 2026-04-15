@@ -27,7 +27,7 @@ def splice_fairways(
 
     Approach divergence handling:
     1. Attribute consistency: Splicing logic handles both 'length' (FIS) and
-       'dim_length' (EURIS) attributes via field-agnostic lookups.
+       'dim_usable_length' (EURIS/Standard) attributes via field-agnostic lookups.
     2. Splicing Geometry: For structures provided as Points (common in EURIS),
        the splicer projections handle Point geometries to derive cut distances.
     3. Hierarchy: Embedded bridge logic is shared and applied to any source
@@ -290,8 +290,8 @@ def _generate_structure_cuts(
                 max_len = 0.0
                 for child in obj.get("locks", []):
                     for ch in child.get("chambers", []):
-                        # Support both 'length' (FIS) and 'dim_length' (EURIS/Standard)
-                        length_val = ch.get("dim_length") or ch.get("length")
+                        # Support both 'length' (FIS) and 'dim_usable_length' (Standard)
+                        length_val = ch.get("dim_usable_length") or ch.get("length")
                         if length_val:
                             max_len = max(max_len, float(length_val))
                 buffer_dist = (

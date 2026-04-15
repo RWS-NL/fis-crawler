@@ -106,7 +106,7 @@ def test_group_complexes_preserves_extra_attributes():
     ch = c["locks"][0]["chambers"][0]
     assert ch["id"] == "101"
     assert ch["extra_chamber_attr"] == "ChamberExtra"
-    assert ch["dim_length"] == 100.0
+    assert ch["dim_structural_length"] == 100.0
 
 
 def test_normalize_attributes_enforces_string_ids():
