@@ -214,31 +214,17 @@ def normalize_attributes(
             new_df[col] = new_df[col].apply(stringify_id)
 
     # 3b. Apply unit conversions (e.g. cm to meters)
-    # Check for fields known to be in centimeters from EURIS/generic sources
-    cm_to_m_cols = [
-        "dim_usable_length",
-        "dim_structural_length",
-        "dim_gate_width",
-        "dim_structural_width",
-        "dim_height_cm",
-        "dim_usable_length_convoy",
-        "dim_gate_width_convoy",
-        "dim_length_cm",
-        "dim_width_cm",
-    ]
-    for col in new_df.columns:
-        if col in cm_to_m_cols:
-            is_cm = False
-            # Hint 1: Explicit name suffix
-            if col.endswith("_cm"):
-                is_cm = True
-            # Hint 2: Unusually large values for these specific navigation fields
-            elif new_df[col].max() > 1000:
-                is_cm = True
-
-            if is_cm:
-                logger.info("Converting %s from cm to meters", col)
-                new_df[col] = new_df[col] / 100.0
+    # Deterministic strategy: Any field explicitly mapped to a name ending in '_cm'
+    # gets converted to meters and renamed to its canonical (meter-based) name.
+    cm_cols = [c for c in new_df.columns if c.endswith("_cm")]
+    for col in cm_cols:
+        target_name = col[:-3]  # remove '_cm'
+        logger.info("Converting %s from cm to meters -> %s", col, target_name)
+        new_df[target_name] = new_df[col] / 100.0
+        # If the target name was already present (e.g. from a different Loader step),
+        # this overwrite is intentional as the cm-sourced data with suffix 
+        # is the most specific representation for this source.
+        new_df = new_df.drop(columns=[col])
 
     # 4. Final cast back to GeoDataFrame if input was one or has geometry to preserve methods/CRS
     if isinstance(df, gpd.GeoDataFrame) or "geometry" in new_df.columns:

@@ -110,7 +110,9 @@ def main():
                 f"No EURIS lock chamber files found matching: {euris_search_path}"
             )
 
-    euris = gpd.read_file(euris_files[0])
+    # Pick the newest file
+    euris_file = max(euris_files, key=os.path.getmtime)
+    euris = gpd.read_file(euris_file)
     # EURIS fields mapping in schema
     euris_norm = utils.normalize_attributes(euris, "chambers", schema)
 
@@ -247,15 +249,18 @@ def main():
 
     # 8. Summary Report
     flagged = results[results["flag_length"] | results["flag_width"]]
+    total_results = len(results)
+    flagged_count = len(flagged)
+    flagged_pct = (flagged_count / total_results) if total_results > 0 else 0.0
 
-    report = f"""# Lock Chamber Consistency Report
+    report = rf"""# Lock Chamber Consistency Report
 
 ## Overall Statistics
-- Total Processed Chambers: {len(results)}
-- Chambers with Dimension Discrepancies: {len(flagged)} ({len(flagged) / len(results):.1%})
+- Total Processed Chambers: {total_results}
+- Chambers with Dimension Discrepancies: {flagged_count} ({flagged_pct:.1%})
 
 ## Key Discrepancies (FIS vs BIVAS/EURIS)
-*Note: Comparisons use FIS \`dim_usable_length\` (SchutLengte) and \`dim_gate_width\`.*
+*Note: Comparisons use FIS `dim_usable_length` (SchutLengte) and `dim_gate_width`.*
 
 ### Top 10 Length Discrepancies
 {flagged[flagged["flag_length"]].sort_values("diff_length_fis_euris", key=lambda x: x.abs() if hasattr(x, "abs") else x, ascending=False).head(10)[["id", "name", "dim_usable_length", "dim_usable_length_euris", "bivas_length"]].to_markdown(index=False) if not flagged.empty else "No significant discrepancies found."}
