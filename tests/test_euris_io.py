@@ -75,7 +75,7 @@ def test_load_dropins_with_explicit_linking_mapping(tmp_path):
     assert chamber["id"] == "TEST_CH_1"
     assert chamber["dim_usable_length"] == 100.0
     assert chamber["dim_gate_width"] == 12.0
-    assert chamber["dim_height_cm"] == 5.0
+    assert chamber["dim_height"] == 5.0
     assert chamber["topological_anchor"] == Point(5.001, 52.001).wkt
 
     assert len(sections) == 1
