@@ -245,18 +245,34 @@ def _get_max_chamber_length(lock_chambers) -> float:
     return 0.0
 
 
+def _extract_coords(geom):
+    """Recursively extract all coordinate tuples from any Shapely geometry."""
+    if geom is None or geom.is_empty:
+        return []
+    if hasattr(geom, "coords"):
+        return list(geom.coords)
+    if hasattr(geom, "geoms"):
+        result = []
+        for sub in geom.geoms:
+            result.extend(_extract_coords(sub))
+        return result
+    return []
+
+
 def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
     """
     Compute asymmetric upstream/downstream buffer distances for a lock complex.
 
-    For each chamber the upstream entrance (``door_start``) and downstream exit
-    (``door_end``) are identified with :func:`fis.lock.utils.find_chamber_doors`
-    and projected onto the fairway line.  The split is placed a margin
-    (``DETAILED_LOCK_SPLICING_BUFFER_M``) **upstream** of the earliest entrance
-    projection, and the merge a margin **downstream** of the latest exit
-    projection.  This guarantees that split/merge nodes never fall inside a
-    chamber polygon, even when chambers are staggered or oriented at an angle to
-    the fairway.
+    For each chamber the fairway line is clipped against the chamber polygon.
+    The split is placed ``DETAILED_LOCK_SPLICING_BUFFER_M`` upstream of the
+    earliest fairway-inside-chamber position, and the merge that same margin
+    downstream of the latest position.  This covers both "branch" locks (chamber
+    polygon beside the fairway, not touching it) and "point" locks (chamber
+    polygon straddles the fairway).
+
+    When a chamber does not intersect the fairway at all, the entrance/exit doors
+    are projected onto the fairway as a proxy; if door detection also fails, all
+    exterior vertices are projected.
 
     Returns:
         (buffer_before_m, buffer_after_m) in metres.
@@ -288,10 +304,7 @@ def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
 
     lock_proj = fw_line_rd.project(lock_rd)
 
-    # Build provisional upstream/downstream points on the fairway (in WGS84) so
-    # that find_chamber_doors can determine which face of each chamber is the
-    # entrance and which is the exit.  These provisional points only need to
-    # convey the flow *direction* – their exact position does not matter.
+    # Provisional direction points for the door-projection fallback only.
     prov_up_rd = fw_line_rd.interpolate(max(0.0, lock_proj - 100.0))
     prov_down_rd = fw_line_rd.interpolate(
         min(fw_line_rd.length, lock_proj + 100.0)
@@ -307,8 +320,6 @@ def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
         .iloc[0]
     )
 
-    # Project the entrance and exit door of every chamber onto the fairway and
-    # track the earliest entrance and latest exit distances.
     min_start = lock_proj
     max_end = lock_proj
 
@@ -328,13 +339,29 @@ def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
             if getattr(ch_geom, "is_empty", False):
                 continue
 
-            # Find the chamber entrance (door_start) and exit (door_end) in WGS84.
+            ch_rd = (
+                gpd.GeoSeries([ch_geom], crs="EPSG:4326")
+                .to_crs(settings.PROJECTED_CRS)
+                .iloc[0]
+            )
+
+            # Primary: clip the fairway against the chamber polygon to find exactly
+            # where the fairway runs through the chamber (handles "point locks" where
+            # the chamber straddles the fairway, as well as offset branches).
+            clipped = fw_line_rd.intersection(ch_rd)
+            if not clipped.is_empty:
+                for cx, cy in _extract_coords(clipped):
+                    d = fw_line_rd.project(Point(cx, cy))
+                    min_start = min(min_start, d)
+                    max_end = max(max_end, d)
+                continue  # arc-lengths captured; no need for door fallback
+
+            # The fairway doesn't intersect this chamber (offset branch):
+            # project the entrance/exit doors onto the fairway.
             door_start_wgs, door_end_wgs = find_chamber_doors(
                 ch_geom, prov_split_wgs, prov_merge_wgs
             )
-
             if door_start_wgs is not None and door_end_wgs is not None:
-                # Project each door onto the fairway (metric CRS) and update bounds.
                 door_start_rd = project_geometry(
                     door_start_wgs, "EPSG:4326", settings.PROJECTED_CRS
                 )
@@ -344,12 +371,7 @@ def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
                 min_start = min(min_start, fw_line_rd.project(door_start_rd))
                 max_end = max(max_end, fw_line_rd.project(door_end_rd))
             else:
-                # Fallback: project all exterior vertices of the chamber polygon.
-                ch_rd = (
-                    gpd.GeoSeries([ch_geom], crs="EPSG:4326")
-                    .to_crs(settings.PROJECTED_CRS)
-                    .iloc[0]
-                )
+                # Final fallback: project all exterior vertices.
                 polys = (
                     list(ch_rd.geoms)
                     if ch_rd.geom_type == "MultiPolygon"
