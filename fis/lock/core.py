@@ -75,6 +75,12 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     if "country_code" in locks.columns:
         locks = locks[locks["country_code"] == "NL"]
     if hasattr(locks, "geometry"):
+        point_locks = locks[locks.geometry.geom_type == "Point"]
+        if len(point_locks) > 0:
+            logger.warning(
+                "Skipping %d point-geometry lock(s) (not supported in FIS processing).",
+                len(point_locks),
+            )
         locks = locks[locks.geometry.geom_type != "Point"]
     chambers = utils.normalize_attributes(chambers, "chambers", schema)
     subchambers = utils.normalize_attributes(subchambers, "subchambers", schema)
