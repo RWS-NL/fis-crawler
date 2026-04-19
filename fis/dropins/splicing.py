@@ -322,9 +322,9 @@ def _generate_structure_cuts(
         if not junction_geoms_to_check:
             line_coords = list(line_rd.coords)
             if line_coords:
-                # Start/end points of the section line are already in utm_crs
-                # because line_rd was obtained by reprojecting the section
-                # geometry to utm_crs earlier in _generate_structure_cuts.
+                # line_rd is already projected to utm_crs (a metric projection
+                # derived from estimate_utm_crs() in _slice_section_with_dropins),
+                # so these Points are in the same CRS as geom_rd above.
                 junction_geoms_to_check = [
                     ("projected", Point(line_coords[0])),
                     ("projected", Point(line_coords[-1])),
