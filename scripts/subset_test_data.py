@@ -51,7 +51,7 @@ def subset_test_data():
 
             if geom_col:
                 # Filter by bbox
-                if df[geom_col].dtype == "object":
+                if pd.api.types.is_string_dtype(df[geom_col]):
                     # Might be WKT
                     from shapely import wkt
 
