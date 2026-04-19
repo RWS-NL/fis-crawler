@@ -72,6 +72,8 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     # Load and normalize structures
     schema = utils.load_schema()
     locks = utils.normalize_attributes(locks, "locks", schema)
+    if "country_code" in locks.columns:
+        locks = locks[locks["country_code"] == "NL"]
     chambers = utils.normalize_attributes(chambers, "chambers", schema)
     subchambers = utils.normalize_attributes(subchambers, "subchambers", schema)
     berths = utils.normalize_attributes(berths, "berths", schema)
