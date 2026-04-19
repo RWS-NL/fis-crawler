@@ -15,6 +15,60 @@ from fis.dropins.berths import build_berths_gdf
 logger = logging.getLogger(__name__)
 
 
+def _build_junction_graph(export_dir: pathlib.Path, data: dict):
+    """Build a minimal networkx graph from sectionjunction geometries.
+
+    ``_find_internal_junctions_for_chambers`` only needs graph nodes with a
+    ``geometry`` attribute.  We build the graph directly from the already-loaded
+    sections (for edges) and the sectionjunction file (for node geometries),
+    avoiding a full round-trip through the ``fis.graph`` pipeline.
+    """
+    import networkx as nx
+
+    gpq = export_dir / "sectionjunction.geoparquet"
+    pq = export_dir / "sectionjunction.parquet"
+    if gpq.exists():
+        junctions = gpd.read_parquet(gpq)
+    elif pq.exists():
+        import pandas as _pd
+        from shapely import wkt as _wkt
+
+        df = _pd.read_parquet(pq)
+        if "Geometry" in df.columns:
+            geoms = df["Geometry"].apply(
+                lambda x: _wkt.loads(x) if isinstance(x, str) else x
+            )
+            junctions = gpd.GeoDataFrame(df, geometry=geoms, crs="EPSG:4326")
+        else:
+            junctions = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+    else:
+        logger.warning("sectionjunction data not found in %s; skipping junction graph", export_dir)
+        return None
+
+    # Standardise geometry column name
+    if "Geometry" in junctions.columns and "geometry" not in junctions.columns:
+        junctions = junctions.rename(columns={"Geometry": "geometry"}).set_geometry("geometry")
+
+    G = nx.Graph()
+    for _, row in junctions.iterrows():
+        node_id = row.get("Id")
+        geom = row.get("geometry")
+        if node_id is not None and geom is not None:
+            G.add_node(node_id, geometry=geom)
+
+    # Add edges so the graph is connected (required by some callers).
+    sections = data.get("sections")
+    if sections is not None and not sections.empty:
+        for _, sec in sections.iterrows():
+            src = sec.get("start_junction_id")
+            tgt = sec.get("end_junction_id")
+            if src is not None and tgt is not None:
+                G.add_edge(src, tgt)
+
+    logger.info("Temporary junction graph built: %d nodes", G.number_of_nodes())
+    return G
+
+
 def load_dropins_with_spatial_matching(
     export_dir: pathlib.Path, disk_dir: pathlib.Path, bbox=None
 ) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict], pd.DataFrame, pd.DataFrame]:
@@ -93,8 +147,11 @@ def load_dropins_with_spatial_matching(
         data["terminals"] = filter_df(data["terminals"], "terminals")
         data["berths"] = filter_df(data["berths"], "berths")
 
+    logger.info("Building temporary junction graph for internal junction detection...")
+    network_graph = _build_junction_graph(export_dir, data)
+
     logger.info("Grouping Locks...")
-    lock_complexes = group_locks(data)
+    lock_complexes = group_locks(data, network_graph)
 
     logger.info("Grouping Bridges...")
     bridge_complexes = group_bridges(data)
