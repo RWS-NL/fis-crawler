@@ -2,7 +2,12 @@
 import pathlib
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import box
+from shapely.geometry import box, Point
+
+# Row limit for non-spatial tables that cannot be spatially filtered
+NON_SPATIAL_ROW_LIMIT = 2000
+# Number of header rows in RIS Index xlsx (metadata row + column header row)
+XLSX_HEADER_ROWS = 2
 
 
 def subset_test_data():
@@ -27,62 +32,96 @@ def subset_test_data():
         output_dir = output_base / name
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        for f in input_dir.glob("*"):
-            if f.suffix not in [".geoparquet", ".parquet"]:
-                continue
-
-            # Prefer .geoparquet over .parquet when both exist for the same stem
-            if f.suffix == ".parquet" and (input_dir / f"{f.stem}.geoparquet").exists():
-                print(f"Skipping {name}/{f.name}: superseded by {f.stem}.geoparquet")
-                continue
-
-            stem = f.stem
+        # Pass 1: spatial (.geoparquet) files — clip to bbox, collect VinCodes
+        spatial_vin_codes: set = set()
+        for f in sorted(input_dir.glob("*.geoparquet")):
             print(f"Subsetting {name}/{f.name}...")
-
             try:
-                if f.suffix == ".geoparquet":
-                    df = gpd.read_parquet(f)
-                else:
-                    df = pd.read_parquet(f)
+                df = gpd.read_parquet(f)
             except Exception as e:
                 print(f"  Error reading {f}: {e}")
                 continue
 
-            # Identify geometry column
-            geom_col = None
-            if isinstance(df, gpd.GeoDataFrame):
-                geom_col = df.geometry.name
-            elif "geometry" in df.columns:
-                geom_col = "geometry"
-            elif "Geometry" in df.columns:
-                geom_col = "Geometry"
+            # Clip trims large polygons (e.g. vtssector) to the bbox, reducing
+            # both row count and polygon complexity in the output.
+            try:
+                subset = df.clip(bpoly)
+            except Exception:
+                subset = df[df.geometry.intersects(bpoly)].copy()
 
-            if geom_col:
-                # Filter by bbox
-                if pd.api.types.is_string_dtype(df[geom_col]):
-                    # Might be WKT
-                    from shapely import wkt
-
-                    temp_gs = gpd.GeoSeries(
-                        df[geom_col].apply(
-                            lambda x: wkt.loads(x) if isinstance(x, str) else x
-                        ),
-                        crs="EPSG:4326",
-                    )
-                    mask = temp_gs.intersects(bpoly)
-                else:
-                    mask = df[geom_col].intersects(bpoly)
-                subset = df[mask].copy()
-            else:
-                # For non-spatial tables like operatingtimes, keep all or filter by ID if possible
-                # For now, let's just keep everything as it's small.
-                subset = df
+            if "VinCode" in subset.columns:
+                spatial_vin_codes.update(subset["VinCode"].dropna().tolist())
 
             print(f"  Result: {len(subset)} rows")
-            if f.suffix == ".geoparquet":
-                subset.to_parquet(output_dir / f"{stem}.geoparquet")
+            subset.to_parquet(output_dir / f"{f.stem}.geoparquet")
+
+        # Pass 2: non-spatial .parquet files (skip those superseded by .geoparquet)
+        for f in sorted(input_dir.glob("*.parquet")):
+            if (input_dir / f"{f.stem}.geoparquet").exists():
+                print(f"Skipping {name}/{f.name}: superseded by {f.stem}.geoparquet")
+                continue
+
+            print(f"Subsetting {name}/{f.name}...")
+            try:
+                df = pd.read_parquet(f)
+            except Exception as e:
+                print(f"  Error reading {f}: {e}")
+                continue
+
+            # Filter by VinCode when spatial context is available, otherwise
+            # take a head sample to avoid bloating test data.
+            if "VinCode" in df.columns and spatial_vin_codes:
+                subset = df[df["VinCode"].isin(spatial_vin_codes)].copy()
             else:
-                subset.to_parquet(output_dir / f"{stem}.parquet")
+                subset = df.head(NON_SPATIAL_ROW_LIMIT).copy()
+
+            print(f"  Result: {len(subset)} rows")
+            subset.to_parquet(output_dir / f"{f.stem}.parquet")
+
+        # Pass 3: xlsx files — preserve header structure, spatially filter data rows
+        for f in sorted(input_dir.glob("*.xlsx")):
+            print(f"Subsetting {name}/{f.name}...")
+            try:
+                sheets = pd.read_excel(f, sheet_name=None, header=None)
+            except Exception as e:
+                print(f"  Error reading {f}: {e}")
+                continue
+
+            out_path = output_dir / f.name
+            with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+                for sheet_name, sheet_df in sheets.items():
+                    header_rows = sheet_df.iloc[:XLSX_HEADER_ROWS]
+                    data = sheet_df.iloc[XLSX_HEADER_ROWS:].copy()
+
+                    # Detect lat/lon columns by their header cell value, which
+                    # may contain embedded newlines (e.g. "Lat\n(WGS 84 ...)").
+                    col_headers = header_rows.iloc[-1]
+                    lat_cols = [
+                        c for c, v in col_headers.items()
+                        if isinstance(v, str) and v.startswith("Lat")
+                    ]
+                    lon_cols = [
+                        c for c, v in col_headers.items()
+                        if isinstance(v, str) and v.startswith("Lon")
+                    ]
+
+                    if lat_cols and lon_cols:
+                        lat_col, lon_col = lat_cols[0], lon_cols[0]
+                        lat = pd.to_numeric(data[lat_col], errors="coerce")
+                        lon = pd.to_numeric(data[lon_col], errors="coerce")
+                        valid = lat.notna() & lon.notna()
+                        mask = valid & pd.Series(
+                            [
+                                bpoly.contains(Point(lo, la)) if ok else False
+                                for ok, la, lo in zip(valid, lat, lon)
+                            ],
+                            index=data.index,
+                        )
+                        data = data[mask]
+
+                    subset = pd.concat([header_rows, data], ignore_index=True)
+                    print(f"  Sheet '{sheet_name}': {len(data)} data rows")
+                    subset.to_excel(writer, sheet_name=sheet_name, header=False, index=False)
 
 
 if __name__ == "__main__":
