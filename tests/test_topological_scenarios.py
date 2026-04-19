@@ -11,7 +11,7 @@ pytestmark = pytest.mark.skipif(
 
 def load_graph():
     edges = gpd.read_parquet("output/dropins-schematization/edges.geoparquet")
-    G = nx.Graph()
+    G = nx.DiGraph()
     for _, edge in edges.iterrows():
         if edge.source_node is not None and edge.target_node is not None:
             G.add_edge(edge.source_node, edge.target_node, **edge.to_dict())

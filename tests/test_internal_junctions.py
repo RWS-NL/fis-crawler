@@ -254,8 +254,6 @@ def test_process_fairway_geometry_asymmetric_buffer():
     merge_x = g_after.coords[0][0]
 
     # The gap between split and merge should be larger on the after-side
-    from shapely.geometry import Point as Pt
-
     lock_x = lock_point.x
     dist_before = lock_x - split_x   # how far upstream the split was pushed
     dist_after = merge_x - lock_x    # how far downstream the merge was pushed

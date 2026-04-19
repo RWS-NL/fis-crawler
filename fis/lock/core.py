@@ -267,7 +267,9 @@ def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
     max_len = _get_max_chamber_length(lock_chambers)
     fallback = (max_len / 2) + margin
 
-    if not fw_geom or not lock_geom:
+    if fw_geom is None or getattr(fw_geom, "is_empty", False):
+        return fallback, fallback
+    if lock_geom is None or getattr(lock_geom, "is_empty", False):
         return fallback, fallback
 
     gs_fw = gpd.GeoSeries([fw_geom], crs="EPSG:4326").to_crs(settings.PROJECTED_CRS)
@@ -287,13 +289,18 @@ def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
     if not lock_chambers.empty and "geometry" in lock_chambers.columns:
         for _, ch_row in lock_chambers.iterrows():
             ch_geom_val = ch_row.get("geometry")
-            if not ch_geom_val or (not isinstance(ch_geom_val, str) and pd.isna(ch_geom_val)):
+            if ch_geom_val is None:
                 continue
-            ch_geom = (
-                wkt.loads(ch_geom_val)
-                if isinstance(ch_geom_val, str)
-                else ch_geom_val
-            )
+            if isinstance(ch_geom_val, str):
+                if not ch_geom_val.strip():
+                    continue
+                ch_geom = wkt.loads(ch_geom_val)
+            elif pd.isna(ch_geom_val):
+                continue
+            else:
+                ch_geom = ch_geom_val
+            if getattr(ch_geom, "is_empty", False):
+                continue
             ch_rd = (
                 gpd.GeoSeries([ch_geom], crs="EPSG:4326")
                 .to_crs(settings.PROJECTED_CRS)
@@ -321,22 +328,66 @@ def _find_internal_junctions_for_chambers(lock_chambers, network_graph):
 
     The result is stored inside each chamber dict so that ``build_graph_features``
     can insert the junctions as intermediate nodes on the chamber route edge.
+
+    Performance: all network node geometries are projected to the metric CRS once
+    and a Shapely STRtree is built so that each chamber polygon can be queried in
+    O(k log N) rather than O(N).
     """
+    from shapely.strtree import STRtree
+
     if network_graph is None or lock_chambers.empty:
         return {}
 
+    # --- Build projected node list once ---
+    node_ids_list = []
+    node_geoms_wgs84 = []
+    node_geoms_rd = []
+
+    for node_id, node_data in network_graph.nodes(data=True):
+        node_geom = node_data.get("geometry")
+        if node_geom is None:
+            continue
+        if not isinstance(node_geom, Point):
+            try:
+                node_geom = Point(node_geom)
+            except Exception:
+                continue
+        if getattr(node_geom, "is_empty", False):
+            continue
+        node_geoms_wgs84.append(node_geom)
+        node_ids_list.append(stringify_id(node_id))
+
+    if not node_ids_list:
+        return {}
+
+    # Project all node geometries to metric CRS in one batch
+    projected = (
+        gpd.GeoSeries(node_geoms_wgs84, crs="EPSG:4326")
+        .to_crs(settings.PROJECTED_CRS)
+    )
+    node_geoms_rd = list(projected)
+
+    # Build STRtree for fast spatial queries
+    strtree = STRtree(node_geoms_rd)
+
     internal_by_chamber = {}
 
-    # Only iterate over chambers that have a polygon geometry
+    # Iterate over chambers that have a polygon geometry
     for _, ch_row in lock_chambers.iterrows():
         ch_geom_val = ch_row.get("geometry")
-        if not ch_geom_val or (
-            not isinstance(ch_geom_val, str) and pd.isna(ch_geom_val)
-        ):
+        if ch_geom_val is None:
             continue
-        ch_geom = (
-            wkt.loads(ch_geom_val) if isinstance(ch_geom_val, str) else ch_geom_val
-        )
+        if isinstance(ch_geom_val, str):
+            if not ch_geom_val.strip():
+                continue
+            ch_geom = wkt.loads(ch_geom_val)
+        elif pd.isna(ch_geom_val):
+            continue
+        else:
+            ch_geom = ch_geom_val
+        if getattr(ch_geom, "is_empty", False):
+            continue
+
         if ch_geom.geom_type not in ("Polygon", "MultiPolygon"):
             continue
 
@@ -352,29 +403,15 @@ def _find_internal_junctions_for_chambers(lock_chambers, network_graph):
         ch_id = stringify_id(ch_row["id"])
         junctions_inside = []
 
-        for node_id, node_data in network_graph.nodes(data=True):
-            node_geom = node_data.get("geometry")
-            if node_geom is None:
-                continue
-            # Geometry stored in the FIS graph is in WGS84; project to metric CRS
-            # for comparison against the projected chamber buffer.
-            if not isinstance(node_geom, Point):
-                try:
-                    node_geom = Point(node_geom)
-                except Exception:
-                    continue
-            node_geom_rd = (
-                gpd.GeoSeries([node_geom], crs="EPSG:4326")
-                .to_crs(settings.PROJECTED_CRS)
-                .iloc[0]
+        # Query candidates via STRtree – much faster than iterating all nodes
+        candidate_indices = strtree.query(ch_geom_buffered_rd, predicate="contains")
+        for idx in candidate_indices:
+            junctions_inside.append(
+                {
+                    "id": node_ids_list[idx],
+                    "geometry": node_geoms_wgs84[idx],  # keep WGS84 for downstream use
+                }
             )
-            if ch_geom_buffered_rd.contains(node_geom_rd):
-                junctions_inside.append(
-                    {
-                        "id": stringify_id(node_id),
-                        "geometry": node_geom,  # keep WGS84 for downstream use
-                    }
-                )
 
         if junctions_inside:
             internal_by_chamber[ch_id] = junctions_inside
@@ -754,6 +791,16 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
                     "exception_schedules": to_python(row["exception_schedules"]) or [],
                 }
 
+    # Pre-compute complex groups before processing individual locks.
+    # This identifies multi-branch complexes (e.g. Oranjesluizen) that share
+    # boundary junctions and should be processed as a unit.
+    complex_groups = detect_complex_groups(locks_gdf, sections_gdf)
+    # Invert: lock_id → group_id for O(1) lookup inside the loop
+    lock_to_group: dict[str, str] = {}
+    for group_id, members in complex_groups.items():
+        for lid in members:
+            lock_to_group[lid] = group_id
+
     for idx, lock in tqdm(
         locks_gdf.iterrows(),
         total=len(locks_gdf),
@@ -837,6 +884,11 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
             "id": lock_id,
             "name": lock["name"],
             "isrs_code": lock_isrs_code,
+            # complex_group_id identifies which multi-lock complex this lock belongs
+            # to (from the detect_complex_groups pre-pass).  For single-lock complexes
+            # this equals lock_id.  build_graph_features uses it to name shared
+            # split/merge nodes in multi-branch complexes.
+            "complex_group_id": lock_to_group.get(lock_id, lock_id),
             **ris_info,
             **fairway_data,
             "berths": berths_data,
@@ -872,7 +924,6 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
 def detect_complex_groups(
     locks: pd.DataFrame,
     sections_gdf: pd.DataFrame,
-    network_graph=None,
 ) -> dict:
     """
     Group FIS locks that form a single navigational complex.
@@ -899,6 +950,9 @@ def detect_complex_groups(
         return {stringify_id(lid): [stringify_id(lid)] for lid in locks["id"]}
 
     # Build: lock_id → set of junction IDs on its fairway sections
+    # Only direct boundary junctions (start/end of every section on the lock's
+    # fairway) are used.  No neighbour expansion is performed so that locks that
+    # merely share a nearby junction are not incorrectly grouped.
     lock_junctions: dict[str, set] = {}
     for _, lock in locks.iterrows():
         lid = stringify_id(lock["id"])
@@ -913,14 +967,6 @@ def detect_complex_groups(
                 j = stringify_id(sec.get(jcol))
                 if j:
                     junctions.add(j)
-        # Also include neighbours from the network graph (one hop)
-        if network_graph is not None:
-            for j in list(junctions):
-                try:
-                    for nbr in network_graph.neighbors(j):
-                        junctions.add(stringify_id(nbr))
-                except Exception:
-                    pass
         lock_junctions[lid] = junctions
 
     # Union-Find grouping

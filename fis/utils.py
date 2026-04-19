@@ -282,7 +282,9 @@ def process_fairway_geometry(
     if isinstance(lock_geom, str):
         lock_geom = wkt.loads(lock_geom)
 
-    if not fw_geom or not lock_geom:
+    if fw_geom is None or getattr(fw_geom, "is_empty", False):
+        return fairway_data
+    if lock_geom is None or getattr(lock_geom, "is_empty", False):
         return fairway_data
 
     # Accurate Spatial Projection (EPSG:28992) for metric calculations

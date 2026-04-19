@@ -305,22 +305,47 @@ def _generate_structure_cuts(
             buffer_dist = settings.BRIDGE_SPLICING_BUFFER_M
 
         # Junction-aware buffer clamping:
-        # If the section's known boundary junction (start or end) falls within
-        # the computed buffer zone, clamp the buffer so the synthetic split/merge
-        # node aligns with that junction's projected position.  This prevents the
-        # splicer from inserting a synthetic node *behind* a pre-existing junction.
-        start_junc_wkt = obj.get("_section_start_junction_geom")
-        end_junc_wkt = obj.get("_section_end_junction_geom")
-        for junc_wkt in (start_junc_wkt, end_junc_wkt):
-            if not junc_wkt:
-                continue
+        # If a section boundary junction falls within the computed buffer zone,
+        # clamp the buffer so the synthetic split/merge node aligns with that
+        # junction's projected position.  This prevents the splicer from
+        # inserting a synthetic node *behind* a pre-existing junction.
+        #
+        # Prefer explicitly attached junction geometries (WGS84 WKT) when
+        # available, and fall back to the section line's own start/end points
+        # (already in the projected CRS) so clamping still works for all sections.
+        junction_geoms_to_check = []
+        for key in ("_section_start_junction_geom", "_section_end_junction_geom"):
+            val = obj.get(key)
+            if val:
+                junction_geoms_to_check.append(("wgs84", val))
+
+        if not junction_geoms_to_check:
+            line_coords = list(line_rd.coords)
+            if line_coords:
+                # Start/end points of the section line are already in the
+                # projected CRS (line_rd is already reprojected above)
+                junction_geoms_to_check = [
+                    ("projected", Point(line_coords[0])),
+                    ("projected", Point(line_coords[-1])),
+                ]
+
+        for crs_hint, junc_val in junction_geoms_to_check:
             try:
-                junc_geom = wkt.loads(junc_wkt) if isinstance(junc_wkt, str) else junc_wkt
-                junc_rd = (
-                    gpd.GeoSeries([junc_geom], crs="EPSG:4326")
-                    .to_crs(utm_crs)
-                    .iloc[0]
-                )
+                if crs_hint == "wgs84":
+                    junc_geom = (
+                        wkt.loads(junc_val)
+                        if isinstance(junc_val, str)
+                        else junc_val
+                    )
+                    junc_rd = (
+                        gpd.GeoSeries([junc_geom], crs="EPSG:4326")
+                        .to_crs(utm_crs)
+                        .iloc[0]
+                    )
+                else:
+                    junc_rd = junc_val
+                if junc_rd.geom_type != "Point":
+                    junc_rd = junc_rd.centroid
                 junc_proj = line_rd.project(junc_rd)
                 snap_dist = settings.LOCK_COMPLEX_JUNCTION_SNAP_DIST_M
                 if abs(junc_proj - dist) < buffer_dist + snap_dist:
