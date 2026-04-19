@@ -145,9 +145,7 @@ def test_chamber_route_without_internal_junctions_is_single_segment():
     )
 
     route_segs = [
-        f
-        for f in features
-        if f["properties"].get("segment_type") == "chamber_route"
+        f for f in features if f["properties"].get("segment_type") == "chamber_route"
     ]
     assert len(route_segs) == 1, (
         "Without internal junctions there should be a single chamber_route segment"
@@ -177,8 +175,8 @@ def test_chamber_route_multiple_internal_junctions_ordered():
         "dim_usable_length": 200,
         "dim_gate_width": 10,
         "internal_junctions": [
-            {"id": "junc_A", "geometry": Point(0, 0)},   # downstream (inserted first)
-            {"id": "junc_B", "geometry": Point(0, 5)},   # upstream   (inserted second)
+            {"id": "junc_A", "geometry": Point(0, 0)},  # downstream (inserted first)
+            {"id": "junc_B", "geometry": Point(0, 5)},  # upstream   (inserted second)
         ],
     }
 
@@ -190,7 +188,7 @@ def test_chamber_route_multiple_internal_junctions_ordered():
         chamber_id,
         f"chamber_{chamber_id}_start",
         f"chamber_{chamber_id}_end",
-        Point(0, 10),   # door_start (upstream)
+        Point(0, 10),  # door_start (upstream)
         Point(0, -10),  # door_end (downstream)
         Point(0, 15),
         Point(0, -15),
@@ -205,7 +203,9 @@ def test_chamber_route_multiple_internal_junctions_ordered():
             G.add_edge(p["source_node"], p["target_node"])
 
     # Path must go: start → junc_B → junc_A → end  (not start → junc_A → junc_B → end)
-    path = nx.shortest_path(G, f"chamber_{chamber_id}_start", f"chamber_{chamber_id}_end")
+    path = nx.shortest_path(
+        G, f"chamber_{chamber_id}_start", f"chamber_{chamber_id}_end"
+    )
     b_idx = path.index("junc_B")
     a_idx = path.index("junc_A")
     assert b_idx < a_idx, (
@@ -256,8 +256,8 @@ def test_process_fairway_geometry_asymmetric_buffer():
 
     # The gap between split and merge should be larger on the after-side
     lock_x = lock_point.x
-    dist_before = lock_x - split_x   # how far upstream the split was pushed
-    dist_after = merge_x - lock_x    # how far downstream the merge was pushed
+    dist_before = lock_x - split_x  # how far upstream the split was pushed
+    dist_after = merge_x - lock_x  # how far downstream the merge was pushed
 
     # buffer_after_m (2000) > buffer_before_m (1000) so dist_after > dist_before
     assert dist_after > dist_before, (
@@ -533,7 +533,9 @@ def test_identify_embedded_polygon_chamber_inside(
 
     matches = identify_embedded_structures([], [])
 
-    assert "op1" in matches, "Opening inside chamber polygon must be matched as embedded"
+    assert "op1" in matches, (
+        "Opening inside chamber polygon must be matched as embedded"
+    )
     assert matches["op1"]["ch_id"] == "ch1"
 
 

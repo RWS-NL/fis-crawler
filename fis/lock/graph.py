@@ -672,9 +672,11 @@ def _build_chamber_route_features(
         sorted_junctions = sorted(internal_junctions, key=_proj_t)
 
         # Build the sequence of waypoints through the chamber
-        waypoints = [(door_start, chamber_node_start_id)] + [
-            (j["geometry"], j["id"]) for j in sorted_junctions
-        ] + [(door_end, chamber_node_end_id)]
+        waypoints = (
+            [(door_start, chamber_node_start_id)]
+            + [(j["geometry"], j["id"]) for j in sorted_junctions]
+            + [(door_end, chamber_node_end_id)]
+        )
 
         for idx, ((pt_a, node_a), (pt_b, node_b)) in enumerate(
             zip(waypoints, waypoints[1:])
@@ -754,4 +756,3 @@ def _build_chamber_route_features(
     )
 
     return features
-

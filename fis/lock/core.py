@@ -360,9 +360,8 @@ def _find_internal_junctions_for_chambers(lock_chambers, network_graph):
         return {}
 
     # Project all node geometries to metric CRS in one batch
-    projected = (
-        gpd.GeoSeries(node_geoms_wgs84, crs="EPSG:4326")
-        .to_crs(settings.PROJECTED_CRS)
+    projected = gpd.GeoSeries(node_geoms_wgs84, crs="EPSG:4326").to_crs(
+        settings.PROJECTED_CRS
     )
     node_geoms_rd = list(projected)
 
@@ -528,7 +527,10 @@ def _resolve_openings_optimized(
 
 
 def _build_chamber_objects_optimized(
-    lock_chambers, chamber_routes, subchambers_by_parent, op_times_map,
+    lock_chambers,
+    chamber_routes,
+    subchambers_by_parent,
+    op_times_map,
     internal_junctions_by_chamber=None,
 ):
     """Optimized chamber builder."""
@@ -1002,4 +1004,3 @@ def detect_complex_groups(
         groups.setdefault(root, []).append(lid)
 
     return groups
-

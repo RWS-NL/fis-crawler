@@ -334,9 +334,7 @@ def _generate_structure_cuts(
             try:
                 if crs_hint == "wgs84":
                     junc_geom = (
-                        wkt.loads(junc_val)
-                        if isinstance(junc_val, str)
-                        else junc_val
+                        wkt.loads(junc_val) if isinstance(junc_val, str) else junc_val
                     )
                     junc_rd = (
                         gpd.GeoSeries([junc_geom], crs="EPSG:4326")

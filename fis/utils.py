@@ -220,10 +220,14 @@ def normalize_attributes(
     for col in cm_cols:
         target_name = col[:-3]  # remove '_cm'
         logger.info("Converting %s from cm to meters -> %s", col, target_name)
-        new_df[target_name] = new_df[col] / 100.0
-        # If the target name was already present (e.g. from a different Loader step),
-        # this overwrite is intentional as the cm-sourced data with suffix 
-        # is the most specific representation for this source.
+        converted = new_df[col] / 100.0
+        if target_name in new_df.columns:
+            # Prefer the cm-converted value where it is non-null; fall back to the
+            # directly-mapped value (e.g. ClearanceHeightClosed → dim_height) where
+            # the _cm column was only added as an empty placeholder.
+            new_df[target_name] = converted.combine_first(new_df[target_name])
+        else:
+            new_df[target_name] = converted
         new_df = new_df.drop(columns=[col])
 
     # 4. Final cast back to GeoDataFrame if input was one or has geometry to preserve methods/CRS

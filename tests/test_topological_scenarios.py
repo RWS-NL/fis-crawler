@@ -206,9 +206,7 @@ def test_scenario_5_sluis_weurt_north_branch():
             "opening_25111 is inside chamber 40927 route – should be on exit edge"
         )
         # opening_25111 must be reachable from chamber_40927_end before lock merge
-        assert nx.has_path(G, ch_end, op_start), (
-            f"No path from {ch_end} to {op_start}"
-        )
+        assert nx.has_path(G, ch_end, op_start), f"No path from {ch_end} to {op_start}"
         path_to_merge = nx.shortest_path(G, ch_end, merge_n)
         assert op_start in path_to_merge, (
             "opening_25111_start must be on the path from chamber_40927_end to merge"
@@ -349,4 +347,3 @@ def test_scenario_8_volkeraksluizen_boundary_junctions():
         assert nx.has_path(G, split_n, junc) or nx.has_path(G, merge_n, junc), (
             f"Boundary junction {junc} is not reachable from the Volkerak complex"
         )
-
