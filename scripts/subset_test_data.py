@@ -6,8 +6,11 @@ from shapely.geometry import box
 
 
 def subset_test_data():
-    bbox = [4.14, 51.66, 4.41, 51.72]  # Slighly expanded to ensure full coverage
-    bpoly = box(*bbox)
+    bboxes = [
+        [4.14, 51.66, 4.41, 51.72],  # Hollandsch Diep / Dordrecht area
+        [5.75, 51.82, 5.90, 51.90],  # Weurt (near Nijmegen)
+    ]
+    bpoly = box(*bboxes[0]).union(box(*bboxes[1]))
 
     input_dirs = {
         "fis-export": pathlib.Path("output/fis-export"),
