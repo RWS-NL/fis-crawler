@@ -340,8 +340,14 @@ def _find_internal_junctions_for_chambers(lock_chambers, network_graph):
         if ch_geom.geom_type not in ("Polygon", "MultiPolygon"):
             continue
 
-        # Buffer the chamber slightly to capture junctions on the exact boundary
-        ch_geom_buffered = ch_geom.buffer(settings.CHAMBER_INTERSECTION_BUFFER_M / 111_000)
+        # Project the chamber polygon to metric CRS before buffering so the
+        # CHAMBER_INTERSECTION_BUFFER_M tolerance is applied accurately.
+        ch_geom_rd = (
+            gpd.GeoSeries([ch_geom], crs="EPSG:4326")
+            .to_crs(settings.PROJECTED_CRS)
+            .iloc[0]
+        )
+        ch_geom_buffered_rd = ch_geom_rd.buffer(settings.CHAMBER_INTERSECTION_BUFFER_M)
 
         ch_id = stringify_id(ch_row["id"])
         junctions_inside = []
@@ -350,17 +356,23 @@ def _find_internal_junctions_for_chambers(lock_chambers, network_graph):
             node_geom = node_data.get("geometry")
             if node_geom is None:
                 continue
-            # Geometry stored in the FIS graph is in WGS84
+            # Geometry stored in the FIS graph is in WGS84; project to metric CRS
+            # for comparison against the projected chamber buffer.
             if not isinstance(node_geom, Point):
                 try:
                     node_geom = Point(node_geom)
                 except Exception:
                     continue
-            if ch_geom_buffered.contains(node_geom):
+            node_geom_rd = (
+                gpd.GeoSeries([node_geom], crs="EPSG:4326")
+                .to_crs(settings.PROJECTED_CRS)
+                .iloc[0]
+            )
+            if ch_geom_buffered_rd.contains(node_geom_rd):
                 junctions_inside.append(
                     {
                         "id": stringify_id(node_id),
-                        "geometry": node_geom,
+                        "geometry": node_geom,  # keep WGS84 for downstream use
                     }
                 )
 

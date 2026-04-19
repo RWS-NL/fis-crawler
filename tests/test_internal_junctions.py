@@ -197,7 +197,7 @@ def test_chamber_route_multiple_internal_junctions_ordered():
         "lock_100_merge",
     )
 
-    G = nx.DiGraph()
+    G = nx.Graph()
     for f in features:
         p = f["properties"]
         if p.get("feature_type") == "fairway_segment":
