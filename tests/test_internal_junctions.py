@@ -8,7 +8,6 @@ Tests cover:
 - identify_embedded_structures rejects openings that are outside chamber polygons.
 """
 
-import pytest
 import networkx as nx
 import pandas as pd
 import geopandas as gpd
@@ -74,7 +73,6 @@ def test_chamber_route_with_internal_junctions_splits_correctly():
         merge_node_id,
     )
 
-    feature_types = [f["properties"]["feature_type"] for f in features]
     node_ids = {
         f["properties"]["id"]
         for f in features

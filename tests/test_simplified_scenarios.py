@@ -64,7 +64,7 @@ def test_simplified_bridge_attributes(simplified_graph):
         assert edge.structure_type == "bridge"
         assert pd.notna(edge.structure_id)
         # Check for aggregated dimensions (at least one should be present)
-        assert "dim_width" in edge or "dim_height" in edge
+        assert "dim_gate_width" in edge or "dim_height" in edge
         assert pd.notna(edge.constituent_ids)
 
 
