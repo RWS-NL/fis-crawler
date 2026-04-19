@@ -911,3 +911,150 @@ def test_multi_section_lock_split_only_on_upstream_section():
     assert abs(merge_node_pt.x - merge_lon) < 0.02, (
         f"Merge node lon ({merge_node_pt.x:.4f}) should be near {merge_lon}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 6. Assertion: split/merge nodes must not be inside chamber polygons
+# ---------------------------------------------------------------------------
+
+
+def test_assert_split_merge_outside_chambers_passes_when_outside():
+    """
+    _assert_split_merge_outside_chambers must NOT raise when both split and
+    merge points are clearly outside every chamber polygon in the complex.
+    """
+    from fis.lock.graph import _assert_split_merge_outside_chambers
+    from shapely.geometry import Polygon, Point
+
+    # 100 m × 100 m chamber polygon in NL coordinates (meters in EPSG:28992)
+    # We work in WGS84 degrees here; the chamber is a tiny polygon around Weurt.
+    ch_poly = Polygon([
+        (5.820, 51.852),
+        (5.821, 51.852),
+        (5.821, 51.853),
+        (5.820, 51.853),
+    ])
+
+    complex_obj = {
+        "id": "49032",
+        "locks": [
+            {
+                "chambers": [
+                    {
+                        "id": "47538",
+                        "geometry": ch_poly.wkt,
+                    }
+                ]
+            }
+        ],
+    }
+
+    split_outside = Point(5.819, 51.851)   # clearly west/south of the polygon
+    merge_outside = Point(5.825, 51.856)   # clearly east/north of the polygon
+
+    # Must not raise
+    _assert_split_merge_outside_chambers("49032", split_outside, merge_outside, [complex_obj])
+
+
+def test_assert_split_merge_outside_chambers_raises_for_merge_inside():
+    """
+    _assert_split_merge_outside_chambers must raise AssertionError when the
+    merge point falls inside a chamber polygon.
+    """
+    import pytest
+    from fis.lock.graph import _assert_split_merge_outside_chambers
+    from shapely.geometry import Polygon, Point
+
+    # Chamber polygon around Weurt
+    ch_poly = Polygon([
+        (5.820, 51.852),
+        (5.822, 51.852),
+        (5.822, 51.855),
+        (5.820, 51.855),
+    ])
+
+    complex_obj = {
+        "id": "49032",
+        "locks": [
+            {
+                "chambers": [
+                    {
+                        "id": "47538",
+                        "geometry": ch_poly.wkt,
+                    }
+                ]
+            }
+        ],
+    }
+
+    split_outside = Point(5.819, 51.851)   # outside
+    merge_inside  = Point(5.821, 51.853)   # deep inside the polygon
+
+    with pytest.raises(AssertionError, match="lock_49032_merge is inside chamber 47538"):
+        _assert_split_merge_outside_chambers("49032", split_outside, merge_inside, [complex_obj])
+
+
+def test_assert_split_merge_outside_chambers_raises_for_split_inside():
+    """
+    _assert_split_merge_outside_chambers must raise AssertionError when the
+    split point falls inside a chamber polygon.
+    """
+    import pytest
+    from fis.lock.graph import _assert_split_merge_outside_chambers
+    from shapely.geometry import Polygon, Point
+
+    ch_poly = Polygon([
+        (5.820, 51.852),
+        (5.822, 51.852),
+        (5.822, 51.855),
+        (5.820, 51.855),
+    ])
+
+    complex_obj = {
+        "id": "49032",
+        "locks": [
+            {
+                "chambers": [
+                    {
+                        "id": "47538",
+                        "geometry": ch_poly.wkt,
+                    }
+                ]
+            }
+        ],
+    }
+
+    split_inside  = Point(5.821, 51.853)   # inside
+    merge_outside = Point(5.825, 51.856)   # outside
+
+    with pytest.raises(AssertionError, match="lock_49032_split is inside chamber 47538"):
+        _assert_split_merge_outside_chambers("49032", split_inside, merge_outside, [complex_obj])
+
+
+def test_assert_split_merge_outside_chambers_skips_non_polygon_chambers():
+    """
+    Chambers with Point or no geometry must be silently skipped (no assertion
+    and no exception).
+    """
+    from fis.lock.graph import _assert_split_merge_outside_chambers
+    from shapely.geometry import Point
+
+    complex_obj = {
+        "id": "99",
+        "locks": [
+            {
+                "chambers": [
+                    {
+                        "id": "stub",
+                        "geometry": Point(5.82, 51.85).wkt,  # Point, not Polygon
+                    }
+                ]
+            }
+        ],
+    }
+
+    # Both points placed at the "chamber" location; should not raise because the
+    # geometry is a Point, not a polygon.
+    _assert_split_merge_outside_chambers(
+        "99", Point(5.82, 51.85), Point(5.82, 51.85), [complex_obj]
+    )

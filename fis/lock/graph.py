@@ -6,7 +6,7 @@ from shapely import wkt
 from shapely.geometry import Point, mapping, LineString, shape
 from pyproj import Geod
 from fis.lock.utils import find_chamber_doors
-from fis import utils
+from fis import utils, settings
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,66 @@ geod = Geod(ellps="WGS84")
 
 CRS = "EPSG:4326"
 
+
+def _assert_split_merge_outside_chambers(
+    lock_id: str,
+    split_point: Point,
+    merge_point: Point,
+    lock_complexes,
+) -> None:
+    """
+    Assert that neither the split nor the merge node for ``lock_id`` falls inside
+    any chamber polygon belonging to that lock complex.
+
+    A small metric tolerance (``CHAMBER_INTERSECTION_BUFFER_M``) is used to avoid
+    false positives caused by points that sit exactly on a chamber boundary.  The
+    check projects geometries to the configured metric CRS.
+
+    Raises ``AssertionError`` if a violation is found.
+    """
+    for c in lock_complexes:
+        if utils.stringify_id(c["id"]) != lock_id:
+            continue
+        for l_obj in c.get("locks", []):
+            for chamber in l_obj.get("chambers", []):
+                ch_geom_val = chamber.get("geometry")
+                if not ch_geom_val or not isinstance(ch_geom_val, str):
+                    continue
+                ch_geom = wkt.loads(ch_geom_val)
+                if ch_geom.geom_type not in ("Polygon", "MultiPolygon"):
+                    continue
+
+                # Project to metric CRS and shrink by buffer so points right on
+                # the boundary don't trigger false-positive assertions.
+                ch_rd = (
+                    gpd.GeoSeries([ch_geom], crs="EPSG:4326")
+                    .to_crs(settings.PROJECTED_CRS)
+                    .iloc[0]
+                )
+                ch_shrunk = ch_rd.buffer(-settings.CHAMBER_INTERSECTION_BUFFER_M)
+                ch_id = utils.stringify_id(chamber.get("id"))
+
+                if split_point is not None:
+                    sp_rd = (
+                        gpd.GeoSeries([split_point], crs="EPSG:4326")
+                        .to_crs(settings.PROJECTED_CRS)
+                        .iloc[0]
+                    )
+                    assert not ch_shrunk.contains(sp_rd), (
+                        f"lock_{lock_id}_split is inside chamber {ch_id} polygon. "
+                        "Lock split nodes must not be placed inside a chamber."
+                    )
+
+                if merge_point is not None:
+                    mp_rd = (
+                        gpd.GeoSeries([merge_point], crs="EPSG:4326")
+                        .to_crs(settings.PROJECTED_CRS)
+                        .iloc[0]
+                    )
+                    assert not ch_shrunk.contains(mp_rd), (
+                        f"lock_{lock_id}_merge is inside chamber {ch_id} polygon. "
+                        "Lock merge nodes must not be placed inside a chamber."
+                    )
 
 def build_nodes_gdf(complexes) -> gpd.GeoDataFrame:
     """Return a Point GeoDataFrame of all routing nodes across all lock complexes."""
@@ -235,6 +295,12 @@ def build_graph_features(complexes):
         if c.get("geometry_after_wkt"):
             g_after = wkt.loads(c["geometry_after_wkt"])
             merge_point = Point(g_after.coords[0])
+
+        # Sanity-check: neither the split nor the merge node may fall inside any
+        # of the lock complex's own chamber polygons.
+        _assert_split_merge_outside_chambers(
+            lock_id, split_point, merge_point, [c]
+        )
 
         features.extend(
             _process_fairway_connections(
