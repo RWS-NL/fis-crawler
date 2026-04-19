@@ -74,6 +74,8 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     locks = utils.normalize_attributes(locks, "locks", schema)
     if "country_code" in locks.columns:
         locks = locks[locks["country_code"] == "NL"]
+    if hasattr(locks, "geometry"):
+        locks = locks[locks.geometry.geom_type != "Point"]
     chambers = utils.normalize_attributes(chambers, "chambers", schema)
     subchambers = utils.normalize_attributes(subchambers, "subchambers", schema)
     berths = utils.normalize_attributes(berths, "berths", schema)
