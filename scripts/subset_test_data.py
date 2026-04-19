@@ -31,6 +31,11 @@ def subset_test_data():
             if f.suffix not in [".geoparquet", ".parquet"]:
                 continue
 
+            # Prefer .geoparquet over .parquet when both exist for the same stem
+            if f.suffix == ".parquet" and (input_dir / f"{f.stem}.geoparquet").exists():
+                print(f"Skipping {name}/{f.name}: superseded by {f.stem}.geoparquet")
+                continue
+
             stem = f.stem
             print(f"Subsetting {name}/{f.name}...")
 
