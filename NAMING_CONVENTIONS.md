@@ -87,9 +87,24 @@ Enrichment modules added prefixes like `speed_Speed` which created "Double Camel
 
 ## 5. Lock-Specific Refinements
 The splitting of fairways for lock complexes involves specialized logic to ensure topological integrity when bridge openings are present:
-- **Dynamic Buffering:** If bridge openings are parented to a lock or its chambers, the `buffer_dist` is automatically expanded to encompass the farthest opening plus a 100m safety margin.
+- **Asymmetric Buffering:** Split/merge node positions are derived from the spatial extents of *each chamber polygon* projected onto the fairway line.  `buffer_before_m` covers the upstream reach of all chambers; `buffer_after_m` covers the downstream reach.  This replaces the old symmetric `buffer_dist = (max_chamber_length / 2) + 50` which misplaced nodes for staggered chambers.
+- **Side-Aware Opening Expansion:** An opening upstream of the lock centroid expands only `buffer_before_m`; a downstream opening expands only `buffer_after_m`.
 - **Metric Projection:** All calculations for splitting and buffering use the **RD New (EPSG:28992)** projected coordinate system to ensure accurate distances in meters.
 - **Centralization:** This logic is implemented in `utils.process_fairway_geometry` and shared across lock and bridge modules.
+
+### Lock Node Naming
+| Node ID pattern | `node_type` value | Description |
+|---|---|---|
+| `lock_{id}_split` | `lock_split` | Upstream boundary of a lock complex (synthetic if no pre-existing junction is snapped) |
+| `lock_{id}_merge` | `lock_merge` | Downstream boundary of a lock complex |
+| `chamber_{id}_start` | `chamber_start` | Upstream door of one chamber |
+| `chamber_{id}_end` | `chamber_end` | Downstream door of one chamber |
+| `{fis_junction_id}` | `chamber_internal_junction` | FIS network junction that lies *inside* a chamber polygon; inserted as an intermediate node on the `chamber_route` edge |
+
+**Direction convention:** `_split` / `_start` nodes always have *lower* projected distance along the fairway geometry than `_merge` / `_end` nodes (upstream-first).
+
+### Multi-Branch Lock Complexes
+When a fairway genuinely forks before the individual chambers (e.g. Oranjesluizen), `detect_complex_groups` in `lock/core.py` identifies which FIS locks share boundary junctions.  The shared upstream junction becomes the natural `lock_split` equivalent; no new synthetic node is created.
 
 ## 6. Maintenance
 When adding new FIS data sources:

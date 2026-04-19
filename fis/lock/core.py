@@ -231,6 +231,145 @@ def _resolve_ris_info(lock_isrs_code, ris_df):
     return ris_info
 
 
+def _get_max_chamber_length(lock_chambers) -> float:
+    """Return the maximum usable (or structural) length across all chambers."""
+    if lock_chambers.empty:
+        return 0.0
+    for col in ("dim_usable_length", "dim_structural_length"):
+        if col in lock_chambers.columns:
+            v = lock_chambers[col].max()
+            if pd.notna(v):
+                return float(v)
+    return 0.0
+
+
+def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
+    """
+    Compute asymmetric upstream/downstream buffer distances for a lock complex.
+
+    Instead of a single symmetric offset from the lock centroid, each chamber
+    polygon is projected onto the fairway line so that the split point is placed
+    before the earliest chamber start and the merge point is placed after the
+    latest chamber end.
+
+    Returns:
+        (buffer_before_m, buffer_after_m) in metres.
+    """
+    fw_geom = fw_obj.geometry if hasattr(fw_obj, "geometry") else None
+    if isinstance(fw_geom, str):
+        fw_geom = wkt.loads(fw_geom)
+
+    lock_geom = lock.geometry if hasattr(lock, "geometry") else None
+    if isinstance(lock_geom, str):
+        lock_geom = wkt.loads(lock_geom)
+
+    margin = settings.DETAILED_LOCK_SPLICING_BUFFER_M
+    max_len = _get_max_chamber_length(lock_chambers)
+    fallback = (max_len / 2) + margin
+
+    if not fw_geom or not lock_geom:
+        return fallback, fallback
+
+    gs_fw = gpd.GeoSeries([fw_geom], crs="EPSG:4326").to_crs(settings.PROJECTED_CRS)
+    gs_lock = gpd.GeoSeries([lock_geom], crs="EPSG:4326").to_crs(settings.PROJECTED_CRS)
+
+    fw_line_rd = gs_fw.iloc[0]
+    lock_rd = gs_lock.iloc[0]
+    if lock_rd.geom_type != "Point":
+        lock_rd = lock_rd.centroid
+
+    lock_proj = fw_line_rd.project(lock_rd)
+
+    # Collect the projected extent of every chamber polygon
+    min_start = lock_proj
+    max_end = lock_proj
+
+    if not lock_chambers.empty and "geometry" in lock_chambers.columns:
+        for _, ch_row in lock_chambers.iterrows():
+            ch_geom_val = ch_row.get("geometry")
+            if not ch_geom_val or (not isinstance(ch_geom_val, str) and pd.isna(ch_geom_val)):
+                continue
+            ch_geom = (
+                wkt.loads(ch_geom_val)
+                if isinstance(ch_geom_val, str)
+                else ch_geom_val
+            )
+            ch_rd = (
+                gpd.GeoSeries([ch_geom], crs="EPSG:4326")
+                .to_crs(settings.PROJECTED_CRS)
+                .iloc[0]
+            )
+            # Sample the four corners of the bounding box for a quick projection
+            minx, miny, maxx, maxy = ch_rd.bounds
+            for cx, cy in [(minx, miny), (maxx, miny), (maxx, maxy), (minx, maxy)]:
+                d = fw_line_rd.project(Point(cx, cy))
+                min_start = min(min_start, d)
+                max_end = max(max_end, d)
+
+    buffer_before_m = max(fallback, (lock_proj - min_start) + margin)
+    buffer_after_m = max(fallback, (max_end - lock_proj) + margin)
+
+    return buffer_before_m, buffer_after_m
+
+
+def _find_internal_junctions_for_chambers(lock_chambers, network_graph):
+    """
+    Return a mapping of chamber_id → list of internal FIS junction dicts.
+
+    A junction is "internal" when its geometry falls inside the chamber polygon
+    (with a small tolerance buffer of ``CHAMBER_INTERSECTION_BUFFER_M``).
+
+    The result is stored inside each chamber dict so that ``build_graph_features``
+    can insert the junctions as intermediate nodes on the chamber route edge.
+    """
+    if network_graph is None or lock_chambers.empty:
+        return {}
+
+    internal_by_chamber = {}
+
+    # Only iterate over chambers that have a polygon geometry
+    for _, ch_row in lock_chambers.iterrows():
+        ch_geom_val = ch_row.get("geometry")
+        if not ch_geom_val or (
+            not isinstance(ch_geom_val, str) and pd.isna(ch_geom_val)
+        ):
+            continue
+        ch_geom = (
+            wkt.loads(ch_geom_val) if isinstance(ch_geom_val, str) else ch_geom_val
+        )
+        if ch_geom.geom_type not in ("Polygon", "MultiPolygon"):
+            continue
+
+        # Buffer the chamber slightly to capture junctions on the exact boundary
+        ch_geom_buffered = ch_geom.buffer(settings.CHAMBER_INTERSECTION_BUFFER_M / 111_000)
+
+        ch_id = stringify_id(ch_row["id"])
+        junctions_inside = []
+
+        for node_id, node_data in network_graph.nodes(data=True):
+            node_geom = node_data.get("geometry")
+            if node_geom is None:
+                continue
+            # Geometry stored in the FIS graph is in WGS84
+            if not isinstance(node_geom, Point):
+                try:
+                    node_geom = Point(node_geom)
+                except Exception:
+                    continue
+            if ch_geom_buffered.contains(node_geom):
+                junctions_inside.append(
+                    {
+                        "id": stringify_id(node_id),
+                        "geometry": node_geom,
+                    }
+                )
+
+        if junctions_inside:
+            internal_by_chamber[ch_id] = junctions_inside
+
+    return internal_by_chamber
+
+
 def _resolve_fairway_data(
     lock, lock_chambers, fairways, sections_gdf, openings_data=None
 ):
@@ -252,21 +391,20 @@ def _resolve_fairway_data(
             "fairway_name": fw_obj["name"],
             "fairway_id": stringify_id(fw_obj["id"]),
         }
-        max_length = 0
-        if not lock_chambers.empty:
-            # Prioritize usable length for calculation buffer, fallback to structural
-            possible_len_cols = ["dim_usable_length", "dim_structural_length"]
-            actual_len_col = next(
-                (c for c in possible_len_cols if c in lock_chambers.columns), None
-            )
-            if actual_len_col:
-                max_length = lock_chambers[actual_len_col].max()
-        if pd.isna(max_length):
-            max_length = 0
 
-        buffer_dist = (max_length / 2) + 50
+        # Compute asymmetric buffers from chamber polygon extents so that the
+        # split is placed before the earliest chamber and the merge after the
+        # latest chamber, even when chambers are staggered along the fairway.
+        buffer_before_m, buffer_after_m = _compute_asymmetric_lock_buffers(
+            fw_obj, lock, lock_chambers
+        )
+
         geom_data = utils.process_fairway_geometry(
-            fw_obj, lock, buffer_dist=buffer_dist, openings_data=openings_data
+            fw_obj,
+            lock,
+            buffer_before_m=buffer_before_m,
+            buffer_after_m=buffer_after_m,
+            openings_data=openings_data,
         )
         fairway_data.update(geom_data)
 
@@ -342,12 +480,16 @@ def _resolve_openings_optimized(
 
 
 def _build_chamber_objects_optimized(
-    lock_chambers, chamber_routes, subchambers_by_parent, op_times_map
+    lock_chambers, chamber_routes, subchambers_by_parent, op_times_map,
+    internal_junctions_by_chamber=None,
 ):
     """Optimized chamber builder."""
     chambers_list = []
     if lock_chambers.empty:
         return chambers_list
+
+    if internal_junctions_by_chamber is None:
+        internal_junctions_by_chamber = {}
 
     for _, chamber in lock_chambers.iterrows():
         route_wkt = None
@@ -405,6 +547,10 @@ def _build_chamber_objects_optimized(
             else None,
             "route_geometry": route_wkt,
             "operating_times": chamber_op_times,
+            # FIS junction nodes that lie inside this chamber polygon (may be empty).
+            # Used by build_graph_features to insert intermediate nodes on the
+            # chamber_route edge (e.g. NL_J2501 / 8864190 inside Weurt chamber 47538).
+            "internal_junctions": internal_junctions_by_chamber.get(chamber_id, []),
         }
 
         if chamber_id in subchambers_by_parent:
@@ -667,6 +813,13 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
             op_id = stringify_id(lock["operating_times_id"])
             lock_op_times = op_times_map.get(op_id)
 
+        # Find FIS junction nodes that lie physically inside each chamber polygon.
+        # These are stored in the chamber dict so that build_graph_features can
+        # insert them as intermediate nodes on the chamber_route edge.
+        internal_junctions_by_chamber = _find_internal_junctions_for_chambers(
+            lock_chambers, network_graph
+        )
+
         complex_obj = {
             **lock_attrs,
             "id": lock_id,
@@ -693,6 +846,7 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
                         chamber_routes,
                         subchambers_by_parent,
                         op_times_map,
+                        internal_junctions_by_chamber=internal_junctions_by_chamber,
                     ),
                 }
             ],
@@ -701,3 +855,94 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
         complexes.append(complex_obj)
 
     return complexes
+
+
+def detect_complex_groups(
+    locks: pd.DataFrame,
+    sections_gdf: pd.DataFrame,
+    network_graph=None,
+) -> dict:
+    """
+    Group FIS locks that form a single navigational complex.
+
+    Two locks belong to the same complex group when they share at least one
+    boundary junction node (``start_junction_id`` / ``end_junction_id`` on their
+    fairway sections).  This captures multi-branch complexes like Oranjesluizen
+    where the fairway forks before the individual lock chambers so they must
+    share the same upstream (split) and downstream (merge) nodes in the graph.
+
+    Returns:
+        A dict mapping ``complex_group_id → [lock_id, ...]`` where
+        ``complex_group_id`` is the string ID of the lock with the lowest
+        numeric ID in the group (or the first alphabetically for ISRS codes).
+
+    Example::
+
+        {
+            "50750": ["50750", "59464015"],  # Oranjesluizen
+            "49032": ["49032"],              # Weurt (single lock, no partner)
+        }
+    """
+    if locks.empty or sections_gdf.empty:
+        return {stringify_id(lid): [stringify_id(lid)] for lid in locks["id"]}
+
+    # Build: lock_id → set of junction IDs on its fairway sections
+    lock_junctions: dict[str, set] = {}
+    for _, lock in locks.iterrows():
+        lid = stringify_id(lock["id"])
+        fid = stringify_id(lock.get("fairway_id"))
+        if not fid:
+            lock_junctions[lid] = set()
+            continue
+        fw_secs = sections_gdf[sections_gdf["fairway_id"] == fid]
+        junctions: set = set()
+        for _, sec in fw_secs.iterrows():
+            for jcol in ("start_junction_id", "end_junction_id"):
+                j = stringify_id(sec.get(jcol))
+                if j:
+                    junctions.add(j)
+        # Also include neighbours from the network graph (one hop)
+        if network_graph is not None:
+            for j in list(junctions):
+                try:
+                    for nbr in network_graph.neighbors(j):
+                        junctions.add(stringify_id(nbr))
+                except Exception:
+                    pass
+        lock_junctions[lid] = junctions
+
+    # Union-Find grouping
+    parent: dict[str, str] = {lid: lid for lid in lock_junctions}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x: str, y: str) -> None:
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            # Keep the smaller ID as the group representative
+            try:
+                if int(rx) > int(ry):
+                    rx, ry = ry, rx
+            except (ValueError, TypeError):
+                if rx > ry:
+                    rx, ry = ry, rx
+            parent[ry] = rx
+
+    lock_ids = list(lock_junctions)
+    for i, lid_a in enumerate(lock_ids):
+        for lid_b in lock_ids[i + 1 :]:
+            if lock_junctions[lid_a] & lock_junctions[lid_b]:
+                union(lid_a, lid_b)
+
+    # Collect groups
+    groups: dict[str, list] = {}
+    for lid in lock_ids:
+        root = find(lid)
+        groups.setdefault(root, []).append(lid)
+
+    return groups
+

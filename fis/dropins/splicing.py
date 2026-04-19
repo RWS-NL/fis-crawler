@@ -304,6 +304,31 @@ def _generate_structure_cuts(
         else:
             buffer_dist = settings.BRIDGE_SPLICING_BUFFER_M
 
+        # Junction-aware buffer clamping:
+        # If the section's known boundary junction (start or end) falls within
+        # the computed buffer zone, clamp the buffer so the synthetic split/merge
+        # node aligns with that junction's projected position.  This prevents the
+        # splicer from inserting a synthetic node *behind* a pre-existing junction.
+        start_junc_wkt = obj.get("_section_start_junction_geom")
+        end_junc_wkt = obj.get("_section_end_junction_geom")
+        for junc_wkt in (start_junc_wkt, end_junc_wkt):
+            if not junc_wkt:
+                continue
+            try:
+                junc_geom = wkt.loads(junc_wkt) if isinstance(junc_wkt, str) else junc_wkt
+                junc_rd = (
+                    gpd.GeoSeries([junc_geom], crs="EPSG:4326")
+                    .to_crs(utm_crs)
+                    .iloc[0]
+                )
+                junc_proj = line_rd.project(junc_rd)
+                snap_dist = settings.LOCK_COMPLEX_JUNCTION_SNAP_DIST_M
+                if abs(junc_proj - dist) < buffer_dist + snap_dist:
+                    # Snap the buffer so it aligns with the junction position
+                    buffer_dist = min(buffer_dist, abs(junc_proj - dist))
+            except Exception:
+                pass
+
         cuts.append(
             StructureCut(
                 id=f"{dropin['type']}_{utils.stringify_id(obj.get('id', obj.get('Id')))}",

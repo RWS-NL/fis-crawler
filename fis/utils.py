@@ -245,10 +245,29 @@ def normalize_attributes(
     return new_df
 
 
-def process_fairway_geometry(fw_row, lock_row, buffer_dist=0, openings_data=None):
+def process_fairway_geometry(
+    fw_row,
+    lock_row,
+    buffer_dist=0,
+    buffer_before_m=None,
+    buffer_after_m=None,
+    openings_data=None,
+):
     """
     Calculate fairway segments and distance using metric projection (EPSG:28992).
-    If openings_data is provided, expand buffer_dist to encompass the farthest opening.
+
+    Supports both symmetric and asymmetric split/merge placement:
+
+    - **Symmetric (legacy):** pass ``buffer_dist``.  The split is placed
+      ``buffer_dist`` metres before the lock centroid's projection and the
+      merge ``buffer_dist`` metres after.
+    - **Asymmetric (preferred for staggered chambers):** pass
+      ``buffer_before_m`` *and* ``buffer_after_m``.  These values set
+      independent upstream/downstream offsets from the centroid projection.
+      When provided they override ``buffer_dist``.
+
+    In both modes, ``openings_data`` expands the relevant side's offset so that
+    bridge openings are fully enclosed between split and merge.
     """
     fairway_data = {}
 
@@ -280,8 +299,12 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0, openings_data=None
     projected_dist = fw_line_rd.project(lock_point_rd)
     fairway_data["lock_to_fairway_distance"] = fw_line_rd.distance(lock_point_rd)
 
-    # Dynamic buffer expansion based on associated bridge openings
-    max_offset = buffer_dist
+    # Resolve initial offsets: asymmetric takes priority over symmetric.
+    offset_before = buffer_before_m if buffer_before_m is not None else buffer_dist
+    offset_after = buffer_after_m if buffer_after_m is not None else buffer_dist
+
+    # Dynamic, side-aware buffer expansion based on associated bridge openings.
+    # Each opening only expands the offset on its own side of the lock centroid.
     if openings_data:
         for op in openings_data:
             op_geom_wkt = op.get("geometry")
@@ -294,25 +317,26 @@ def process_fairway_geometry(fw_row, lock_row, buffer_dist=0, openings_data=None
                 op_point_rd = op_point_rd.centroid
 
             op_proj_dist = fw_line_rd.project(op_point_rd)
-            dist_from_lock = abs(op_proj_dist - projected_dist)
 
-            # Check available space on the fairway section to move the node back
-            if op_proj_dist >= projected_dist:
-                space_left = fw_line_rd.length - op_proj_dist
-            else:
+            if op_proj_dist < projected_dist:
+                # Opening is upstream (before) the lock centroid
+                dist = projected_dist - op_proj_dist
                 space_left = op_proj_dist
-
-            target_margin = 100
-            actual_margin = min(target_margin, space_left)
-            max_offset = max(max_offset, dist_from_lock + actual_margin)
+                actual_margin = min(100, space_left)
+                offset_before = max(offset_before, dist + actual_margin)
+            else:
+                # Opening is at or downstream (after) the lock centroid
+                dist = op_proj_dist - projected_dist
+                space_left = fw_line_rd.length - op_proj_dist
+                actual_margin = min(100, space_left)
+                offset_after = max(offset_after, dist + actual_margin)
 
     total_len = fw_line_rd.length
-    # Split with offset (gap for the structure complex)
-    dist_before = max(0, projected_dist - max_offset)
-    dist_after = min(total_len, projected_dist + max_offset)
+    # Determine cut positions along the projected fairway line
+    dist_before = max(0, projected_dist - offset_before)
+    dist_after = min(total_len, projected_dist + offset_after)
 
     # Convert back to WGS84 by interpolating on the original WGS84 line
-    # interpolating relative distances on WGS84 line is robust
     geom_before = substring(fw_geom, 0, (dist_before / total_len) * fw_geom.length)
     geom_after = substring(
         fw_geom, (dist_after / total_len) * fw_geom.length, fw_geom.length

@@ -14,6 +14,15 @@ def identify_embedded_structures(
 ) -> Dict[str, Dict]:
     """
     Identifies bridges that are functionally embedded within a lock complex.
+
+    An opening is classified as *embedded* when it physically intersects (or lies
+    within ``CHAMBER_INTERSECTION_BUFFER_M`` of) the chamber polygon.  For
+    non-polygon chamber geometries (e.g. Point stubs in tests) the legacy
+    distance-and-scoring heuristic is preserved.
+
+    Openings that are merely *near* a chamber (within ``EMBEDDED_STRUCTURE_MAX_DIST_M``)
+    but outside its polygon are **not** considered embedded; they remain on the
+    fairway approach or exit edge of that chamber.
     """
     from fis.lock.graph import build_chambers_gdf
     from fis.bridge.graph import build_openings_gdf
@@ -47,6 +56,18 @@ def identify_embedded_structures(
             dist = op_row.geometry.distance(ch_row.geometry)
             if dist > settings.EMBEDDED_STRUCTURE_MAX_DIST_M:
                 continue
+
+            # For Polygon chambers, require the opening to actually intersect
+            # (or be within the small tolerance buffer) the chamber polygon.
+            # This prevents adjacent bridge openings that are only spatially
+            # *near* a chamber from being misclassified as embedded.
+            if ch_row.geometry.geom_type in ("Polygon", "MultiPolygon"):
+                ch_buffered = ch_row.geometry.buffer(
+                    settings.CHAMBER_INTERSECTION_BUFFER_M
+                )
+                if not op_row.geometry.intersects(ch_buffered):
+                    continue
+
             score = _calculate_semantic_spatial_score(op_name, ch_name, dist)
             if score > 1.0:
                 all_candidates.append((score, dist, op_id, ch_id, ch_row))

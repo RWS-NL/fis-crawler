@@ -167,6 +167,15 @@ DISK_MATCH_BUFFER_LOCK_M = 50.0
 # Max distance (meters) to consider a bridge opening part of a nearby lock complex.
 EMBEDDED_STRUCTURE_MAX_DIST_M = 500.0
 
+# Max distance (meters) within which a split/merge node snaps to an existing FIS
+# junction node instead of creating a new synthetic lock_N_split/merge node.
+LOCK_COMPLEX_JUNCTION_SNAP_DIST_M = 50.0
+
+# Buffer (meters) added around a chamber polygon when classifying bridge openings as
+# "embedded" (i.e. physically inside the chamber).  Openings within this distance
+# of the chamber polygon boundary are considered inside the lock chamber.
+CHAMBER_INTERSECTION_BUFFER_M = 5.0
+
 # --- Berth Association ---
 
 # Max linear distance (meters) to associate a berth with a lock.

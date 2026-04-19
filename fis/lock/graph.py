@@ -562,6 +562,13 @@ def _build_chamber_route_features(
 ):
     """
     Helper to extract routing lines from split nodes to doors and through chambers.
+
+    If the chamber dict contains ``internal_junctions`` (FIS network junction nodes
+    whose geometry falls inside the chamber polygon), they are inserted as
+    intermediate nodes on the ``chamber_route`` edge.  This ensures that existing
+    network junctions (e.g. NL_J2501 inside Weurt chamber 47538) are preserved as
+    reachable nodes in the detailed graph rather than being bypassed by a single
+    chamber_start → chamber_end edge.
     """
 
     features = []
@@ -626,37 +633,97 @@ def _build_chamber_route_features(
         }
     )
 
-    # Chamber (Start -> End)
+    # Chamber route (Start -> [intermediate junctions] -> End)
+    # Sort any internal junction nodes by their projected distance along the
+    # door_start → door_end vector so that they appear in correct traversal order.
+    internal_junctions = chamber.get("internal_junctions", [])
     chamber_line = LineString([door_start, door_end])
-    features.append(
-        {
-            "type": "Feature",
-            "geometry": mapping(chamber_line),
-            "properties": {
-                "id": f"fairway_segment_{lock_id}_{chamber_id}_route",
-                "feature_type": "fairway_segment",
-                "segment_type": "chamber_route",
-                "structure_type": "lock",
-                "structure_id": lock_id,
-                "lock_id": lock_id,
-                "chamber_id": chamber_id,
-                "fairway_id": fairway_id,
-                "name": c.get("fairway_name"),
-                "section_id": _find_best_section_id(
-                    chamber_line,
-                    c.get("sections", []),
-                    context=f"Route for Chamber {chamber_id} (Lock {lock_id})",
-                ),
-                "dim_usable_length": chamber.get("dim_usable_length"),
-                "dim_gate_width": chamber.get("dim_gate_width"),
-                "dim_structural_length": chamber.get("dim_structural_length"),
-                "dim_structural_width": chamber.get("dim_structural_width"),
-                "source_node": chamber_node_start_id,
-                "target_node": chamber_node_end_id,
-                "length_m": geod.geometry_length(chamber_line),
-            },
-        }
+    section_id_for_route = _find_best_section_id(
+        chamber_line,
+        c.get("sections", []),
+        context=f"Route for Chamber {chamber_id} (Lock {lock_id})",
     )
+    base_route_props = {
+        "feature_type": "fairway_segment",
+        "segment_type": "chamber_route",
+        "structure_type": "lock",
+        "structure_id": lock_id,
+        "lock_id": lock_id,
+        "chamber_id": chamber_id,
+        "fairway_id": fairway_id,
+        "name": c.get("fairway_name"),
+        "section_id": section_id_for_route,
+        "dim_usable_length": chamber.get("dim_usable_length"),
+        "dim_gate_width": chamber.get("dim_gate_width"),
+        "dim_structural_length": chamber.get("dim_structural_length"),
+        "dim_structural_width": chamber.get("dim_structural_width"),
+    }
+
+    if internal_junctions:
+        # Project each internal junction onto the door_start→door_end axis and
+        # sort by that distance so we traverse them in fairway direction order.
+        dx = door_end.x - door_start.x
+        dy = door_end.y - door_start.y
+
+        def _proj_t(junc):
+            geom = junc["geometry"]
+            return (geom.x - door_start.x) * dx + (geom.y - door_start.y) * dy
+
+        sorted_junctions = sorted(internal_junctions, key=_proj_t)
+
+        # Build the sequence of waypoints through the chamber
+        waypoints = [(door_start, chamber_node_start_id)] + [
+            (j["geometry"], j["id"]) for j in sorted_junctions
+        ] + [(door_end, chamber_node_end_id)]
+
+        for idx, ((pt_a, node_a), (pt_b, node_b)) in enumerate(
+            zip(waypoints, waypoints[1:])
+        ):
+            seg_line = LineString([pt_a, pt_b])
+            # Emit an intermediate junction node feature (if it isn't a door node)
+            if node_b not in (chamber_node_start_id, chamber_node_end_id):
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(pt_b),
+                        "properties": {
+                            "id": node_b,
+                            "feature_type": "node",
+                            "node_type": "chamber_internal_junction",
+                            "node_id": node_b,
+                            "lock_id": lock_id,
+                            "chamber_id": chamber_id,
+                        },
+                    }
+                )
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": mapping(seg_line),
+                    "properties": {
+                        "id": f"fairway_segment_{lock_id}_{chamber_id}_route_{idx}",
+                        **base_route_props,
+                        "source_node": node_a,
+                        "target_node": node_b,
+                        "length_m": geod.geometry_length(seg_line),
+                    },
+                }
+            )
+    else:
+        # Simple single-segment chamber route
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(chamber_line),
+                "properties": {
+                    "id": f"fairway_segment_{lock_id}_{chamber_id}_route",
+                    **base_route_props,
+                    "source_node": chamber_node_start_id,
+                    "target_node": chamber_node_end_id,
+                    "length_m": geod.geometry_length(chamber_line),
+                },
+            }
+        )
 
     # Exit (End -> Merge)
     exit_line = LineString([door_end, merge_point])
@@ -687,3 +754,4 @@ def _build_chamber_route_features(
     )
 
     return features
+
