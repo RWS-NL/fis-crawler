@@ -171,13 +171,16 @@ def test_chamber_route_multiple_internal_junctions_ordered():
     }
     chamber_id = "777"
     # door_start at y=10, door_end at y=-10 (decreasing y = downstream)
-    # junc_B is closer to door_start (y=5), junc_A is further downstream (y=0)
+    # junc_B is closer to door_start (y=5), junc_A is further downstream (y=0).
+    # They are intentionally given in reversed (downstream-first) insertion order
+    # to prove that _build_chamber_route_features sorts them by projected distance,
+    # not by the order in which they appear in the input list.
     chamber = {
         "dim_usable_length": 200,
         "dim_gate_width": 10,
         "internal_junctions": [
-            {"id": "junc_A", "geometry": Point(0, 0)},   # downstream
-            {"id": "junc_B", "geometry": Point(0, 5)},   # upstream (closer to start)
+            {"id": "junc_A", "geometry": Point(0, 0)},   # downstream (inserted first)
+            {"id": "junc_B", "geometry": Point(0, 5)},   # upstream   (inserted second)
         ],
     }
 
