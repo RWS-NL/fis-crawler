@@ -285,20 +285,44 @@ def _generate_structure_cuts(
 
         dist = line_rd.project(geom_rd)
         if dropin["type"] == "lock":
-            buffer_dist = obj.get("fairway_buffer_dist")
-            if buffer_dist is None or mode == "simplified":
-                max_len = 0.0
-                for child in obj.get("locks", []):
-                    for ch in child.get("chambers", []):
-                        # Support both 'length' (FIS) and 'dim_usable_length' (Standard)
-                        length_val = ch.get("dim_usable_length") or ch.get("length")
-                        if length_val:
-                            max_len = max(max_len, float(length_val))
-                buffer_dist = (
-                    settings.SIMPLIFIED_LOCK_SPLICING_BUFFER_M
-                    if mode == "simplified"
-                    else (max_len / 2.0) + settings.DETAILED_LOCK_SPLICING_BUFFER_M
+            # When pre-computed fairway split/merge positions are available (set by
+            # _resolve_fairway_data using the asymmetric buffer from chamber extents),
+            # project them onto this section and use the resulting [split, merge]
+            # interval as midpoint ± half-span.  This prevents lock split/merge nodes
+            # from landing inside adjacent chamber polygons when the lock complex spans
+            # multiple fairway sections.
+            fairway_split_wkt = obj.get("_fairway_split_point_wkt")
+            fairway_merge_wkt = obj.get("_fairway_merge_point_wkt")
+            if fairway_split_wkt and fairway_merge_wkt and mode != "simplified":
+                split_pt = wkt.loads(fairway_split_wkt)
+                merge_pt = wkt.loads(fairway_merge_wkt)
+                split_pt_rd = (
+                    gpd.GeoSeries([split_pt], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
                 )
+                merge_pt_rd = (
+                    gpd.GeoSeries([merge_pt], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+                )
+                split_proj = line_rd.project(split_pt_rd)
+                merge_proj = line_rd.project(merge_pt_rd)
+                # Encode [split_proj, merge_proj] as midpoint ± half-span so that
+                # FairwaySplicer.splice() computes the correct split/merge distances.
+                dist = (split_proj + merge_proj) / 2.0
+                buffer_dist = max(0.5, (merge_proj - split_proj) / 2.0)
+            else:
+                buffer_dist = obj.get("fairway_buffer_dist")
+                if buffer_dist is None or mode == "simplified":
+                    max_len = 0.0
+                    for child in obj.get("locks", []):
+                        for ch in child.get("chambers", []):
+                            # Support both 'length' (FIS) and 'dim_usable_length' (Standard)
+                            length_val = ch.get("dim_usable_length") or ch.get("length")
+                            if length_val:
+                                max_len = max(max_len, float(length_val))
+                    buffer_dist = (
+                        settings.SIMPLIFIED_LOCK_SPLICING_BUFFER_M
+                        if mode == "simplified"
+                        else (max_len / 2.0) + settings.DETAILED_LOCK_SPLICING_BUFFER_M
+                    )
         elif dropin["type"] in ("terminal", "berth"):
             buffer_dist = 0.0
         else:

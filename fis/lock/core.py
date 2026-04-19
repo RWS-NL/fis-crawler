@@ -472,6 +472,14 @@ def _resolve_fairway_data(
             chamber_routes["split_point"] = split_point
             chamber_routes["merge_point"] = merge_point
 
+            # Save the correct fairway-derived split/merge positions under
+            # protected keys so the section splicer can use them directly.
+            # The section splicer later overwrites geometry_before/after_wkt
+            # with section-specific geometry, but these protected keys remain
+            # intact and hold the globally-correct cut coordinates.
+            fairway_data["_fairway_split_point_wkt"] = split_point.wkt
+            fairway_data["_fairway_merge_point_wkt"] = merge_point.wkt
+
     return fairway_data, chamber_routes
 
 

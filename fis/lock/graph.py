@@ -82,6 +82,8 @@ def build_locks_gdf(complexes) -> gpd.GeoDataFrame:
         "sections",
         "geometry_before_wkt",
         "geometry_after_wkt",
+        "_fairway_split_point_wkt",
+        "_fairway_merge_point_wkt",
     }
 
     rows = []
@@ -197,6 +199,8 @@ def build_graph_features(complexes):
                     "berths",
                     "geometry_before_wkt",
                     "geometry_after_wkt",
+                    "_fairway_split_point_wkt",
+                    "_fairway_merge_point_wkt",
                 ]:
                     continue
                 if isinstance(v, (list, dict)):

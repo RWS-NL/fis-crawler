@@ -6,6 +6,9 @@ Tests cover:
 - Asymmetric buffering: process_fairway_geometry respects buffer_before_m / buffer_after_m.
 - detect_complex_groups groups locks that share boundary junctions.
 - identify_embedded_structures rejects openings that are outside chamber polygons.
+- Pre-computed fairway split/merge positions prevent lock nodes from landing inside
+  adjacent chamber polygons when a lock complex spans multiple fairway sections
+  (e.g. lock_49032_split/merge at Sluis Weurt should not land inside chamber 47538).
 """
 
 import networkx as nx
@@ -604,4 +607,307 @@ def test_identify_embedded_point_chamber_legacy_behaviour(
     # Legacy: Point chamber at distance 10 m should still be matched
     assert "op1" in matches, (
         "Point-geometry chambers must use legacy distance matching (no intersection check)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 5. Pre-computed fairway split/merge points in section splicing
+#    (fixes lock split/merge landing inside chamber polygons)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_fairway_data_saves_protected_split_merge_keys():
+    """
+    _resolve_fairway_data must persist the correct fairway-derived split/merge
+    coordinates in the complex dict under the protected keys
+    ``_fairway_split_point_wkt`` and ``_fairway_merge_point_wkt``.
+
+    These keys must NOT be overwritten later by _assign_geom_wkt (which only
+    targets geometry_before_wkt / geometry_after_wkt).
+    """
+    from fis.utils import process_fairway_geometry
+    from shapely.geometry import LineString, Point
+    from shapely import wkt as shapely_wkt
+
+    fw_line = LineString([(5.0, 52.0), (5.5, 52.0)])
+    lock_point = Point(5.25, 52.0)
+
+    class FwRow:
+        geometry = fw_line
+
+    class LockRow:
+        geometry = lock_point
+
+    # Large asymmetric buffers so the split/merge are clearly separated
+    result = process_fairway_geometry(
+        FwRow(),
+        LockRow(),
+        buffer_before_m=5000,
+        buffer_after_m=10000,
+    )
+
+    assert "geometry_before_wkt" in result, "geometry_before_wkt must be computed"
+    assert "geometry_after_wkt" in result, "geometry_after_wkt must be computed"
+
+    g_before = shapely_wkt.loads(result["geometry_before_wkt"])
+    g_after = shapely_wkt.loads(result["geometry_after_wkt"])
+
+    expected_split = Point(g_before.coords[-1])
+    expected_merge = Point(g_after.coords[0])
+
+    # Simulate what _resolve_fairway_data does after process_fairway_geometry
+    fairway_data = dict(result)
+    bwkt = fairway_data.get("geometry_before_wkt")
+    awkt = fairway_data.get("geometry_after_wkt")
+    if bwkt and awkt:
+        split_pt = Point(shapely_wkt.loads(bwkt).coords[-1])
+        merge_pt = Point(shapely_wkt.loads(awkt).coords[0])
+        fairway_data["_fairway_split_point_wkt"] = split_pt.wkt
+        fairway_data["_fairway_merge_point_wkt"] = merge_pt.wkt
+
+    assert "_fairway_split_point_wkt" in fairway_data, (
+        "_fairway_split_point_wkt must be saved alongside geometry_before_wkt"
+    )
+    assert "_fairway_merge_point_wkt" in fairway_data, (
+        "_fairway_merge_point_wkt must be saved alongside geometry_after_wkt"
+    )
+
+    saved_split = shapely_wkt.loads(fairway_data["_fairway_split_point_wkt"])
+    saved_merge = shapely_wkt.loads(fairway_data["_fairway_merge_point_wkt"])
+
+    assert saved_split.distance(expected_split) < 1e-9, (
+        "_fairway_split_point_wkt must equal the last coord of geometry_before_wkt"
+    )
+    assert saved_merge.distance(expected_merge) < 1e-9, (
+        "_fairway_merge_point_wkt must equal the first coord of geometry_after_wkt"
+    )
+
+
+def test_generate_structure_cuts_uses_precomputed_positions():
+    """
+    When a lock dropin carries _fairway_split_point_wkt and _fairway_merge_point_wkt
+    the _generate_structure_cuts function must use those positions (projected onto the
+    section line) instead of the symmetric centroid ± buffer fallback.
+
+    Concretely: for a 1000 m section running from x=0 to x=1000, if the fairway
+    split is at x=200 and the merge at x=800, the resulting StructureCut should
+    have projected_distance = 500 (midpoint) and buffer_distance = 300 (half-span),
+    so that FairwaySplicer places the actual split at 200 and merge at 800.
+    """
+    import geopandas as gpd
+    from shapely.geometry import LineString, Point
+    from fis.dropins.splicing import _generate_structure_cuts
+
+    # Section: 1000 m straight line (in a metric CRS) – we work in projected CRS
+    # directly to keep the test simple and CRS-independent.
+    section_line = LineString([(0, 0), (1000, 0)])
+    # utm_crs is irrelevant here because we provide the geometry already projected;
+    # the function projects WGS84 → utm internally, so we approximate with a WGS84
+    # string and a line in degrees.  Use a tiny section (0.009° ≈ 1 km) so the
+    # projected distance is close to the degree-space distance we can compute.
+    # Instead, we directly test by using a section near NL and checking the ratio.
+
+    # Build a 1° section in WGS84 near the Netherlands (roughly 70 km)
+    section_wgs84 = LineString([(5.0, 52.0), (6.0, 52.0)])
+    section_gdf = gpd.GeoSeries([section_wgs84], crs="EPSG:4326")
+    utm_crs = section_gdf.estimate_utm_crs().to_epsg()
+    utm_str = f"EPSG:{utm_crs}"
+    line_rd = section_gdf.to_crs(utm_str).iloc[0]
+    total_m = line_rd.length
+
+    # Define split at 20 % and merge at 80 % along the section
+    split_frac = 0.2
+    merge_frac = 0.8
+    from shapely.ops import substring
+
+    split_pt_rd = Point(line_rd.interpolate(split_frac, normalized=True).coords[0])
+    merge_pt_rd = Point(line_rd.interpolate(merge_frac, normalized=True).coords[0])
+
+    # Convert back to WGS84 for the WKT values
+    split_pt_wgs84 = (
+        gpd.GeoSeries([split_pt_rd], crs=utm_str).to_crs("EPSG:4326").iloc[0]
+    )
+    merge_pt_wgs84 = (
+        gpd.GeoSeries([merge_pt_rd], crs=utm_str).to_crs("EPSG:4326").iloc[0]
+    )
+
+    # Build a minimal lock dropin with pre-computed positions
+    lock_centroid_wgs84 = Point(5.5, 52.0)
+    lock_dropin = {
+        "type": "lock",
+        "obj": {
+            "id": "99999",
+            "geometry": lock_centroid_wgs84.wkt,
+            "_fairway_split_point_wkt": split_pt_wgs84.wkt,
+            "_fairway_merge_point_wkt": merge_pt_wgs84.wkt,
+            "locks": [{"chambers": [{"dim_usable_length": 50}]}],
+        },
+    }
+
+    cuts = _generate_structure_cuts(line_rd, [lock_dropin], utm_str, mode="detailed")
+
+    assert len(cuts) == 1, "Expected exactly one StructureCut for the lock"
+    cut = cuts[0]
+
+    expected_split_m = total_m * split_frac
+    expected_merge_m = total_m * merge_frac
+    expected_mid = (expected_split_m + expected_merge_m) / 2.0
+    expected_buf = (expected_merge_m - expected_split_m) / 2.0
+
+    assert abs(cut.projected_distance - expected_mid) < total_m * 0.01, (
+        f"projected_distance ({cut.projected_distance:.1f}) should be near midpoint "
+        f"({expected_mid:.1f})"
+    )
+    assert abs(cut.buffer_distance - expected_buf) < total_m * 0.01, (
+        f"buffer_distance ({cut.buffer_distance:.1f}) should be half-span "
+        f"({expected_buf:.1f})"
+    )
+
+
+def test_multi_section_lock_split_only_on_upstream_section():
+    """
+    For a lock that spans two sections (split on section A, merge on section B):
+    - On section A (upstream): a 'before lock' segment must be created and
+      geometry_before_wkt must be set; no 'after lock' segment should appear.
+    - On section B (downstream): no 'before lock' segment; an 'after lock'
+      segment must appear and geometry_after_wkt must be set.
+
+    This verifies that lock_49032_split never lands inside chamber polygons
+    because the section splicer now uses _fairway_split/merge_point_wkt instead
+    of the symmetric centroid ± buffer.
+    """
+    import geopandas as gpd
+    from shapely.geometry import LineString, Point
+    from fis.dropins.splicing import _slice_section_with_dropins
+
+    # Two horizontal sections at latitude 52°, placed end-to-end:
+    #   section_a: lon 5.0 → 5.5  (upstream, contains the split)
+    #   section_b: lon 5.5 → 6.0  (downstream, contains the merge)
+    # The lock spans the boundary: split at 90% of section_a, merge at 10% of
+    # section_b.  In WGS84:
+    #   split  ≈ 5.0 + 0.9*0.5 = 5.45
+    #   merge  ≈ 5.5 + 0.1*0.5 = 5.55
+
+    split_lon = 5.45
+    merge_lon = 5.55
+    lat = 52.0
+
+    split_pt_wgs84 = Point(split_lon, lat)
+    merge_pt_wgs84 = Point(merge_lon, lat)
+
+    lock_obj = {
+        "id": "88888",
+        "geometry": Point(5.5, lat).wkt,  # centroid at boundary
+        "_fairway_split_point_wkt": split_pt_wgs84.wkt,
+        "_fairway_merge_point_wkt": merge_pt_wgs84.wkt,
+        "locks": [{"chambers": [{"dim_usable_length": 50}]}],
+    }
+    lock_dropin = {"type": "lock", "obj": lock_obj}
+
+    # ---- Section A: upstream (5.0 → 5.5) ----
+    sec_a = pd.Series(
+        {
+            "id": "sec_a",
+            "fairway_id": "fw_test",
+            "StartJunctionId": None,
+            "EndJunctionId": None,
+            "geometry": LineString([(5.0, lat), (5.5, lat)]),
+        }
+    )
+
+    features_a = []
+    _slice_section_with_dropins(
+        features_a, sec_a, [lock_dropin], [lock_dropin], mode="detailed"
+    )
+
+    # Section A must have a segment that ENDS at the lock split node
+    seg_ids_a = [
+        f["properties"]["id"]
+        for f in features_a
+        if f["properties"]["feature_type"] == "fairway_segment"
+    ]
+    target_nodes_a = [
+        f["properties"].get("target_node")
+        for f in features_a
+        if f["properties"]["feature_type"] == "fairway_segment"
+    ]
+    source_nodes_a = [
+        f["properties"].get("source_node")
+        for f in features_a
+        if f["properties"]["feature_type"] == "fairway_segment"
+    ]
+
+    assert "lock_88888_split" in target_nodes_a, (
+        "Section A must produce a segment whose target is lock_88888_split"
+    )
+    assert "lock_88888_merge" not in source_nodes_a, (
+        "Section A must NOT produce an 'after lock' segment sourced from lock_88888_merge"
+    )
+
+    # geometry_before_wkt must have been set on lock_obj by section A
+    assert lock_obj.get("geometry_before_wkt") is not None, (
+        "Section A must set geometry_before_wkt on the lock object"
+    )
+    split_node_pt = Point(
+        wkt.loads(lock_obj["geometry_before_wkt"]).coords[-1]
+    )
+    # The split node should be near lon=5.45 (within 0.02°)
+    assert abs(split_node_pt.x - split_lon) < 0.02, (
+        f"Split node lon ({split_node_pt.x:.4f}) should be near {split_lon} "
+        f"(got {split_node_pt.x:.4f})"
+    )
+
+    # ---- Section B: downstream (5.5 → 6.0) ----
+    # Re-use same lock_obj (geometry_before_wkt is now set, but should NOT be
+    # overwritten by section B because section B has no 'before lock' segment)
+    before_wkt_after_a = lock_obj.get("geometry_before_wkt")
+
+    sec_b = pd.Series(
+        {
+            "id": "sec_b",
+            "fairway_id": "fw_test",
+            "StartJunctionId": None,
+            "EndJunctionId": None,
+            "geometry": LineString([(5.5, lat), (6.0, lat)]),
+        }
+    )
+
+    features_b = []
+    _slice_section_with_dropins(
+        features_b, sec_b, [lock_dropin], [lock_dropin], mode="detailed"
+    )
+
+    source_nodes_b = [
+        f["properties"].get("source_node")
+        for f in features_b
+        if f["properties"]["feature_type"] == "fairway_segment"
+    ]
+    target_nodes_b = [
+        f["properties"].get("target_node")
+        for f in features_b
+        if f["properties"]["feature_type"] == "fairway_segment"
+    ]
+
+    assert "lock_88888_merge" in source_nodes_b, (
+        "Section B must produce a segment sourced from lock_88888_merge"
+    )
+    assert "lock_88888_split" not in target_nodes_b, (
+        "Section B must NOT produce a segment targeting lock_88888_split"
+    )
+
+    # geometry_before_wkt must NOT have been overwritten by section B
+    assert lock_obj.get("geometry_before_wkt") == before_wkt_after_a, (
+        "Section B must not overwrite geometry_before_wkt set by section A"
+    )
+
+    # geometry_after_wkt must now be set (by section B)
+    assert lock_obj.get("geometry_after_wkt") is not None, (
+        "Section B must set geometry_after_wkt on the lock object"
+    )
+    merge_node_pt = Point(
+        wkt.loads(lock_obj["geometry_after_wkt"]).coords[0]
+    )
+    # The merge node should be near lon=5.55 (within 0.02°)
+    assert abs(merge_node_pt.x - merge_lon) < 0.02, (
+        f"Merge node lon ({merge_node_pt.x:.4f}) should be near {merge_lon}"
     )

@@ -81,9 +81,11 @@ class FairwaySplicer:
 
             merge_distance = max(split_distance + EPSILON, merge_distance)
             if merge_distance >= self.total_length:
-                merge_distance = max(
-                    split_distance + EPSILON, self.total_length - EPSILON
-                )
+                # The lock complex extends to or beyond the end of this section.
+                # Set merge_distance exactly to total_length so that
+                # current_distance = total_length and no spurious tiny trailing
+                # segment (which would wrongly assign geometry_after_wkt) is created.
+                merge_distance = self.total_length
 
             start_distance = current_distance
             source_id = current_source_id
