@@ -4,6 +4,7 @@ import logging
 import pandas as pd
 import geopandas as gpd
 from shapely import wkt
+from shapely.strtree import STRtree
 from tqdm import tqdm
 
 from shapely.geometry import Point, LineString
@@ -333,8 +334,6 @@ def _find_internal_junctions_for_chambers(lock_chambers, network_graph):
     and a Shapely STRtree is built so that each chamber polygon can be queried in
     O(k log N) rather than O(N).
     """
-    from shapely.strtree import STRtree
-
     if network_graph is None or lock_chambers.empty:
         return {}
 
@@ -947,7 +946,7 @@ def detect_complex_groups(
         }
     """
     if locks.empty or sections_gdf.empty:
-        return {stringify_id(lid): [stringify_id(lid)] for lid in locks["id"]}
+        return {(sid := stringify_id(lid)): [sid] for lid in locks["id"]}
 
     # Build: lock_id → set of junction IDs on its fairway sections
     # Only direct boundary junctions (start/end of every section on the lock's

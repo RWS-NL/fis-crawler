@@ -219,7 +219,7 @@ def test_scenario_6_sluis_weurt_south_branch():
     """
     Sluis Weurt (lock complex 49032) – south branch (chamber 47538).
 
-    Expected node order (direction-neutral, undirected graph):
+    Expected node order:
         lock_49032_split
         → chamber_47538_start
         → 8864190              (NL_J2501 – internal FIS junction inside chamber)

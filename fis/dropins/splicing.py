@@ -322,8 +322,9 @@ def _generate_structure_cuts(
         if not junction_geoms_to_check:
             line_coords = list(line_rd.coords)
             if line_coords:
-                # Start/end points of the section line are already in the
-                # projected CRS (line_rd is already reprojected above)
+                # Start/end points of the section line are in the projected CRS
+                # (utm_crs) because line_rd was obtained by reprojecting the
+                # section geometry earlier in this function.
                 junction_geoms_to_check = [
                     ("projected", Point(line_coords[0])),
                     ("projected", Point(line_coords[-1])),

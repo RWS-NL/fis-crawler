@@ -100,7 +100,7 @@ def test_chamber_route_with_internal_junctions_splits_correctly():
     )
 
     # Build a small graph and verify connectivity
-    G = nx.Graph()
+    G = nx.DiGraph()
     for f in features:
         p = f["properties"]
         if p.get("feature_type") == "fairway_segment":
@@ -197,7 +197,7 @@ def test_chamber_route_multiple_internal_junctions_ordered():
         "lock_100_merge",
     )
 
-    G = nx.Graph()
+    G = nx.DiGraph()
     for f in features:
         p = f["properties"]
         if p.get("feature_type") == "fairway_segment":
