@@ -700,7 +700,6 @@ def test_generate_structure_cuts_uses_precomputed_positions():
 
     # Section: 1000 m straight line (in a metric CRS) – we work in projected CRS
     # directly to keep the test simple and CRS-independent.
-    section_line = LineString([(0, 0), (1000, 0)])
     # utm_crs is irrelevant here because we provide the geometry already projected;
     # the function projects WGS84 → utm internally, so we approximate with a WGS84
     # string and a line in degrees.  Use a tiny section (0.009° ≈ 1 km) so the
@@ -718,8 +717,6 @@ def test_generate_structure_cuts_uses_precomputed_positions():
     # Define split at 20 % and merge at 80 % along the section
     split_frac = 0.2
     merge_frac = 0.8
-    from shapely.ops import substring
-
     split_pt_rd = Point(line_rd.interpolate(split_frac, normalized=True).coords[0])
     merge_pt_rd = Point(line_rd.interpolate(merge_frac, normalized=True).coords[0])
 
@@ -776,7 +773,6 @@ def test_multi_section_lock_split_only_on_upstream_section():
     because the section splicer now uses _fairway_split/merge_point_wkt instead
     of the symmetric centroid ± buffer.
     """
-    import geopandas as gpd
     from shapely.geometry import LineString, Point
     from fis.dropins.splicing import _slice_section_with_dropins
 
@@ -821,11 +817,6 @@ def test_multi_section_lock_split_only_on_upstream_section():
     )
 
     # Section A must have a segment that ENDS at the lock split node
-    seg_ids_a = [
-        f["properties"]["id"]
-        for f in features_a
-        if f["properties"]["feature_type"] == "fairway_segment"
-    ]
     target_nodes_a = [
         f["properties"].get("target_node")
         for f in features_a
