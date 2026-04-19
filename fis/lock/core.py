@@ -10,6 +10,7 @@ from tqdm import tqdm
 from shapely.geometry import Point, LineString
 from shapely.ops import unary_union
 from fis.utils import to_python, sanitize_attrs, stringify_id
+from fis.lock.utils import find_chamber_doors, project_geometry
 from fis import settings, utils
 from fis.ris_index import load_ris_index
 
@@ -248,10 +249,14 @@ def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
     """
     Compute asymmetric upstream/downstream buffer distances for a lock complex.
 
-    Instead of a single symmetric offset from the lock centroid, each chamber
-    polygon is projected onto the fairway line so that the split point is placed
-    before the earliest chamber start and the merge point is placed after the
-    latest chamber end.
+    For each chamber the upstream entrance (``door_start``) and downstream exit
+    (``door_end``) are identified with :func:`fis.lock.utils.find_chamber_doors`
+    and projected onto the fairway line.  The split is placed a margin
+    (``DETAILED_LOCK_SPLICING_BUFFER_M``) **upstream** of the earliest entrance
+    projection, and the merge a margin **downstream** of the latest exit
+    projection.  This guarantees that split/merge nodes never fall inside a
+    chamber polygon, even when chambers are staggered or oriented at an angle to
+    the fairway.
 
     Returns:
         (buffer_before_m, buffer_after_m) in metres.
@@ -283,7 +288,27 @@ def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
 
     lock_proj = fw_line_rd.project(lock_rd)
 
-    # Collect the projected extent of every chamber polygon
+    # Build provisional upstream/downstream points on the fairway (in WGS84) so
+    # that find_chamber_doors can determine which face of each chamber is the
+    # entrance and which is the exit.  These provisional points only need to
+    # convey the flow *direction* – their exact position does not matter.
+    prov_up_rd = fw_line_rd.interpolate(max(0.0, lock_proj - 100.0))
+    prov_down_rd = fw_line_rd.interpolate(
+        min(fw_line_rd.length, lock_proj + 100.0)
+    )
+    prov_split_wgs = (
+        gpd.GeoSeries([prov_up_rd], crs=settings.PROJECTED_CRS)
+        .to_crs("EPSG:4326")
+        .iloc[0]
+    )
+    prov_merge_wgs = (
+        gpd.GeoSeries([prov_down_rd], crs=settings.PROJECTED_CRS)
+        .to_crs("EPSG:4326")
+        .iloc[0]
+    )
+
+    # Project the entrance and exit door of every chamber onto the fairway and
+    # track the earliest entrance and latest exit distances.
     min_start = lock_proj
     max_end = lock_proj
 
@@ -302,17 +327,39 @@ def _compute_asymmetric_lock_buffers(fw_obj, lock, lock_chambers):
                 ch_geom = ch_geom_val
             if getattr(ch_geom, "is_empty", False):
                 continue
-            ch_rd = (
-                gpd.GeoSeries([ch_geom], crs="EPSG:4326")
-                .to_crs(settings.PROJECTED_CRS)
-                .iloc[0]
+
+            # Find the chamber entrance (door_start) and exit (door_end) in WGS84.
+            door_start_wgs, door_end_wgs = find_chamber_doors(
+                ch_geom, prov_split_wgs, prov_merge_wgs
             )
-            # Sample the four corners of the bounding box for a quick projection
-            minx, miny, maxx, maxy = ch_rd.bounds
-            for cx, cy in [(minx, miny), (maxx, miny), (maxx, maxy), (minx, maxy)]:
-                d = fw_line_rd.project(Point(cx, cy))
-                min_start = min(min_start, d)
-                max_end = max(max_end, d)
+
+            if door_start_wgs is not None and door_end_wgs is not None:
+                # Project each door onto the fairway (metric CRS) and update bounds.
+                door_start_rd = project_geometry(
+                    door_start_wgs, "EPSG:4326", settings.PROJECTED_CRS
+                )
+                door_end_rd = project_geometry(
+                    door_end_wgs, "EPSG:4326", settings.PROJECTED_CRS
+                )
+                min_start = min(min_start, fw_line_rd.project(door_start_rd))
+                max_end = max(max_end, fw_line_rd.project(door_end_rd))
+            else:
+                # Fallback: project all exterior vertices of the chamber polygon.
+                ch_rd = (
+                    gpd.GeoSeries([ch_geom], crs="EPSG:4326")
+                    .to_crs(settings.PROJECTED_CRS)
+                    .iloc[0]
+                )
+                polys = (
+                    list(ch_rd.geoms)
+                    if ch_rd.geom_type == "MultiPolygon"
+                    else [ch_rd]
+                )
+                for poly in polys:
+                    for cx, cy in poly.exterior.coords:
+                        d = fw_line_rd.project(Point(cx, cy))
+                        min_start = min(min_start, d)
+                        max_end = max(max_end, d)
 
     buffer_before_m = max(fallback, (lock_proj - min_start) + margin)
     buffer_after_m = max(fallback, (max_end - lock_proj) + margin)

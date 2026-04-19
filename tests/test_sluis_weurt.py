@@ -15,8 +15,9 @@ They exercise:
 """
 
 import networkx as nx
+import pandas as pd
 import pytest
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point, Polygon
 
 
 # ---------------------------------------------------------------------------
@@ -211,4 +212,128 @@ def test_south_branch_path_does_not_cross_north_chamber(sluis_weurt_complex):
     north_nodes = [n for n in path if "40927" in n]
     assert not north_nodes, (
         f"South-branch path crossed north-branch nodes: {north_nodes}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. Buffer computation: doors projected onto fairway → split/merge outside chambers
+# ---------------------------------------------------------------------------
+
+
+def _simulate_split_merge_from_buffers(fw_geom, lock_geom, lock_chambers_df):
+    """
+    Call _compute_asymmetric_lock_buffers and simulate what process_fairway_geometry
+    does with the returned buffers so we can check the resulting split/merge points.
+    """
+    import geopandas as gpd
+    from shapely.ops import substring
+    from fis import settings
+    from fis.lock.core import _compute_asymmetric_lock_buffers
+
+    class _FwRow:
+        geometry = fw_geom
+
+    class _LockRow:
+        geometry = lock_geom
+
+    buf_before, buf_after = _compute_asymmetric_lock_buffers(
+        _FwRow(), _LockRow(), lock_chambers_df
+    )
+
+    gs_fw = gpd.GeoSeries([fw_geom], crs="EPSG:4326").to_crs(settings.PROJECTED_CRS)
+    gs_lock = gpd.GeoSeries([lock_geom], crs="EPSG:4326").to_crs(settings.PROJECTED_CRS)
+    fw_rd = gs_fw.iloc[0]
+    lock_rd = gs_lock.iloc[0]
+    if lock_rd.geom_type != "Point":
+        lock_rd = lock_rd.centroid
+
+    lock_proj = fw_rd.project(lock_rd)
+    total_len_rd = fw_rd.length
+    total_len_wgs = fw_geom.length
+
+    dist_before = max(0.0, lock_proj - buf_before)
+    dist_after = min(total_len_rd, lock_proj + buf_after)
+
+    geom_before = substring(fw_geom, 0.0, (dist_before / total_len_rd) * total_len_wgs)
+    geom_after = substring(
+        fw_geom, (dist_after / total_len_rd) * total_len_wgs, total_len_wgs
+    )
+
+    split_pt = Point(geom_before.coords[-1])
+    merge_pt = Point(geom_after.coords[0])
+    return split_pt, merge_pt
+
+
+def test_buffer_computation_places_split_outside_chambers():
+    """
+    _compute_asymmetric_lock_buffers must produce buffers that place the split
+    point outside every chamber polygon.
+
+    Uses the same Weurt-like geometry as the fixture (E-W fairway, two chambers
+    flanking the fairway) but drives the full buffer computation path rather than
+    pre-setting geometry_before/after_wkt.
+    """
+    fw_geom = LineString([(5.808, 51.8538), (5.838, 51.8538)])
+    lock_geom = Point(5.822, 51.8538)
+
+    ch_north = Polygon([
+        (5.819, 51.854), (5.825, 51.854),
+        (5.825, 51.856), (5.819, 51.856),
+        (5.819, 51.854),
+    ])
+    ch_south = Polygon([
+        (5.819, 51.852), (5.825, 51.852),
+        (5.825, 51.854), (5.819, 51.854),
+        (5.819, 51.852),
+    ])
+
+    lock_chambers_df = pd.DataFrame([
+        {"id": "40927", "geometry": ch_north.wkt, "dim_usable_length": 250},
+        {"id": "47538", "geometry": ch_south.wkt, "dim_usable_length": 250},
+    ])
+
+    split_pt, merge_pt = _simulate_split_merge_from_buffers(
+        fw_geom, lock_geom, lock_chambers_df
+    )
+
+    for ch_id, ch_poly in [("40927", ch_north), ("47538", ch_south)]:
+        assert not ch_poly.contains(split_pt), (
+            f"split_pt {split_pt.wkt} landed inside chamber {ch_id}"
+        )
+        assert not ch_poly.contains(merge_pt), (
+            f"merge_pt {merge_pt.wkt} landed inside chamber {ch_id}"
+        )
+
+
+def test_buffer_computation_places_merge_outside_downstream_chamber():
+    """
+    When a single chamber extends far downstream of the lock centroid, the
+    computed merge point must still land downstream of that chamber's exit door.
+
+    This exercises the specific failure mode from the real Sluis Weurt data
+    where the merge node landed inside chamber 47538.
+    """
+    # Fairway still E-W; the "lock" centroid is near the western end of the
+    # chamber so the downstream extent is large.
+    fw_geom = LineString([(5.808, 51.8538), (5.838, 51.8538)])
+    # Lock centroid at the western edge of the chamber extent (lon 5.819)
+    lock_geom = Point(5.819, 51.8538)
+
+    # Single large chamber extending from 5.819 to 5.825 (≈ 410 m wide)
+    ch_big = Polygon([
+        (5.819, 51.852), (5.825, 51.852),
+        (5.825, 51.854), (5.819, 51.854),
+        (5.819, 51.852),
+    ])
+
+    lock_chambers_df = pd.DataFrame([
+        {"id": "47538", "geometry": ch_big.wkt, "dim_usable_length": 250},
+    ])
+
+    split_pt, merge_pt = _simulate_split_merge_from_buffers(
+        fw_geom, lock_geom, lock_chambers_df
+    )
+
+    assert not ch_big.contains(merge_pt), (
+        f"merge_pt {merge_pt.wkt} landed inside the downstream chamber"
     )
