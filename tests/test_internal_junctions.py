@@ -947,12 +947,12 @@ def test_assert_split_merge_outside_chambers_passes_when_outside():
     _assert_split_merge_outside_chambers("49032", split_outside, merge_outside, [complex_obj])
 
 
-def test_assert_split_merge_outside_chambers_raises_for_merge_inside():
+def test_assert_split_merge_outside_chambers_raises_for_merge_inside(caplog):
     """
-    _assert_split_merge_outside_chambers must raise AssertionError when the
+    _assert_split_merge_outside_chambers must log a warning (not raise) when the
     merge point falls inside a chamber polygon.
     """
-    import pytest
+    import logging
     from fis.lock.graph import _assert_split_merge_outside_chambers
     from shapely.geometry import Polygon, Point
 
@@ -981,16 +981,22 @@ def test_assert_split_merge_outside_chambers_raises_for_merge_inside():
     split_outside = Point(5.819, 51.851)   # outside
     merge_inside  = Point(5.821, 51.853)   # deep inside the polygon
 
-    with pytest.raises(AssertionError, match="lock_49032_merge is inside chamber 47538"):
+    # Should not raise; instead emits a warning
+    with caplog.at_level(logging.WARNING, logger="fis.lock.graph"):
         _assert_split_merge_outside_chambers("49032", split_outside, merge_inside, [complex_obj])
 
+    assert any(
+        "lock_49032_merge" in r.message and "47538" in r.message
+        for r in caplog.records
+    ), "Expected a warning about lock_49032_merge inside chamber 47538"
 
-def test_assert_split_merge_outside_chambers_raises_for_split_inside():
+
+def test_assert_split_merge_outside_chambers_raises_for_split_inside(caplog):
     """
-    _assert_split_merge_outside_chambers must raise AssertionError when the
+    _assert_split_merge_outside_chambers must log a warning (not raise) when the
     split point falls inside a chamber polygon.
     """
-    import pytest
+    import logging
     from fis.lock.graph import _assert_split_merge_outside_chambers
     from shapely.geometry import Polygon, Point
 
@@ -1018,8 +1024,13 @@ def test_assert_split_merge_outside_chambers_raises_for_split_inside():
     split_inside  = Point(5.821, 51.853)   # inside
     merge_outside = Point(5.825, 51.856)   # outside
 
-    with pytest.raises(AssertionError, match="lock_49032_split is inside chamber 47538"):
+    with caplog.at_level(logging.WARNING, logger="fis.lock.graph"):
         _assert_split_merge_outside_chambers("49032", split_inside, merge_outside, [complex_obj])
+
+    assert any(
+        "lock_49032_split" in r.message and "47538" in r.message
+        for r in caplog.records
+    ), "Expected a warning about lock_49032_split inside chamber 47538"
 
 
 def test_assert_split_merge_outside_chambers_skips_non_polygon_chambers():

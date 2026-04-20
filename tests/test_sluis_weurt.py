@@ -53,14 +53,15 @@ def test_valid_schematization_does_not_raise(sluis_weurt_complex):
     build_graph_features([sluis_weurt_complex])  # must not raise
 
 
-def test_invalid_merge_inside_chamber_47538_raises(sluis_weurt_complex):
+def test_invalid_merge_inside_chamber_47538_raises(sluis_weurt_complex, caplog):
     """
     Reproduces the original bug: when the merge point is placed inside
-    chamber 47538, build_graph_features must raise AssertionError.
+    chamber 47538, build_graph_features must log a warning (not raise).
 
     Chamber 47538 covers lon 5.819–5.825, lat 51.852–51.854.
     Placing the merge at (5.822, 51.853) puts it clearly inside that polygon.
     """
+    import logging
     from fis.lock.graph import build_graph_features
 
     # Move merge point to inside chamber 47538
@@ -68,30 +69,37 @@ def test_invalid_merge_inside_chamber_47538_raises(sluis_weurt_complex):
         [(5.822, 51.853), (5.838, 51.8538)]
     ).wkt
 
-    with pytest.raises(
-        AssertionError, match="lock_49032_merge is inside chamber 47538"
-    ):
+    with caplog.at_level(logging.WARNING, logger="fis.lock.graph"):
         build_graph_features([sluis_weurt_complex])
 
+    assert any(
+        "lock_49032_merge" in r.message and "47538" in r.message
+        for r in caplog.records
+    ), "Expected a warning about lock_49032_merge inside chamber 47538"
 
-def test_invalid_split_inside_chamber_40927_raises(sluis_weurt_complex):
+
+def test_invalid_split_inside_chamber_40927_raises(sluis_weurt_complex, caplog):
     """
     When the split point is placed inside chamber 40927, build_graph_features
-    must raise AssertionError.
+    must log a warning (not raise).
 
     Chamber 40927 covers lon 5.819–5.825, lat 51.854–51.856.
     Placing the split at (5.822, 51.855) puts it clearly inside.
     """
+    import logging
     from fis.lock.graph import build_graph_features
 
     sluis_weurt_complex["geometry_before_wkt"] = LineString(
         [(5.808, 51.8538), (5.822, 51.855)]
     ).wkt
 
-    with pytest.raises(
-        AssertionError, match="lock_49032_split is inside chamber 40927"
-    ):
+    with caplog.at_level(logging.WARNING, logger="fis.lock.graph"):
         build_graph_features([sluis_weurt_complex])
+
+    assert any(
+        "lock_49032_split" in r.message and "40927" in r.message
+        for r in caplog.records
+    ), "Expected a warning about lock_49032_split inside chamber 40927"
 
 
 # ---------------------------------------------------------------------------

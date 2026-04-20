@@ -486,6 +486,8 @@ def find_nearby_berths(
                 relation = "after"
 
         # Propagate ALL scalar attributes
+        from shapely.geometry.base import BaseGeometry
+
         b_obj = {}
         for k, v in berth.to_dict().items():
             if k == "geometry":
@@ -493,7 +495,10 @@ def find_nearby_berths(
 
             # Use a robust way to check for NA on potentially complex types
             try:
-                if isinstance(v, (list, dict, pd.Series, pd.Index, np.ndarray)):
+                if isinstance(v, BaseGeometry):
+                    # Convert any stray geometry column values to WKT
+                    b_obj[k] = v.wkt
+                elif isinstance(v, (list, dict, pd.Series, pd.Index, np.ndarray)):
                     # Keep complex types as-is (might be problematic for downstream but avoids error)
                     b_obj[k] = v
                 elif pd.notna(v):

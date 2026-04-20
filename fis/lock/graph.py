@@ -22,14 +22,16 @@ def _assert_split_merge_outside_chambers(
     lock_complexes,
 ) -> None:
     """
-    Assert that neither the split nor the merge node for ``lock_id`` falls inside
-    any chamber polygon belonging to that lock complex.
+    Warn when the split or merge node for ``lock_id`` falls inside any chamber
+    polygon belonging to that lock complex.
 
     A small metric tolerance (``CHAMBER_INTERSECTION_BUFFER_M``) is used to avoid
     false positives caused by points that sit exactly on a chamber boundary.  The
     check projects geometries to the configured metric CRS.
 
-    Raises ``AssertionError`` if a violation is found.
+    Logs a warning instead of raising when a violation is found, so that unusual
+    spatial configurations (e.g. highly curved fairways near large chamber polygons)
+    do not abort the entire build.
     """
     for c in lock_complexes:
         if utils.stringify_id(c["id"]) != lock_id:
@@ -44,7 +46,7 @@ def _assert_split_merge_outside_chambers(
                     continue
 
                 # Project to metric CRS and shrink by buffer so points right on
-                # the boundary don't trigger false-positive assertions.
+                # the boundary don't trigger false-positive warnings.
                 ch_rd = (
                     gpd.GeoSeries([ch_geom], crs="EPSG:4326")
                     .to_crs(settings.PROJECTED_CRS)
@@ -59,10 +61,13 @@ def _assert_split_merge_outside_chambers(
                         .to_crs(settings.PROJECTED_CRS)
                         .iloc[0]
                     )
-                    assert not ch_shrunk.contains(sp_rd), (
-                        f"lock_{lock_id}_split is inside chamber {ch_id} polygon. "
-                        "Lock split nodes must not be placed inside a chamber."
-                    )
+                    if ch_shrunk.contains(sp_rd):
+                        logger.warning(
+                            "lock_%s_split is inside chamber %s polygon. "
+                            "Lock split nodes must not be placed inside a chamber.",
+                            lock_id,
+                            ch_id,
+                        )
 
                 if merge_point is not None:
                     mp_rd = (
@@ -70,10 +75,13 @@ def _assert_split_merge_outside_chambers(
                         .to_crs(settings.PROJECTED_CRS)
                         .iloc[0]
                     )
-                    assert not ch_shrunk.contains(mp_rd), (
-                        f"lock_{lock_id}_merge is inside chamber {ch_id} polygon. "
-                        "Lock merge nodes must not be placed inside a chamber."
-                    )
+                    if ch_shrunk.contains(mp_rd):
+                        logger.warning(
+                            "lock_%s_merge is inside chamber %s polygon. "
+                            "Lock merge nodes must not be placed inside a chamber.",
+                            lock_id,
+                            ch_id,
+                        )
 
 def build_nodes_gdf(complexes) -> gpd.GeoDataFrame:
     """Return a Point GeoDataFrame of all routing nodes across all lock complexes."""

@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 class NumpyEncoder(json.JSONEncoder):
-    """Custom encoder for numpy types."""
+    """Custom encoder for numpy types and Shapely geometries."""
 
     def default(self, obj):
         import numpy as np
+        from shapely.geometry.base import BaseGeometry
 
         if isinstance(obj, np.ndarray):
             return obj.tolist()
@@ -37,6 +38,8 @@ class NumpyEncoder(json.JSONEncoder):
             return float(obj)
         if isinstance(obj, np.bool_):
             return bool(obj)
+        if isinstance(obj, BaseGeometry):
+            return obj.wkt
         return super().default(obj)
 
 
