@@ -7,7 +7,7 @@ from shapely import wkt
 from shapely.strtree import STRtree
 from tqdm import tqdm
 
-from shapely.geometry import Point, LineString
+from shapely.geometry import Point, LineString, LinearRing
 from shapely.ops import unary_union
 from fis.utils import to_python, sanitize_attrs, stringify_id
 from fis.lock.utils import find_chamber_doors, project_geometry
@@ -259,7 +259,7 @@ def _extract_coords(geom):
     """Recursively extract all coordinate tuples from any Shapely geometry."""
     if geom is None or geom.is_empty:
         return []
-    if hasattr(geom, "coords"):
+    if isinstance(geom, (Point, LineString, LinearRing)):
         return list(geom.coords)
     if hasattr(geom, "geoms"):
         result = []
