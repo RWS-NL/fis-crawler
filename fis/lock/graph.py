@@ -732,11 +732,17 @@ def _build_chamber_route_features(
     if internal_junctions:
         # Project each internal junction onto the door_start→door_end axis and
         # sort by that distance so we traverse them in fairway direction order.
+        # Geometry may be stored as a WKT string (for JSON-serialisability); load
+        # it back to a Point here before any geometric operations.
+        def _geom(junc):
+            g = junc["geometry"]
+            return wkt.loads(g) if isinstance(g, str) else g
+
         dx = door_end.x - door_start.x
         dy = door_end.y - door_start.y
 
         def _proj_t(junc):
-            geom = junc["geometry"]
+            geom = _geom(junc)
             return (geom.x - door_start.x) * dx + (geom.y - door_start.y) * dy
 
         sorted_junctions = sorted(internal_junctions, key=_proj_t)
@@ -744,7 +750,7 @@ def _build_chamber_route_features(
         # Build the sequence of waypoints through the chamber
         waypoints = (
             [(door_start, chamber_node_start_id)]
-            + [(j["geometry"], j["id"]) for j in sorted_junctions]
+            + [(_geom(j), j["id"]) for j in sorted_junctions]
             + [(door_end, chamber_node_end_id)]
         )
 

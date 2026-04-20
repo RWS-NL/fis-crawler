@@ -486,7 +486,9 @@ def _find_internal_junctions_for_chambers(lock_chambers, network_graph):
             junctions_inside.append(
                 {
                     "id": node_ids_list[idx],
-                    "geometry": node_geoms_wgs84[idx],  # keep WGS84 for downstream use
+                    # Store as WKT so the dict is JSON-serializable; graph.py
+                    # deserialises this back to a Point when building edges.
+                    "geometry": node_geoms_wgs84[idx].wkt,
                 }
             )
 
