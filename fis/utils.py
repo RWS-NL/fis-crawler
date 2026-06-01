@@ -216,9 +216,9 @@ def normalize_attributes(
     # 3b. Apply unit conversions (e.g. cm to meters)
     # Deterministic strategy: Any field explicitly mapped to a name ending in '_cm'
     # gets converted to meters and renamed to its canonical (meter-based) name.
-    cm_cols = [
-        c for c in new_df.columns if c.endswith("_cm") and c in rename_map.values()
-    ]
+    # Exclude columns that were padded in step 2b to avoid overwriting canonical columns with NaN.
+    padded_set = set(missing_target_cols)
+    cm_cols = [c for c in new_df.columns if c.endswith("_cm") and c not in padded_set]
     for col in cm_cols:
         target_name = col[:-3]  # remove '_cm'
         logger.info("Converting %s from cm to meters -> %s", col, target_name)

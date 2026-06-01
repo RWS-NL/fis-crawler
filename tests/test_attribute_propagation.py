@@ -130,3 +130,34 @@ def test_normalize_attributes_enforces_string_ids():
     assert normalized.iloc[0]["id"] == "1"
     assert normalized.iloc[0]["parent_id"] == "10"
     assert normalized["some_other"].dtype == "float64"
+
+
+def test_normalize_attributes_preserves_padded_cm_columns():
+    """
+    Ensure that when a schema mapping includes a target column ending with '_cm',
+    but the input data is missing that source column, the padded target column
+    is preserved as NaN and does not destructively overwrite any existing canonical column.
+    """
+    df = pd.DataFrame(
+        {
+            "Id": [1],
+            "ClearanceHeightClosed": [17.14],
+        }
+    )
+    schema = {
+        "attributes": {
+            "openings": {
+                "Id": "id",
+                "ClearanceHeightClosed": "dim_height",
+                "mheightcm": "dim_height_cm",
+            }
+        },
+        "identifiers": {"columns": ["id"]},
+    }
+
+    normalized = utils.normalize_attributes(df, "openings", schema)
+
+    # The populated dim_height must be preserved (not overwritten by NaN from dim_height_cm)
+    assert normalized.iloc[0]["dim_height"] == 17.14
+    # The missing dim_height_cm is padded with NaN
+    assert pd.isna(normalized.iloc[0]["dim_height_cm"])
