@@ -45,11 +45,6 @@ def load_dropins_with_explicit_linking(
         combined = pd.concat(gdfs, ignore_index=True)
         if schema_section:
             combined = normalize_attributes(combined, schema_section)
-            # Handle CM to Meter conversion for any column ending in _cm
-            for col in combined.columns:
-                if col.endswith("_cm"):
-                    target_col = col.replace("_cm", "")
-                    combined[target_col] = combined[col] / 100.0
         return combined
 
     logger.info("Loading structures with explicit linking...")
