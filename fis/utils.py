@@ -214,16 +214,20 @@ def normalize_attributes(
             new_df[col] = new_df[col].apply(stringify_id)
 
     # 3b. Apply unit conversions (e.g. cm to meters)
-    # Deterministic strategy: Any field explicitly mapped to a name ending in '_cm'
-    # gets converted to meters and renamed to its canonical (meter-based) name.
-    cm_cols = [c for c in new_df.columns if c.endswith("_cm")]
+    # Deterministic strategy: Any non-padded column whose normalized name ends in '_cm'
+    # gets converted to meters and merged into its canonical (meter-based) name,
+    # overwriting existing values only where the converted value is not-null.
+    # Exclude columns that were padded in step 2b to avoid overwriting canonical columns with NaN.
+    padded_set = set(missing_target_cols)
+    cm_cols = [c for c in new_df.columns if c.endswith("_cm") and c not in padded_set]
     for col in cm_cols:
         target_name = col[:-3]  # remove '_cm'
         logger.info("Converting %s from cm to meters -> %s", col, target_name)
-        new_df[target_name] = new_df[col] / 100.0
-        # If the target name was already present (e.g. from a different Loader step),
-        # this overwrite is intentional as the cm-sourced data with suffix 
-        # is the most specific representation for this source.
+        converted = new_df[col] / 100.0
+        if target_name in new_df.columns:
+            new_df[target_name] = converted.fillna(new_df[target_name])
+        else:
+            new_df[target_name] = converted
         new_df = new_df.drop(columns=[col])
 
     # 4. Final cast back to GeoDataFrame if input was one or has geometry to preserve methods/CRS

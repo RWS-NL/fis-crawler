@@ -130,3 +130,66 @@ def test_normalize_attributes_enforces_string_ids():
     assert normalized.iloc[0]["id"] == "1"
     assert normalized.iloc[0]["parent_id"] == "10"
     assert normalized["some_other"].dtype == "float64"
+
+
+def test_normalize_attributes_preserves_padded_cm_columns():
+    """
+    Ensure that when a schema mapping includes a target column ending with '_cm',
+    but the input data is missing that source column, the padded target column
+    is preserved as NaN and does not destructively overwrite any existing canonical column.
+    """
+    df = pd.DataFrame(
+        {
+            "Id": [1],
+            "ClearanceHeightClosed": [17.14],
+        }
+    )
+    schema = {
+        "attributes": {
+            "openings": {
+                "Id": "id",
+                "ClearanceHeightClosed": "dim_height",
+                "mheightcm": "dim_height_cm",
+            }
+        },
+        "identifiers": {"columns": ["id"]},
+    }
+
+    normalized = utils.normalize_attributes(df, "openings", schema)
+
+    # The populated dim_height must be preserved (not overwritten by NaN from dim_height_cm)
+    assert normalized.iloc[0]["dim_height"] == 17.14
+    # The missing dim_height_cm is padded with NaN
+    assert pd.isna(normalized.iloc[0]["dim_height_cm"])
+
+
+def test_normalize_attributes_selective_cm_overwrite():
+    """
+    Ensure that the cm->meters conversion only overwrites canonical values where
+    the cm-sourced values are present/not-null, preserving original values for
+    rows where the cm column is missing/NaN.
+    """
+    df = pd.DataFrame(
+        {
+            "Id": [1, 2],
+            "ClearanceHeightClosed": [17.14, 20.0],
+            "mheightcm": [500.0, None],  # One present, one missing
+        }
+    )
+    schema = {
+        "attributes": {
+            "openings": {
+                "Id": "id",
+                "ClearanceHeightClosed": "dim_height",
+                "mheightcm": "dim_height_cm",
+            }
+        },
+        "identifiers": {"columns": ["id"]},
+    }
+
+    normalized = utils.normalize_attributes(df, "openings", schema)
+
+    # First row should be overwritten: 500 cm -> 5.0 m
+    assert normalized.iloc[0]["dim_height"] == 5.0
+    # Second row should preserve original: 20.0 m (since mheightcm was None)
+    assert normalized.iloc[1]["dim_height"] == 20.0
