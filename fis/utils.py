@@ -216,13 +216,15 @@ def normalize_attributes(
     # 3b. Apply unit conversions (e.g. cm to meters)
     # Deterministic strategy: Any field explicitly mapped to a name ending in '_cm'
     # gets converted to meters and renamed to its canonical (meter-based) name.
-    cm_cols = [c for c in new_df.columns if c.endswith("_cm")]
+    cm_cols = [
+        c for c in new_df.columns if c.endswith("_cm") and c in rename_map.values()
+    ]
     for col in cm_cols:
         target_name = col[:-3]  # remove '_cm'
         logger.info("Converting %s from cm to meters -> %s", col, target_name)
         new_df[target_name] = new_df[col] / 100.0
         # If the target name was already present (e.g. from a different Loader step),
-        # this overwrite is intentional as the cm-sourced data with suffix 
+        # this overwrite is intentional as the cm-sourced data with suffix
         # is the most specific representation for this source.
         new_df = new_df.drop(columns=[col])
 
