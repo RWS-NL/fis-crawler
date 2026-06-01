@@ -214,8 +214,9 @@ def normalize_attributes(
             new_df[col] = new_df[col].apply(stringify_id)
 
     # 3b. Apply unit conversions (e.g. cm to meters)
-    # Deterministic strategy: Any field explicitly mapped to a name ending in '_cm'
-    # gets converted to meters and renamed to its canonical (meter-based) name.
+    # Deterministic strategy: Any non-padded field mapped to a name ending in '_cm'
+    # gets converted to meters and merged into its canonical (meter-based) name,
+    # overwriting existing values only where the converted value is not-null.
     # Exclude columns that were padded in step 2b to avoid overwriting canonical columns with NaN.
     padded_set = set(missing_target_cols)
     cm_cols = [c for c in new_df.columns if c.endswith("_cm") and c not in padded_set]
