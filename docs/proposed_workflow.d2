@@ -1,0 +1,96 @@
+title: |md
+  # Proposed Workflow (to-be)
+  Decoupled stages with serialized intermediate artifacts.
+  Each stage can run independently from cached outputs.
+|
+
+direction: down
+
+# ===== STAGE 1: Data Acquisition (unchanged) =====
+stage1: "Stage 1: Crawl (unchanged)" {
+  style.fill: "#e8f4fd"
+  fis: "scrapy crawl dataservice\n→ output/fis-export/"
+  euris: "scrapy crawl euris\n→ output/euris-export/"
+  disk: "scrapy crawl disk\n→ output/disk-export/"
+}
+
+# ===== STAGE 2: Base Graph (unchanged) =====
+stage2: "Stage 2: Build Base Graph (unchanged)" {
+  style.fill: "#e8f8e8"
+  fis-graph: "fis graph fis + enrich"
+  euris-graph: "fis graph euris + enrich"
+  merge: "fis graph merge\n→ output/merged-graph/"
+  fis-graph -> merge
+  euris-graph -> merge
+}
+
+# ===== STAGE 3: Administrative Collection (independent) =====
+stage3: "Stage 3: Administrative Collection (independent, cacheable)" {
+  style.fill: "#e8f0ff"
+  style.stroke: "#0066cc"
+
+  lock: "fis lock schematize\n→ output/lock-schematization/\n\nOutputs: lock_complexes.json\n(administrative locks, chambers, berths)" {
+    style.fill: "#d0e8ff"
+  }
+  bridge: "fis bridge schematize\n→ output/bridge-schematization/\n\nOutputs: bridge_complexes.json\n(administrative bridges, openings)" {
+    style.fill: "#d0e8ff"
+  }
+}
+
+# ===== STAGE 4: Lock Complex Integration (NEW) =====
+stage4: "Stage 4: Lock Complex Integration (NEW)" {
+  style.fill: "#fff0e0"
+  style.stroke: "#cc6600"
+  label: |md
+    **NEW STEP**: Resolves complex lock topology using base graph.
+    Runs AFTER both lock and bridge schematization are complete.
+    Uses base graph to traverse up/down and find split/merge domain boundaries.
+  |
+
+  embedded: "Match bridges & berths to lock\n(traversal + spatial + semantic)"
+  inject: "Inject chambers, bridges & berths\ninto lock complex domain"
+  validate: "Validate lock complex\ntopology"
+
+  embedded -> inject -> validate
+}
+
+# ===== STAGE 5: Fairway Splicing (formerly dropins) =====
+stage5: "Stage 5: Fairway Splicing + Export" {
+  style.fill: "#e8ffe8"
+  style.stroke: "#006600"
+
+  splice: "Splice structures into\nfairway sections"
+  detailed: "Detailed mode\n(chamber-level routing)"
+  simplified: "Simplified mode\n(single passage edges)"
+
+  splice -> detailed
+  splice -> simplified
+}
+
+# ===== Connections =====
+stage1.fis -> stage2.fis-graph
+stage1.euris -> stage2.euris-graph
+
+stage1.fis -> stage3.lock: "FIS parquet"
+stage1.disk -> stage3.lock: "DISK parquet"
+stage1.fis -> stage3.bridge: "FIS parquet"
+stage1.disk -> stage3.bridge: "DISK parquet"
+
+stage3.lock -> stage4.embedded: "lock_complexes.json"
+stage3.bridge -> stage4.embedded: "bridge_complexes.json"
+stage2.merge -> stage4.embedded: "merged-graph"
+
+stage4.validate -> stage5.splice: "integrated_complexes.json"
+stage2.merge -> stage5.splice: "merged-graph"
+
+# ===== Key benefit =====
+benefit: |md
+  ## Key Benefits
+  - **Stage 3 is independently runnable**: modify lock logic, re-run only lock schematize
+  - **Stage 4 is isolated**: all bridge-in-lock logic in one place
+  - **Serialized artifacts**: each stage reads/writes JSON/parquet, no re-crawling
+  - **Test any stage in isolation**: mock inputs from cached files
+  - **Stage 4 can have its own test suite** with visual lock complex examples
+| {
+  style.fill: "#e8ffe8"
+}

@@ -1,0 +1,77 @@
+title: |md
+  # Current Workflow (as-is)
+  Tightly coupled: lock complex integration happens during dropins,
+  requiring both crawled data and graph to be present.
+|
+
+direction: down
+
+# Data Sources
+crawl: "1. Crawl" {
+  style.fill: "#e8f4fd"
+  fis: "scrapy crawl dataservice\n→ output/fis-export/"
+  euris: "scrapy crawl euris\n→ output/euris-export/"
+  disk: "scrapy crawl disk\n→ output/disk-export/"
+}
+
+# Graph Building
+graph: "2. Build Graphs" {
+  style.fill: "#e8f8e8"
+  fis-graph: "fis graph fis\n→ output/fis-graph/"
+  euris-graph: "fis graph euris\n→ output/euris-graph/"
+  enrich-fis: "fis graph enrich-fis\n→ output/fis-enriched/"
+  enrich-euris: "fis graph enrich-euris\n→ output/euris-enriched/"
+  merge: "fis graph merge\n→ output/merged-graph/"
+
+  fis-graph -> enrich-fis
+  euris-graph -> enrich-euris
+  enrich-fis -> merge
+  enrich-euris -> merge
+}
+
+# Schematization (THE PROBLEM AREA)
+schematize: "3. Schematize" {
+  style.fill: "#fff3cd"
+  lock: "fis lock schematize\n→ output/lock-schematization/" {
+    style.fill: "#ffcccc"
+  }
+  bridge: "fis bridge schematize\n→ output/bridge-schematization/" {
+    style.fill: "#ffcccc"
+  }
+  dropins: "4. Integrate Dropins" {
+    style.fill: "#ffcccc"
+    style.stroke: "#cc0000"
+    detailed: "fis dropins schematize --mode detailed"
+    simplified: "fis dropins schematize --mode simplified"
+  }
+  lock -> dropins: "lock_complexes"
+  bridge -> dropins: "bridge_complexes"
+}
+
+# Connections
+crawl.fis -> graph.fis-graph
+crawl.euris -> graph.euris-graph
+crawl.fis -> graph.enrich-fis
+crawl.euris -> graph.enrich-euris
+
+crawl.fis -> schematize.lock: "FIS parquet"
+crawl.disk -> schematize.lock: "DISK parquet"
+graph.fis-graph -> schematize.lock: "graph.pickle\n(for topology)"
+crawl.fis -> schematize.bridge: "FIS parquet"
+crawl.disk -> schematize.bridge: "DISK parquet"
+
+crawl.fis -> schematize.dropins: "sections"
+crawl.disk -> schematize.dropins: "DISK data"
+
+# Problem annotation
+problem: |md
+  ## Problems
+  1. **Tight coupling**: dropins needs lock + bridge + sections + DISK all at once
+  2. **No caching**: changing lock logic requires re-running everything
+  3. **Embedded bridge detection** happens during dropins, not during lock/bridge
+  4. **Lock complex grouping** (`group_complexes`) does too much at once
+  5. **Test data** is ad-hoc, not structured by challenge type
+| {
+  style.fill: "#ffe0e0"
+  style.stroke: "#cc0000"
+}
