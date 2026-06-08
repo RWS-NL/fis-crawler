@@ -1,0 +1,57 @@
+# Manual mappings to resolve bridge-opening to lock-chamber associations
+# and custom boundary/splitting overrides for lock complexes.
+
+[bridge_chamber_mappings]
+# Format: "bridge_opening_id" = "chamber_id"
+# Sluis Weurt
+"5835" = "47538"   # Oostkolk
+"25111" = "40927"  # Westkolk
+
+# Volkeraksluizen (Commercial Complex)
+"43247" = "6428"   # Westkolk
+"9802" = "24817"   # Middenkolk
+"39854" = "7083"   # Oostkolk
+
+# Volkeraksluizen (Jachtensluis)
+"9689" = "18373"   # Jachtensluis
+
+# Krammersluizen
+"17693" = "38644"
+"26232" = "56085"
+
+# Krammerjachtensluis
+"16146" = "7617764"
+"47766" = "7069818"
+
+# Lorentzsluizen
+"40168" = "15772"  # Chamber 15772 (1st bridge)
+"20927" = "15772"  # Chamber 15772 (2nd bridge)
+"53890" = "28501"  # Chamber 28501 (1st bridge)
+"44027" = "28501"  # Chamber 28501 (2nd bridge)
+
+# Oranjesluizen entrance bridge
+"53836" = "3127"   # Map opening 53836 to Zuidkolk (or generally as entrance)
+
+
+[lock_complex_overrides]
+# Define custom start/end junction node overrides for specific lock complexes if dynamic traversal fails
+# format: lock_complex_id = { entry_node = "FIS_xxx", exit_node = "FIS_yyy" }
+"49032" = { entry_node = "FIS_8864666", exit_node = "FIS_8865102" }  # Sluis Weurt
+"42863" = { entry_node = "FIS_8860743", exit_node = "FIS_8866727" }  # Volkeraksluizen Commercial
+"52078" = { entry_node = "FIS_8860743", exit_node = "FIS_8866727" }  # Volkerak Jachtensluis sharing boundary
+"50750" = { entry_node = "FIS_8864384", exit_node = "FIS_59275858" } # Oranjesluizen
+"15772" = { entry_node = "FIS_8864239", exit_node = "FIS_8860933" }  # Lorentzsluizen (using chamber id as complex placeholder)
+
+
+[manual_split_coordinates]
+# Manual coordinates (lat, lon) to force splitting fairway edges at specific points
+# Sluis Weurt
+sluis_weurt = { split_north = [51.85576807, 5.82172072], merge_south = [51.85064351, 5.82029552] }
+
+# Lorentzsluizen
+lorentzsluizen = { split_north = [53.07508413, 5.33457122], merge_south = [53.06465534, 5.33916480], chamber_28501_waypoint = [53.06604214, 5.33901687] }
+
+
+[exceptional_navigational_structures]
+# Weirs that should be loaded from exceptionalnavigationalstructure dataset
+"46058" = { name = "Stuw Grave", type = "STW", navigable = false, geometry = [51.7687924650035, 5.73579871342707] }
