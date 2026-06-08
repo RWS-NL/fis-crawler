@@ -114,6 +114,7 @@ To avoid the regressions and scope creep of prior attempts, we propose a multi-p
 2. **Define Gold-Standard Paths**: Formally document the expected node sequence and bridge/berth mappings for Sluis Weurt, Volkeraksluizen, and Oranjesluizen.
 3. **Mock Datasets**: Extract and save sub-graphs for these 14 complexes as local test fixtures so we can test the traversal algorithms offline.
 4. **Manual Mappings Draft**: Create the initial draft of `config/lock_bridge_mappings.toml`.
+5. **Explore Exceptional Structures**: Create a diagnostic script to inspect the raw `exceptionalnavigationalstructure` dataset (attributes, geometries, and type distributions) to understand what exceptional structures (weirs, etc.) exist in the dataset.
 
 ### Phase 2: Traversal Algorithm Design & Validation
 1. Create [domain.py](file:///Users/baart_f/src/fis/fis/dropins/domain.py) to implement the `extract_lock_complex_domain(G, lock_complex)` traversal logic.
