@@ -80,6 +80,12 @@ During traversal, bridges may be found near chambers. Some bridge openings are l
   - Define custom start/end junction node overrides for specific lock complexes if the dynamic traversal falls short.
   - Mark specific bridges as adjacent vs. embedded.
 
+### Exceptional Navigational Structures (Weirs & Retaining Locks) Integration
+Exceptional structures (like weirs and retaining locks) located within the lock complex boundaries must be integrated:
+- **Retaining Locks (`KSS`)**: Spliced as navigable passage edges (similar to lock chambers) but tagged with `structure_type = 'keersluis'`.
+- **Weirs (`STW`)**: Spliced as non-navigable edges by default (`navigable = false`) to represent physical barriers, unless overrides mark them as navigable (e.g., when fully opened).
+- **Opening Coordinate Overrides**: For weirs with stacked openings (e.g., Stuw Grave), `lock_bridge_mappings.toml` will provide the manual coordinate offsets (e.g., matching neighboring bridge openings) to ensure correct separate layout nodes in the graph.
+
 ---
 
 ## 4. Structured Test Lock Complexes (#147)
