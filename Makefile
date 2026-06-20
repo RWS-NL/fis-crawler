@@ -1,4 +1,4 @@
-.PHONY: all crawl crawl-fis crawl-euris crawl-disk crawl-ivs build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas \
+.PHONY: all crawl crawl-fis crawl-euris crawl-disk crawl-ivs process-ivs build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas \
 	schematize-dropins-fis-detailed schematize-dropins-fis-simplified schematize-dropins-euris
 
 # Default target
@@ -46,6 +46,10 @@ crawl-disk: logs-dir
 
 crawl-ivs: logs-dir
 	uv run scrapy crawl ivs -L INFO 2>&1 | tee output/logs/crawl-ivs.log
+
+process-ivs: logs-dir
+	uv run python -m fis.cli ivs process 2>&1 | tee output/logs/process-ivs.log
+
 
 # --- Graph Building ---
 build-graphs: build-fis-graph build-euris-graph
