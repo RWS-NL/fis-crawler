@@ -1,4 +1,4 @@
-.PHONY: all crawl crawl-fis crawl-euris crawl-disk build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas \
+.PHONY: all crawl crawl-fis crawl-euris crawl-disk crawl-ivs build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas \
 	schematize-dropins-fis-detailed schematize-dropins-fis-simplified schematize-dropins-euris
 
 # Default target
@@ -8,7 +8,8 @@ logs-dir:
 	mkdir -p output/logs
 
 # --- Crawling Steps ---
-crawl: crawl-fis crawl-euris crawl-disk
+crawl: crawl-fis crawl-euris crawl-disk crawl-ivs
+
 
 reference/Bivas.5.10.1.sqlite:
 	mkdir -p reference
@@ -42,6 +43,9 @@ crawl-euris: output/euris-export/.euris_crawl_complete
 
 crawl-disk: logs-dir
 	uv run scrapy crawl disk -L INFO 2>&1 | tee output/logs/crawl-disk.log
+
+crawl-ivs: logs-dir
+	uv run scrapy crawl ivs -L INFO 2>&1 | tee output/logs/crawl-ivs.log
 
 # --- Graph Building ---
 build-graphs: build-fis-graph build-euris-graph

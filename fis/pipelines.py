@@ -191,5 +191,13 @@ class EurisFilesPipeline(FilesPipeline):
             spider.logger.info("No RIS Excel files were successfully read.")
 
 
+class IvsFilesPipeline(FilesPipeline):
+    def file_path(self, request, response=None, info=None, *, item=None):
+        # Use the filename from the item if available
+        return item.get("filename") or super().file_path(
+            request, response, info, item=item
+        )
+
 # concat_network and generate_graph functions moved to fis/graph/euris.py
 # Use: uv run python -m fis.cli graph euris
+
