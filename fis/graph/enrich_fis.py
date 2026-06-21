@@ -237,12 +237,12 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
         "WidePushedHeight",
         "Note",
     ]
-    maxdim_df = match_by_geometry(
+    maxdim_df = match_by_route_km(
         sections, datasets.get("maximumdimensions"), maxdim_cols, "dim_"
     )
 
     nav_cols = ["Classification", "Code", "Description"]
-    nav_df = match_by_geometry(sections, datasets.get("navigability"), nav_cols, "nav_")
+    nav_df = match_by_route_km(sections, datasets.get("navigability"), nav_cols, "nav_")
     # Add cemt_class alias
     if "nav_Code" in nav_df.columns:
         nav_df["cemt_class"] = nav_df["nav_Code"]

@@ -205,16 +205,22 @@ def build_edge_structures_lookup() -> dict:
         df_fis_ch = pd.read_parquet(fis_ch_path)
         for _, r in df_fis_ch.iterrows():
             sid = r.get("fairway_section_id")
+            name = str(r.get("name", ""))
+            if "Irenesluis" in name or "Irenesluizen" in name:
+                sid = 47304
             if is_valid(sid):
-                lookup[str(sid)]["chambers"].append(r.to_dict())
+                lookup[str(int(float(sid)))]["chambers"].append(r.to_dict())
 
     fis_op_path = pathlib.Path("output/dropins-fis-detailed/openings.geoparquet")
     if fis_op_path.exists():
         df_fis_op = pd.read_parquet(fis_op_path)
         for _, r in df_fis_op.iterrows():
             sid = r.get("fairway_section_id")
+            name = str(r.get("name", ""))
+            if "Irenesluis" in name or "Irenesluizen" in name:
+                sid = 47304
             if is_valid(sid):
-                lookup[str(sid)]["openings"].append(r.to_dict())
+                lookup[str(int(float(sid)))]["openings"].append(r.to_dict())
 
     eur_edges_path = pathlib.Path("output/dropins-euris-detailed/edges.geoparquet")
     eur_ch_path = pathlib.Path("output/dropins-euris-detailed/chambers.geoparquet")
