@@ -48,6 +48,9 @@ def sample_maxdim(sample_sections):
     return gpd.GeoDataFrame(
         {
             "Id": [101, 102],
+            "RouteId": [100, 200],
+            "RouteKmBegin": [0.0, 0.0],
+            "RouteKmEnd": [5.0, 8.0],
             "GeneralDepth": [3.5, 2.0],
             "GeneralWidth": [40.0, 25.0],
             "WidePushedWidth": [15.0, 10.0],
@@ -67,6 +70,9 @@ def sample_navigability(sample_sections):
     return gpd.GeoDataFrame(
         {
             "Id": [201],
+            "RouteId": [100],
+            "RouteKmBegin": [0.0],
+            "RouteKmEnd": [5.0],
             "Classification": ["CEMT"],
             "Code": ["IV"],
             "Description": ["Class IV waterway"],
