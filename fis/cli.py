@@ -35,6 +35,5 @@ cli.add_command(publish_cli, name="publish")
 cli.add_command(ivs_cli, name="ivs")
 
 
-
 if __name__ == "__main__":
     cli()

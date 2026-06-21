@@ -198,6 +198,6 @@ class IvsFilesPipeline(FilesPipeline):
             request, response, info, item=item
         )
 
+
 # concat_network and generate_graph functions moved to fis/graph/euris.py
 # Use: uv run python -m fis.cli graph euris
-

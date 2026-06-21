@@ -218,7 +218,8 @@ def merge_graphs(
         if node_id in prune_node_ids:
             logger.info("Pruning FIS node %s - Lobith correction", node_id)
             continue
-        combined.add_node(f"FIS_{node_id}", data_source="FIS", **attrs)
+        node_attrs = {"data_source": "FIS", **attrs}
+        combined.add_node(f"FIS_{node_id}", **node_attrs)
 
     # Add FIS edges
     # Lobith correction: Remove edge 22638449 (redundant border crossing)
@@ -238,7 +239,8 @@ def merge_graphs(
         if u in prune_node_ids or v in prune_node_ids:
             continue
 
-        combined.add_edge(f"FIS_{u}", f"FIS_{v}", data_source="FIS", **attrs)
+        edge_attrs = {"data_source": "FIS", **attrs}
+        combined.add_edge(f"FIS_{u}", f"FIS_{v}", **edge_attrs)
 
     # Add EURIS nodes (already have country prefix like NL_J3524)
     logger.info("Adding EURIS nodes to combined graph (excluding NL)")
@@ -246,7 +248,8 @@ def merge_graphs(
         # Skip Dutch nodes in EURIS as FIS provides the authoritative network
         if attrs.get("countrycode") == "NL":
             continue
-        combined.add_node(f"EURIS_{node_id}", data_source="EURIS", **attrs)
+        node_attrs = {"data_source": "EURIS", **attrs}
+        combined.add_node(f"EURIS_{node_id}", **node_attrs)
 
     # Add EURIS edges
     logger.info("Adding EURIS edges to combined graph (excluding NL)")
@@ -258,7 +261,8 @@ def merge_graphs(
         if u_cc == "NL" or v_cc == "NL":
             continue
 
-        combined.add_edge(f"EURIS_{u}", f"EURIS_{v}", data_source="EURIS", **attrs)
+        edge_attrs = {"data_source": "EURIS", **attrs}
+        combined.add_edge(f"EURIS_{u}", f"EURIS_{v}", **edge_attrs)
 
     # Add new border connections
     logger.info("Adding %d border connections", len(connections))

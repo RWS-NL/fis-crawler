@@ -75,9 +75,7 @@ def get_zip_year_month(zf_path: pathlib.Path):
             return y, m
 
     # 2. Alternative pattern: IVS_weekmonitor_YYYY_YYYYMMDD_HHMMSS.zip
-    match2 = re.search(
-        r"IVS_weekmonitor_(\d{4})_(\d{4})(\d{2})", zf_path.name
-    )
+    match2 = re.search(r"IVS_weekmonitor_(\d{4})_(\d{4})(\d{2})", zf_path.name)
     if match2:
         y = int(match2.group(1))
         # Fallback month derived from export date (YYYYMMDD -> MM)
@@ -91,9 +89,7 @@ def get_zip_year_month(zf_path: pathlib.Path):
         if "jaar" in df.columns and "maand" in df.columns:
             return int(df["jaar"].iloc[0]), int(df["maand"].iloc[0])
     except Exception as e:
-        logger.warning(
-            f"Fallback reading failed for {zf_path.name}: {e}"
-        )
+        logger.warning(f"Fallback reading failed for {zf_path.name}: {e}")
 
     return None
 
@@ -116,19 +112,15 @@ def read_and_normalize_zip(zip_path):
         for col in STANDARD_COLS:
             dt = DTYPES[col]
             if col == "v05_06_begindt_evenement_iso":
-                df[col] = pd.to_datetime(
-                    df[col], format="ISO8601", utc=True
-                ).astype("datetime64[us, UTC]")
+                df[col] = pd.to_datetime(df[col], format="ISO8601", utc=True).astype(
+                    "datetime64[us, UTC]"
+                )
             elif dt == "int64":
                 df[col] = (
-                    pd.to_numeric(df[col], errors="coerce")
-                    .fillna(0)
-                    .astype("int64")
+                    pd.to_numeric(df[col], errors="coerce").fillna(0).astype("int64")
                 )
             elif dt == "float64":
-                df[col] = pd.to_numeric(df[col], errors="coerce").astype(
-                    "float64"
-                )
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
             else:
                 df[col] = df[col].astype("object")
 
@@ -168,9 +160,7 @@ def save_year_month(year, month, dfs, output_dir):
         f"Writing {len(dedup)} rows for year {year}, month {month} to {part_file}..."
     )
     dedup.to_parquet(str(part_file), engine="pyarrow")
-    logger.info(
-        f"Dask task finished saving year {year}, month {month} to {part_file}."
-    )
+    logger.info(f"Dask task finished saving year {year}, month {month} to {part_file}.")
     return True
 
 
@@ -206,7 +196,7 @@ def process_ivs_data(downloads_dir: pathlib.Path, output_dir: pathlib.Path):
     cluster = LocalCluster()
     client = Client(cluster)
 
-    logger.info(f"Dask cluster initialized successfully.")
+    logger.info("Dask cluster initialized successfully.")
     logger.info(f"Dask dashboard is available at: {client.dashboard_link}")
 
     try:

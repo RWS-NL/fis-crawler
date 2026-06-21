@@ -150,6 +150,8 @@ def enrich_fis(
 
     if edge_data:
         edges_gdf = gpd.GeoDataFrame(edge_data, crs="EPSG:4326")
+        edges_gdf["source"] = edges_gdf["source"].astype(str)
+        edges_gdf["target"] = edges_gdf["target"].astype(str)
         edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
         edges_gdf.to_parquet(output_dir / "edges.geoparquet")
         logger.info("Exported %d enriched edges", len(edges_gdf))

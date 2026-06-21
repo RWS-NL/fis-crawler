@@ -37,4 +37,3 @@ class IvsSpider(scrapy.Spider):
                 "file_urls": [file_url],
                 "filename": zip_link,
             }
-
