@@ -160,7 +160,7 @@ def save_year_month(year, month, dfs, output_dir):
     dedup = combined.drop_duplicates()
 
     # Hive style directories: year=YYYY/month=MM
-    year_month_dir = output_dir / f"year={year}" / f"month={month}"
+    year_month_dir = output_dir / f"year={year}" / f"month={month:02d}"
     year_month_dir.mkdir(parents=True, exist_ok=True)
     part_file = year_month_dir / "part.0.parquet"
 
