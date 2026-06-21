@@ -45,10 +45,12 @@ crawl-disk: logs-dir
 	uv run scrapy crawl disk -L INFO 2>&1 | tee output/logs/crawl-disk.log
 
 crawl-ivs: logs-dir
+	mkdir -p output/ivs-downloads
 	uv run scrapy crawl ivs -L INFO 2>&1 | tee output/logs/crawl-ivs.log
 
 process-ivs: logs-dir
-	uv run python -m fis.cli ivs process 2>&1 | tee output/logs/process-ivs.log
+	mkdir -p output/ivs-partitioned
+	uv run python -m fis.cli ivs process --downloads-dir output/ivs-downloads --output-dir output/ivs-partitioned 2>&1 | tee output/logs/process-ivs.log
 
 
 # --- Graph Building ---
