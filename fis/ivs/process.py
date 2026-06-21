@@ -58,8 +58,8 @@ DTYPES = {
     "v28_beladingscode": "float64",
     "v38_vervoerd_gewicht": "float64",
     "v30_4_containers_teu_s": "float64",
-    "nstr_nw": "float64",
-    "nst2007_nw": "float64",
+    "nstr_nw": "object",
+    "nst2007_nw": "object",
 }
 
 
@@ -98,7 +98,22 @@ def get_zip_year_month(zf_path: pathlib.Path):
 def read_and_normalize_zip(zip_path):
     """Read a weekmonitor ZIP file, normalize columns and strictly cast datatypes."""
     try:
-        df = pd.read_csv(zip_path, compression="zip", sep=";")
+        # Determine headers first to only map existing columns in dtype dict
+        header_df = pd.read_csv(zip_path, compression="zip", sep=";", nrows=0)
+        dtype_dict = {}
+        for col in [
+            "nstr_nw",
+            "nst2007_nw",
+            "unlo_herkomst",
+            "unlo_bestemming",
+            "sk_code",
+            "v15_1_scheepstype_rws",
+        ]:
+            matched_col = next((c for c in header_df.columns if c.lower() == col), None)
+            if matched_col:
+                dtype_dict[matched_col] = str
+
+        df = pd.read_csv(zip_path, compression="zip", sep=";", dtype=dtype_dict)
         df.columns = [c.lower() for c in df.columns]
 
         # Ensure all standard columns are present
