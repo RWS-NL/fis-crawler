@@ -11,6 +11,10 @@ from typing import Optional
 import geopandas as gpd
 import networkx as nx
 import pandas as pd
+import numpy as np
+from scipy.spatial import KDTree
+from shapely.geometry import LineString
+from pyproj import Geod
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +503,102 @@ def enrich_fis_graph(
     return graph
 
 
-def integrate_harbours(graph, datasets):
+def _is_valid(val) -> bool:
+    """Helper to check if a database value is non-null and not nan."""
+    if val is None:
+        return False
+    if isinstance(val, float) and np.isnan(val):
+        return False
+    if str(val) == "nan":
+        return False
+    return True
+
+
+def _integrate_single_harbour(
+    row: pd.Series,
+    graph: nx.Graph,
+    rj_code_map: dict[str, int],
+    tree: Optional[KDTree],
+    junction_nodes: list[int],
+    geod: Geod,
+) -> tuple[bool, bool]:
+    """Helper to integrate a single harbour row into the graph."""
+    raw_id = row.get("Id")
+    if not _is_valid(raw_id):
+        return False, False
+
+    h_id = f"harbour_{raw_id}"
+    h_name = row.get("Name", "Unnamed Harbour")
+    h_geom = row.get("geometry")
+
+    if not h_geom:
+        return False, False
+
+    # Ensure it's a Point
+    if h_geom.geom_type != "Point":
+        h_geom = h_geom.centroid
+
+    h_code = row.get("Code")
+    h_code_str = str(h_code).strip().upper() if _is_valid(h_code) else ""
+
+    # Extract locode: prefer UnLocationCode if present and valid, otherwise first 5 chars of Code
+    h_locode = row.get("UnLocationCode")
+    if not _is_valid(h_locode) or len(str(h_locode).strip()) < 5:
+        if len(h_code_str) >= 5:
+            h_locode = h_code_str[:5]
+        else:
+            h_locode = ""
+    else:
+        h_locode = str(h_locode).strip().upper()
+
+    # Add node
+    graph.add_node(
+        h_id,
+        node_id=h_id,
+        node_type="harbour",
+        name=h_name,
+        locode=h_locode,
+        isrs_id=h_code_str,
+        vin_code=str(row.get("VinCode", "")),
+        city=str(row.get("City", "")),
+        geometry=h_geom,
+    )
+    node_added = True
+    edge_added = False
+
+    # Link to target junction node
+    target_node_id = None
+    if h_code_str and h_code_str in rj_code_map:
+        candidate = rj_code_map[h_code_str]
+        if graph.has_node(candidate):
+            target_node_id = candidate
+
+    # Fallback to geometric snapping
+    if target_node_id is None and tree is not None:
+        dist, idx = tree.query((h_geom.x, h_geom.y))
+        candidate = junction_nodes[idx]
+        if graph.has_node(candidate):
+            target_node_id = candidate
+
+    if target_node_id is not None:
+        target_geom = graph.nodes[target_node_id].get("geometry")
+        if target_geom and hasattr(target_geom, "x"):
+            access_line = LineString([h_geom, target_geom])
+            graph.add_edge(
+                h_id,
+                target_node_id,
+                geometry=access_line,
+                length_m=geod.geometry_length(access_line),
+                segment_type="harbour_access",
+                data_source="vinharbour",
+                name=f"Access to {h_name}",
+            )
+            edge_added = True
+
+    return node_added, edge_added
+
+
+def integrate_harbours(graph: nx.Graph, datasets: dict) -> nx.Graph:
     """Integrates harbours from the vinharbour dataset as nodes and access edges in the graph."""
     harbours = datasets.get("vinharbour")
     if harbours is None or harbours.empty:
@@ -508,31 +607,17 @@ def integrate_harbours(graph, datasets):
         )
         return graph
 
-    import numpy as np
-    from scipy.spatial import KDTree
-    from shapely.geometry import LineString
-    from pyproj import Geod
-
-    def is_valid(val):
-        if val is None:
-            return False
-        if isinstance(val, float) and np.isnan(val):
-            return False
-        if str(val) == "nan":
-            return False
-        return True
-
     geod = Geod(ellps="WGS84")
 
     # Step 1: Map routejunction Code -> SectionJunctionId
     route_junc = datasets.get("routejunction")
     rj_code_map = {}
     if route_junc is not None:
-        for _, r in route_junc.iterrows():
-            c = r.get("Code")
-            sjid = r.get("SectionJunctionId")
-            if is_valid(c) and is_valid(sjid):
-                rj_code_map[str(c).strip().upper()] = int(sjid)
+        for _, row in route_junc.iterrows():
+            code = row.get("Code")
+            section_junction_id = row.get("SectionJunctionId")
+            if _is_valid(code) and _is_valid(section_junction_id):
+                rj_code_map[str(code).strip().upper()] = int(section_junction_id)
 
     # Step 2: Prepare KDTree of all junction nodes in the graph for fallback snapping
     junction_nodes = []
@@ -551,76 +636,13 @@ def integrate_harbours(graph, datasets):
     harbour_edges_added = 0
 
     for _, row in harbours.iterrows():
-        raw_id = row.get("Id")
-        if not is_valid(raw_id):
-            continue
-
-        h_id = f"harbour_{raw_id}"
-        h_name = row.get("Name", "Unnamed Harbour")
-        h_geom = row.get("geometry")
-
-        if not h_geom:
-            continue
-
-        # Ensure it's a Point
-        if h_geom.geom_type != "Point":
-            h_geom = h_geom.centroid
-
-        h_code = row.get("Code")
-        h_code_str = str(h_code).strip().upper() if is_valid(h_code) else ""
-
-        # Extract locode: prefer UnLocationCode if present and valid, otherwise first 5 chars of Code
-        h_locode = row.get("UnLocationCode")
-        if not is_valid(h_locode) or len(str(h_locode).strip()) < 5:
-            if len(h_code_str) >= 5:
-                h_locode = h_code_str[:5]
-            else:
-                h_locode = ""
-        else:
-            h_locode = str(h_locode).strip().upper()
-
-        # Add node
-        graph.add_node(
-            h_id,
-            node_id=h_id,
-            node_type="harbour",
-            name=h_name,
-            locode=h_locode,
-            isrs_id=h_code_str,
-            vin_code=str(row.get("VinCode", "")),
-            city=str(row.get("City", "")),
-            geometry=h_geom,
+        node_added, edge_added = _integrate_single_harbour(
+            row, graph, rj_code_map, tree, junction_nodes, geod
         )
-        harbour_nodes_added += 1
-
-        # Link to target junction node
-        target_node_id = None
-        if h_code_str and h_code_str in rj_code_map:
-            candidate = rj_code_map[h_code_str]
-            if graph.has_node(candidate):
-                target_node_id = candidate
-
-        # Fallback to geometric snapping
-        if target_node_id is None and tree is not None:
-            dist, idx = tree.query((h_geom.x, h_geom.y))
-            candidate = junction_nodes[idx]
-            if graph.has_node(candidate):
-                target_node_id = candidate
-
-        if target_node_id is not None:
-            target_geom = graph.nodes[target_node_id].get("geometry")
-            if target_geom and hasattr(target_geom, "x"):
-                access_line = LineString([h_geom, target_geom])
-                graph.add_edge(
-                    h_id,
-                    target_node_id,
-                    geometry=access_line,
-                    length_m=geod.geometry_length(access_line),
-                    segment_type="harbour_access",
-                    data_source="vinharbour",
-                    name=f"Access to {h_name}",
-                )
-                harbour_edges_added += 1
+        if node_added:
+            harbour_nodes_added += 1
+        if edge_added:
+            harbour_edges_added += 1
 
     logger.info(
         "Integrated %d harbour nodes and %d harbour access edges into the graph.",

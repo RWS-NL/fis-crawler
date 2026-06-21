@@ -158,69 +158,78 @@ def build_edge_structures_lookup() -> dict:
     Builds a unified lookup mapping FIS fairway section IDs and EURIS fairway section codes
     to their respective lock chambers and bridge openings from the detailed databases.
     """
-    lookup = defaultdict(lambda: {"chambers": [], "openings": []})
-
     fis_ch_path = pathlib.Path("output/dropins-fis-detailed/chambers.geoparquet")
-    if fis_ch_path.exists():
-        df_fis_ch = pd.read_parquet(fis_ch_path)
-        for _, r in df_fis_ch.iterrows():
-            sid = r.get("fairway_section_id")
-            name = str(r.get("name", ""))
-            if "Irenesluis" in name or "Irenesluizen" in name:
-                sid = 47304
-            if is_valid(sid):
-                lookup[str(int(float(sid)))]["chambers"].append(r.to_dict())
-
     fis_op_path = pathlib.Path("output/dropins-fis-detailed/openings.geoparquet")
-    if fis_op_path.exists():
-        df_fis_op = pd.read_parquet(fis_op_path)
-        for _, r in df_fis_op.iterrows():
-            sid = r.get("fairway_section_id")
-            name = str(r.get("name", ""))
-            if "Irenesluis" in name or "Irenesluizen" in name:
-                sid = 47304
-            if is_valid(sid):
-                lookup[str(int(float(sid)))]["openings"].append(r.to_dict())
-
     eur_edges_path = pathlib.Path("output/dropins-euris-detailed/edges.geoparquet")
     eur_ch_path = pathlib.Path("output/dropins-euris-detailed/chambers.geoparquet")
     eur_op_path = pathlib.Path("output/dropins-euris-detailed/openings.geoparquet")
 
-    if eur_edges_path.exists() and eur_ch_path.exists() and eur_op_path.exists():
-        df_eur_edges = pd.read_parquet(eur_edges_path)
-        euris_sec_locks = defaultdict(set)
-        euris_sec_bridges = defaultdict(set)
-        for _, r in df_eur_edges.iterrows():
-            sid = r.get("section_id")
-            lid = r.get("lock_id")
-            bid = r.get("bridge_id")
-            if is_valid(sid):
-                if is_valid(lid):
-                    euris_sec_locks[str(sid)].add(str(lid))
-                if is_valid(bid):
-                    euris_sec_bridges[str(sid)].add(str(bid))
+    # Fail fast if required detailed dropins data files are missing
+    for path in (fis_ch_path, fis_op_path, eur_edges_path, eur_ch_path, eur_op_path):
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Required detailed dropin file {path} is missing. Ensure schematize steps ran successfully."
+            )
 
-        df_eur_ch = pd.read_parquet(eur_ch_path)
-        euris_ch_by_lock = defaultdict(list)
-        for _, r in df_eur_ch.iterrows():
-            lid = r.get("lock_id")
+    lookup = defaultdict(lambda: {"chambers": [], "openings": []})
+
+    # Load FIS chambers
+    df_fis_ch = pd.read_parquet(fis_ch_path)
+    for _, r in df_fis_ch.iterrows():
+        sid = r.get("fairway_section_id")
+        name = str(r.get("name", ""))
+        # Map chamber name variants of Irenesluis to its canonical FIS fairway section ID 47304.
+        if "Irenesluis" in name or "Irenesluizen" in name:
+            sid = 47304
+        if is_valid(sid):
+            lookup[str(int(float(sid)))]["chambers"].append(r.to_dict())
+
+    # Load FIS openings
+    df_fis_op = pd.read_parquet(fis_op_path)
+    for _, r in df_fis_op.iterrows():
+        sid = r.get("fairway_section_id")
+        name = str(r.get("name", ""))
+        # Map opening name variants of Irenesluis to its canonical FIS fairway section ID 47304.
+        if "Irenesluis" in name or "Irenesluizen" in name:
+            sid = 47304
+        if is_valid(sid):
+            lookup[str(int(float(sid)))]["openings"].append(r.to_dict())
+
+    # Load EURIS edges, chambers, and openings
+    df_eur_edges = pd.read_parquet(eur_edges_path)
+    euris_sec_locks = defaultdict(set)
+    euris_sec_bridges = defaultdict(set)
+    for _, r in df_eur_edges.iterrows():
+        sid = r.get("section_id")
+        lid = r.get("lock_id")
+        bid = r.get("bridge_id")
+        if is_valid(sid):
             if is_valid(lid):
-                euris_ch_by_lock[str(lid)].append(r.to_dict())
-
-        df_eur_op = pd.read_parquet(eur_op_path)
-        euris_op_by_bridge = defaultdict(list)
-        for _, r in df_eur_op.iterrows():
-            bid = r.get("bridge_id")
+                euris_sec_locks[str(sid)].add(str(lid))
             if is_valid(bid):
-                euris_op_by_bridge[str(bid)].append(r.to_dict())
+                euris_sec_bridges[str(sid)].add(str(bid))
 
-        for sid, lids in euris_sec_locks.items():
-            for lid in lids:
-                lookup[sid]["chambers"].extend(euris_ch_by_lock[lid])
+    df_eur_ch = pd.read_parquet(eur_ch_path)
+    euris_ch_by_lock = defaultdict(list)
+    for _, r in df_eur_ch.iterrows():
+        lid = r.get("lock_id")
+        if is_valid(lid):
+            euris_ch_by_lock[str(lid)].append(r.to_dict())
 
-        for sid, bids in euris_sec_bridges.items():
-            for bid in bids:
-                lookup[sid]["openings"].extend(euris_op_by_bridge[bid])
+    df_eur_op = pd.read_parquet(eur_op_path)
+    euris_op_by_bridge = defaultdict(list)
+    for _, r in df_eur_op.iterrows():
+        bid = r.get("bridge_id")
+        if is_valid(bid):
+            euris_op_by_bridge[str(bid)].append(r.to_dict())
+
+    for sid, lids in euris_sec_locks.items():
+        for lid in lids:
+            lookup[sid]["chambers"].extend(euris_ch_by_lock[lid])
+
+    for sid, bids in euris_sec_bridges.items():
+        for bid in bids:
+            lookup[sid]["openings"].extend(euris_op_by_bridge[bid])
 
     return lookup
 
@@ -271,16 +280,13 @@ def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict
     if ship_dims["beam"] > min_width:
         struct_id = limiting_struct[0] if limiting_struct else None
         struct_type = limiting_struct[2] if limiting_struct else "fairway"
-        is_non_dutch = False
+        is_dutch = True
         if struct_id:
             s_id_str = str(struct_id).upper()
-            if (
-                s_id_str.startswith("DE")
-                or s_id_str.startswith("BE")
-                or "EURIS_DE" in s_id_str
-                or "EURIS_BE" in s_id_str
-            ):
-                is_non_dutch = True
+            is_dutch = (
+                s_id_str.isdigit() or s_id_str.startswith("FIS_") or "NL" in s_id_str
+            )
+        is_non_dutch = not is_dutch
 
         if is_non_dutch:
             excess = ship_dims["beam"] - min_width
@@ -324,7 +330,7 @@ def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict
 
     # Depth checks disabled as raw values are referenced to NAP and need water levels to determine actual water depth.
 
-    # 5. Sea route check
+    # Sea route check
     water_name = str(d_edge.get("water_name", "")).strip().lower()
     if "noordzee" in water_name or "sea" in water_name:
         penalties["sea"] += 100000.0
@@ -338,7 +344,7 @@ def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict
             }
         )
 
-    # 6. CEMT Class check
+    # CEMT Class check
     edge_cemt = d_edge.get("cemt_class")
     if is_valid(edge_cemt) and ship_dims.get("cemt"):
         norm_edge = normalize_cemt(str(edge_cemt))
@@ -377,23 +383,20 @@ def get_edge_weight_soft(d_edge: dict, struct_data: dict, ship_dims: dict) -> fl
         "calspeed_down",
     ]:
         if is_valid(d_edge.get(k)):
-            try:
-                if isinstance(d_edge[k], str):
-                    import re
+            if isinstance(d_edge[k], str):
+                import re
 
-                    m = re.search(r"[-+]?\d*\.\d+|\d+", d_edge[k])
-                    if m:
-                        val = float(m.group(0))
-                        if val > 0.0:
-                            speed_km_h = val
-                            break
-                else:
-                    val = float(d_edge[k])
+                m = re.search(r"[-+]?\d*\.\d+|\d+", d_edge[k])
+                if m:
+                    val = float(m.group(0))
                     if val > 0.0:
                         speed_km_h = val
                         break
-            except ValueError:
-                pass
+            else:
+                val = float(d_edge[k])
+                if val > 0.0:
+                    speed_km_h = val
+                    break
 
     speed_km_h = max(1.0, speed_km_h)
     travel_time = length_km / speed_km_h
@@ -685,11 +688,16 @@ def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
     edge_trips = defaultdict(int)
     violations_tracker = defaultdict(list)
 
-    edge_geoms = {}
+    # Pre-build edge metadata dictionary to avoid nested O(E) searches
+    edge_metadata = {}
     for u, v, d in G_merged.edges(data=True):
         eid = get_edge_key(d)
         if eid:
-            edge_geoms[eid] = d["geometry"]
+            edge_metadata[eid] = {
+                "geometry": d.get("geometry"),
+                "name": d.get("name", "Unnamed"),
+                "data_source": d.get("data_source", "unknown"),
+            }
 
     edge_penalties = defaultdict(
         lambda: {
@@ -727,7 +735,8 @@ def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
             for edge_info in res["path"]:
                 edge_id = edge_info["edge_id"]
                 p_dict = edge_info["penalties"]
-                if edge_id in edge_geoms:
+                meta = edge_metadata.get(edge_id)
+                if meta and meta["geometry"]:
                     trips_data.append(
                         {
                             "unlo_herkomst": res["unlo_herkomst"],
@@ -743,7 +752,7 @@ def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
                             "penalty_sea": p_dict["sea"],
                             "penalty_cemt": p_dict["cemt"],
                             "penalty_total": p_dict["total"],
-                            "geometry": edge_geoms[edge_id],
+                            "geometry": meta["geometry"],
                         }
                     )
 
@@ -769,15 +778,14 @@ def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
 
     # Build intensity data
     intensity_data = []
-    for u, v, d in G_merged.edges(data=True):
-        edge_id = get_edge_key(d)
-        if edge_id and (edge_id in edge_cargo or edge_id in edge_trips):
+    for edge_id, meta in edge_metadata.items():
+        if edge_id in edge_cargo or edge_id in edge_trips:
             p_info = edge_penalties[edge_id]
             intensity_data.append(
                 {
                     "id": edge_id,
-                    "data_source": d.get("data_source", "unknown"),
-                    "name": d.get("name", "Unnamed"),
+                    "data_source": meta["data_source"],
+                    "name": meta["name"],
                     "cargo_weight_kg": edge_cargo[edge_id],
                     "trip_count": edge_trips[edge_id],
                     "penalty_lock": p_info["lock"],
@@ -786,24 +794,15 @@ def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
                     "penalty_sea": p_info["sea"],
                     "penalty_cemt": p_info["cemt"],
                     "penalty_total": p_info["total"],
-                    "geometry": d["geometry"],
+                    "geometry": meta["geometry"],
                 }
             )
 
     # Build penalized data
     penalized_data = []
     for (edge_id, v_type), records in violations_tracker.items():
-        edge_geom = None
-        edge_name = "Unknown"
-        edge_source = "Unknown"
-        for u, v, d in G_merged.edges(data=True):
-            if get_edge_key(d) == edge_id:
-                edge_geom = d["geometry"]
-                edge_name = d.get("name", "Unnamed")
-                edge_source = d.get("data_source", "unknown")
-                break
-
-        if edge_geom:
+        meta = edge_metadata.get(edge_id)
+        if meta and meta["geometry"]:
             tot_trips = sum(r["trips"] for r in records)
             tot_cargo = sum(r["cargo_weight"] for r in records)
             worst_r = max(records, key=lambda x: x["trips"])
@@ -811,8 +810,8 @@ def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
             penalized_data.append(
                 {
                     "edge_id": edge_id,
-                    "name": edge_name,
-                    "data_source": edge_source,
+                    "name": meta["name"],
+                    "data_source": meta["data_source"],
                     "violation_type": v_type,
                     "ship_class": worst_r["ship_class"],
                     "ship_value": worst_r["ship_value"],
@@ -821,7 +820,7 @@ def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
                     "struct_name": worst_r["struct_name"],
                     "trips": tot_trips,
                     "cargo_weight_kg": tot_cargo,
-                    "geometry": edge_geom,
+                    "geometry": meta["geometry"],
                 }
             )
 
@@ -836,14 +835,24 @@ def export_assignment_outputs(
     unique_trips_data: list,
 ):
     """Exports geodataframes and unique trips path data to GeoJSON, Parquet and GPKG."""
-    if intensity_data:
-        intensity_gdf = gpd.GeoDataFrame(
-            intensity_data, geometry="geometry", crs="EPSG:4326"
+    if not intensity_data or not trips_data or not unique_trips_data:
+        raise ValueError(
+            "Assignment outputs are empty. No voyages were routed successfully."
         )
-        intensity_gdf.to_file(output_dir / "intensity.geojson", driver="GeoJSON")
-        intensity_gdf.to_parquet(output_dir / "intensity.geoparquet")
+
+    intensity_gdf = gpd.GeoDataFrame(
+        intensity_data, geometry="geometry", crs="EPSG:4326"
+    )
+    intensity_gdf.to_file(output_dir / "intensity.geojson", driver="GeoJSON")
+    intensity_gdf.to_parquet(output_dir / "intensity.geoparquet")
 
     gpkg_path = output_dir / "routing_detailed_analysis.gpkg"
+    intensity_gdf.to_file(gpkg_path, layer="connected_routes", driver="GPKG")
+
+    trips_gdf = gpd.GeoDataFrame(trips_data, geometry="geometry", crs="EPSG:4326")
+    trips_gdf.to_file(gpkg_path, layer="assigned_trips", driver="GPKG")
+    logger.info(f"Saved individual trip routes to {gpkg_path}.")
+
     if penalized_data:
         penalized_gdf = gpd.GeoDataFrame(
             penalized_data, geometry="geometry", crs="EPSG:4326"
@@ -851,20 +860,11 @@ def export_assignment_outputs(
         penalized_gdf.to_file(gpkg_path, layer="penalized_edges", driver="GPKG")
         logger.info(f"Saved penalized edges debug layer to {gpkg_path}.")
 
-    if intensity_data:
-        intensity_gdf.to_file(gpkg_path, layer="connected_routes", driver="GPKG")
-
-    if trips_data:
-        trips_gdf = gpd.GeoDataFrame(trips_data, geometry="geometry", crs="EPSG:4326")
-        trips_gdf.to_file(gpkg_path, layer="assigned_trips", driver="GPKG")
-        logger.info(f"Saved individual trip routes to {gpkg_path}.")
-
-    if unique_trips_data:
-        unique_df = pd.DataFrame(unique_trips_data)
-        unique_df.to_parquet(output_dir / "trips_with_paths.parquet")
-        logger.info(
-            f"Saved unique trip paths to {output_dir / 'trips_with_paths.parquet'}."
-        )
+    unique_df = pd.DataFrame(unique_trips_data)
+    unique_df.to_parquet(output_dir / "trips_with_paths.parquet")
+    logger.info(
+        f"Saved unique trip paths to {output_dir / 'trips_with_paths.parquet'}."
+    )
 
 
 def assign_traffic(
@@ -879,7 +879,7 @@ def assign_traffic(
     output_dir.mkdir(parents=True, exist_ok=True)
     reference_dir = pathlib.Path("reference")
 
-    # 1. Load inputs
+    # Load inputs
     zenodo_coords = load_unlocode_coordinates(reference_dir)
     dtv_db = load_shiptypes(reference_dir)
 
@@ -889,7 +889,7 @@ def assign_traffic(
 
     lookup = build_edge_structures_lookup()
 
-    # 2. Build spatial lookup for geocoding
+    # Build spatial lookup for geocoding
     node_list = []
     for n_id, n_data in G_merged.nodes(data=True):
         d = dict(n_data)
@@ -909,22 +909,22 @@ def assign_traffic(
 
     node_locode_map = build_locode_node_lookup(G_merged)
 
-    # 3. Load, group, and geocode voyages
+    # Load, group, and geocode voyages
     df_voyages = load_voyages(ivs_dir, year, month)
     voyage_groups = group_voyages(df_voyages)
     voyage_groups = geocode_voyage_groups(
         voyage_groups, zenodo_coords, node_locode_map, tree, node_ids, G_merged
     )
 
-    # 4. Execute routing
+    # Execute routing
     results = run_parallel_routing(voyage_groups, G_merged, lookup, dtv_db)
 
-    # 5. Aggregate results
+    # Aggregate results
     intensity_data, penalized_data, trips_data, unique_trips_data = aggregate_results(
         results, G_merged
     )
 
-    # 6. Export outputs
+    # Export outputs
     export_assignment_outputs(
         output_dir, intensity_data, penalized_data, trips_data, unique_trips_data
     )

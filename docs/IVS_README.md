@@ -21,9 +21,9 @@ To save memory and optimize query performance, the processed dataset is stored u
 ```text
 /data/ivs/partitioned/
   ├── year=2024/
-  │   ├── month=1/
+  │   ├── month=01/
   │   │   └── part.0.parquet
-  │   ├── month=2/
+  │   ├── month=02/
   │   │   └── part.0.parquet
   │   └── ...
   └── year=2025/
@@ -50,8 +50,8 @@ All column names are standardized to lowercase. The schema of the written Parque
 | `v28_beladingscode` | `float64` | Loading code indicating cargo status |
 | `v38_vervoerd_gewicht` | `float64` | Transported weight in kilograms (kg) |
 | `v30_4_containers_teu_s` | `float64` | Number of containers carried in TEU |
-| `nstr_nw` | `float64` | NSTR commodity classification code |
-| `nst2007_nw` | `float64` | NST 2007 commodity classification code |
+| `nstr_nw` | `string` | NSTR commodity classification code |
+| `nst2007_nw` | `string` | NST 2007 commodity classification code |
 
 ---
 

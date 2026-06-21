@@ -121,6 +121,24 @@ def read_and_normalize_zip(zip_path):
             if col not in df.columns:
                 df[col] = None
 
+        # Derive jaarmaand from jaar and maand if it's missing or 0
+        if "jaarmaand" in df.columns:
+            temp_jaarmaand = (
+                pd.to_numeric(df["jaarmaand"], errors="coerce")
+                .fillna(0)
+                .astype("int64")
+            )
+            temp_jaar = (
+                pd.to_numeric(df["jaar"], errors="coerce").fillna(0).astype("int64")
+            )
+            temp_maand = (
+                pd.to_numeric(df["maand"], errors="coerce").fillna(0).astype("int64")
+            )
+            derived_jaarmaand = (temp_jaar % 100) * 100 + temp_maand
+            df["jaarmaand"] = temp_jaarmaand.where(
+                temp_jaarmaand > 0, derived_jaarmaand
+            )
+
         df = df[STANDARD_COLS]
 
         # Strict type casting
@@ -164,7 +182,23 @@ def save_year_month(year, month, dfs, output_dir):
         return False
 
     combined = pd.concat(valid_dfs, ignore_index=True)
-    dedup = combined.drop_duplicates()
+
+    # Stable trip key columns for primary-key style deduplication
+    trip_keys = [
+        "v05_06_begindt_evenement",
+        "unlo_herkomst",
+        "unlo_bestemming",
+        "v15_1_scheepstype_rws",
+        "sk_code",
+        "v18_laadvermogen",
+        "v38_vervoerd_gewicht",
+    ]
+    subset = [k for k in trip_keys if k in combined.columns]
+    dedup = (
+        combined.drop_duplicates(subset=subset)
+        if subset
+        else combined.drop_duplicates()
+    )
 
     # Hive style directories: year=YYYY/month=MM
     year_month_dir = output_dir / f"year={year}" / f"month={month:02d}"
