@@ -16,13 +16,13 @@ def cli():
     type=click.Path(
         exists=True, file_okay=False, dir_okay=True, path_type=pathlib.Path
     ),
-    default="/scratch-shared/fbaart/data/ivs/downloads",
+    default="output/ivs-downloads",
     help="Path to directory containing weekmonitor ZIP files.",
 )
 @click.option(
     "--output-dir",
     type=click.Path(file_okay=False, dir_okay=True, path_type=pathlib.Path),
-    default="/scratch-shared/fbaart/data/ivs/partitioned",
+    default="output/ivs-partitioned",
     help="Path to output directory for partitioned Parquet files.",
 )
 def process(downloads_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
