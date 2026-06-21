@@ -14,7 +14,7 @@ class IvsSpider(scrapy.Spider):
         "ITEM_PIPELINES": {
             "fis.pipelines.IvsFilesPipeline": 1,
         },
-        "FILES_STORE": "/scratch-shared/fbaart/data/ivs/downloads",
+        "FILES_STORE": "output/ivs-downloads",
     }
 
     def parse(self, response):
