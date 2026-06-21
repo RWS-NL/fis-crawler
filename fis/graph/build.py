@@ -5,6 +5,7 @@ from typing import Tuple
 
 import geopandas as gpd
 import networkx as nx
+import pyproj
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,11 @@ def build_graph(
     edge_data = edge_data.rename(
         columns={"StartJunctionId": "source", "EndJunctionId": "target"}
     )
+
+    # Compute length_m geodesically from geometry
+    logger.info("Computing edge lengths...")
+    geod = pyproj.Geod(ellps="WGS84")
+    edge_data["length_m"] = edge_data["geometry"].apply(geod.geometry_length)
 
     # Build graph from edge list
     logger.info("Building graph from %d edges", len(edge_data))

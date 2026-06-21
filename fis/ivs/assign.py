@@ -405,7 +405,8 @@ def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict
 
 def get_edge_weight_soft(d_edge: dict, struct_data: dict, ship_dims: dict) -> float:
     """Calculates Dijkstra cost: travel time + lock delays + soft penalties."""
-    length_km = d_edge.get("length_m", d_edge.get("length", 1.0)) / 1000.0
+    # Enforce strict length_m consistency
+    length_km = float(d_edge["length_m"]) / 1000.0
 
     speed_km_h = 10.0
     for k in [

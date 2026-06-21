@@ -59,5 +59,9 @@ def apply_schema_mapping(graph: nx.Graph, schema: Dict[str, Any]) -> nx.Graph:
             if k in edge_map:
                 new_key = edge_map[k]
                 attrs[new_key] = attrs.pop(k)
+        # Drop redundant/vague length columns to enforce length_m consistency
+        for key_to_drop in ["Length", "length", "length_km"]:
+            if key_to_drop in attrs:
+                attrs.pop(key_to_drop)
 
     return graph
