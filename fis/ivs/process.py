@@ -197,6 +197,10 @@ def process_ivs_data(downloads_dir: pathlib.Path, output_dir: pathlib.Path):
         else:
             logger.warning(f"Could not parse year/month for file: {zf.name}")
 
+    if not files_by_year_month:
+        logger.error("Could not determine year/month for any ZIP files; aborting.")
+        return
+
     # Spin up Local Dask Cluster using default settings
     logger.info("Starting Dask LocalCluster...")
     cluster = LocalCluster()
