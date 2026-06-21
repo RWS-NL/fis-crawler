@@ -68,13 +68,13 @@ def process(downloads_dir: pathlib.Path, output_dir: pathlib.Path) -> None:
 @click.option(
     "--year",
     type=int,
-    default=2024,
+    default=None,
     help="Year of the IVS voyages to route.",
 )
 @click.option(
     "--month",
     type=int,
-    default=1,
+    default=None,
     help="Month of the IVS voyages to route.",
 )
 def assign(
@@ -82,8 +82,8 @@ def assign(
     base_graph: pathlib.Path,
     ivs_dir: pathlib.Path,
     output_dir: pathlib.Path,
-    year: int,
-    month: int,
+    year: int | None,
+    month: int | None,
 ) -> None:
     """Assign IVS voyages to the detailed waterway network with optimal routing."""
     # Resolve correct default for ivs_dir if fbaart scratch is used
@@ -98,7 +98,10 @@ def assign(
     click.echo(f"Base Graph:     {base_graph}")
     click.echo(f"IVS Directory:  {ivs_dir}")
     click.echo(f"Output Dir:     {output_dir}")
-    click.echo(f"Period:         {year}-{month:02d}")
+    if year is not None and month is not None:
+        click.echo(f"Period:         {year}-{month:02d}")
+    else:
+        click.echo("Period:         All files in directory")
 
     assign_traffic(graph_path, base_graph, ivs_dir, output_dir, year, month)
     click.echo("IVS traffic assignment finished successfully.")

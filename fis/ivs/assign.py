@@ -594,16 +594,30 @@ def geocode_unlocode(
     return None
 
 
-def load_voyages(ivs_dir: pathlib.Path, year: int, month: int) -> pd.DataFrame:
-    """Reads the raw parquet partition for the specified year and month."""
-    ivs_file = ivs_dir / f"year={year}" / f"month={month:02d}" / "part.0.parquet"
-    if not ivs_file.exists():
-        fallback_files = list(ivs_dir.glob(f"year={year}/month={month:02d}/*.parquet"))
-        if not fallback_files:
-            raise FileNotFoundError(f"IVS data not found at {ivs_file}")
-        ivs_file = fallback_files[0]
-    logger.info(f"Reading IVS dataset from {ivs_file}...")
-    return pd.read_parquet(ivs_file)
+def load_voyages(
+    ivs_dir: pathlib.Path, year: int | None = None, month: int | None = None
+) -> pd.DataFrame:
+    """Reads the raw parquet partition(s). If year/month are specified, loads that partition; otherwise loads all parquets under ivs_dir."""
+    if year is not None and month is not None:
+        ivs_file = ivs_dir / f"year={year}" / f"month={month:02d}" / "part.0.parquet"
+        if not ivs_file.exists():
+            fallback_files = list(
+                ivs_dir.glob(f"year={year}/month={month:02d}/*.parquet")
+            )
+            if not fallback_files:
+                raise FileNotFoundError(f"IVS data not found at {ivs_file}")
+            ivs_file = fallback_files[0]
+        logger.info(f"Reading IVS dataset from {ivs_file}...")
+        return pd.read_parquet(ivs_file)
+    else:
+        parquet_files = list(ivs_dir.glob("**/*.parquet"))
+        if not parquet_files:
+            raise FileNotFoundError(f"No IVS parquet datasets found in {ivs_dir}")
+        logger.info(
+            f"Reading IVS datasets from {len(parquet_files)} files under {ivs_dir}..."
+        )
+        dfs = [pd.read_parquet(f) for f in parquet_files]
+        return pd.concat(dfs, ignore_index=True)
 
 
 def group_voyages(df: pd.DataFrame) -> pd.DataFrame:
@@ -894,8 +908,8 @@ def assign_traffic(
     base_graph: pathlib.Path,
     ivs_dir: pathlib.Path,
     output_dir: pathlib.Path,
-    year: int,
-    month: int,
+    year: int | None = None,
+    month: int | None = None,
 ):
     """Assigns IVS voyages with clean, decoupled helper functions."""
     output_dir.mkdir(parents=True, exist_ok=True)
