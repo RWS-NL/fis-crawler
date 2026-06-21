@@ -22,9 +22,11 @@ def test_case_6668():
     fis_edges = gpd.read_parquet(fis_edges_path)
     fis_7070534_rows = fis_edges[
         fis_edges["Id"].apply(
-            lambda val: str(int(float(val))) == "7070534"
-            if val is not None and str(val) != "nan"
-            else False
+            lambda val: (
+                str(int(float(val))) == "7070534"
+                if val is not None and str(val) != "nan"
+                else False
+            )
         )
     ]
     assert not fis_7070534_rows.empty, "FIS edge 7070534 not found in parquet."
