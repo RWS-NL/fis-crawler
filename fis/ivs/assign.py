@@ -457,10 +457,10 @@ def route_batch_voyages_dask(
     batch_results = []
 
     for _, row in batch_df.iterrows():
-        o_node = row["o_node"]
-        d_node = row["d_node"]
+        origin_node = row["origin_node"]
+        destination_node = row["destination_node"]
 
-        if not o_node or not d_node:
+        if not origin_node or not destination_node:
             batch_results.append({"status": "geocode_fail"})
             continue
 
@@ -475,7 +475,9 @@ def route_batch_voyages_dask(
             return get_edge_weight_soft(d, struct_data, ship_dims)
 
         try:
-            path = nx.shortest_path(G_merged, o_node, d_node, weight=weight_func)
+            path = nx.shortest_path(
+                G_merged, origin_node, destination_node, weight=weight_func
+            )
 
             edges_traversed = []
             violations_log = []
@@ -510,7 +512,9 @@ def route_batch_voyages_dask(
                     "unlo_herkomst": row["unlo_herkomst"],
                     "unlo_bestemming": row["unlo_bestemming"],
                     "sk_code": row["sk_code"],
+                    "nstr_nw": row["nstr_nw"],
                     "path": edges_traversed,
+                    "path_nodes": path,
                     "violations": violations_log,
                     "trips": int(row["trips"]),
                     "cargo_weight": float(row["cargo_weight"]),
@@ -522,19 +526,8 @@ def route_batch_voyages_dask(
     return batch_results
 
 
-def assign_traffic(
-    graph_path: pathlib.Path,
-    base_graph: pathlib.Path,
-    ivs_dir: pathlib.Path,
-    output_dir: pathlib.Path,
-    year: int,
-    month: int,
-):
-    """Assigns IVS voyages using Dask LocalCluster with optimized batch routing."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    reference_dir = pathlib.Path("reference")
-
-    # 1. Load Reference Data
+def load_unlocode_coordinates(reference_dir: pathlib.Path) -> dict:
+    """Downloads and loads Zenodo coordinates reference data."""
     zenodo_path = download_zenodo_data(reference_dir)
     zenodo_gdf = gpd.read_file(zenodo_path)
     zenodo_gdf["key"] = zenodo_gdf["country_code"] + zenodo_gdf["location_code"]
@@ -542,41 +535,15 @@ def assign_traffic(
     # Correct geocoding error for Neeltje Jans (NLNTJ) in Zenodo reference
     zenodo_gdf.loc[zenodo_gdf["key"] == "NLNTJ", "geometry"] = Point(3.7115, 51.6391)
 
-    zenodo_coords = {
+    return {
         row["key"]: row["geometry"]
         for _, row in zenodo_gdf.iterrows()
         if row["geometry"]
     }
 
-    dtv_db = load_shiptypes(reference_dir)
 
-    # 2. Load merged graph
-    logger.info(f"Loading base merged graph from {base_graph}...")
-    with open(base_graph, "rb") as f:
-        G_merged = pickle.load(f)
-
-    # 3. Cache structures
-    logger.info("Caching lock/bridge structures lookup...")
-    lookup = build_edge_structures_lookup()
-
-    # 4. Spatial index for geocoding snaps
-    node_list = []
-    for n_id, n_data in G_merged.nodes(data=True):
-        d = dict(n_data)
-        d["node_id_key"] = n_id
-        node_list.append(d)
-
-    nodes_gdf = gpd.GeoDataFrame(
-        node_list,
-        index=[d["node_id_key"] for d in node_list],
-        geometry="geometry",
-        crs="EPSG:4326",
-    )
-    nodes_gdf = nodes_gdf[nodes_gdf.geometry.notnull() & ~nodes_gdf.geometry.is_empty]
-    node_ids = list(nodes_gdf.index)
-    coords = np.array([(p.x, p.y) for p in nodes_gdf.geometry])
-    tree = KDTree(coords)
-
+def build_locode_node_lookup(G_merged: nx.Graph) -> dict:
+    """Builds a lookup mapping locode strings and prefixes to graph nodes."""
     node_locode_map = defaultdict(list)
     for n_id, n_data in G_merged.nodes(data=True):
         loc = n_data.get("locode")
@@ -586,51 +553,66 @@ def assign_traffic(
             if len(loc_str) >= 5:
                 prefix = loc_str[:5]
                 node_locode_map[prefix].append((n_id, n_data.get("node_type", "")))
+    return node_locode_map
 
-    def geocode_unlocode(unlocode: str):
-        unlocode = str(unlocode).strip().upper()
-        geom = zenodo_coords.get(unlocode)
-        if unlocode in node_locode_map:
-            candidates = node_locode_map[unlocode]
-            best_node = None
-            min_score = float("inf")
-            for n_id, ntype in candidates:
-                n_geom = G_merged.nodes[n_id].get("geometry")
-                if n_geom and hasattr(n_geom, "x"):
-                    dist = 0.0
-                    if geom:
-                        dist = (n_geom.x - geom.x) ** 2 + (n_geom.y - geom.y) ** 2
-                    # Preference: node type is primary, proximity to centroid is secondary
-                    pref = 2
-                    if ntype == "harbour":
-                        pref = 0
-                    elif ntype == "terminal":
-                        pref = 1
-                    score = pref * 10.0 + dist
-                    if score < min_score:
-                        min_score = score
-                        best_node = n_id
-            if best_node:
-                return best_node
-        if geom:
-            dist, idx = tree.query((geom.x, geom.y))
-            return node_ids[idx]
-        return None
 
-    # 5. Load and geocode IVS voyages
+def geocode_unlocode(
+    unlocode: str,
+    zenodo_coords: dict,
+    node_locode_map: dict,
+    tree: KDTree,
+    node_ids: list,
+    G_merged: nx.Graph,
+) -> str:
+    """Matches a single UN/LOCODE to the nearest suitable graph node."""
+    unlocode = str(unlocode).strip().upper()
+    geom = zenodo_coords.get(unlocode)
+    if unlocode in node_locode_map:
+        candidates = node_locode_map[unlocode]
+        best_node = None
+        min_score = float("inf")
+        for n_id, ntype in candidates:
+            n_geom = G_merged.nodes[n_id].get("geometry")
+            if n_geom and hasattr(n_geom, "x"):
+                dist = 0.0
+                if geom:
+                    dist = (n_geom.x - geom.x) ** 2 + (n_geom.y - geom.y) ** 2
+                pref = 2
+                if ntype == "harbour":
+                    pref = 0
+                elif ntype == "terminal":
+                    pref = 1
+                score = pref * 10.0 + dist
+                if score < min_score:
+                    min_score = score
+                    best_node = n_id
+        if best_node:
+            return best_node
+    if geom:
+        dist, idx = tree.query((geom.x, geom.y))
+        return node_ids[idx]
+    return None
+
+
+def load_voyages(ivs_dir: pathlib.Path, year: int, month: int) -> pd.DataFrame:
+    """Reads the raw parquet partition for the specified year and month."""
     ivs_file = ivs_dir / f"year={year}" / f"month={month:02d}" / "part.0.parquet"
     if not ivs_file.exists():
         fallback_files = list(ivs_dir.glob(f"year={year}/month={month:02d}/*.parquet"))
         if not fallback_files:
             raise FileNotFoundError(f"IVS data not found at {ivs_file}")
         ivs_file = fallback_files[0]
-
     logger.info(f"Reading IVS dataset from {ivs_file}...")
-    df = pd.read_parquet(ivs_file)
-    df = df.dropna(subset=["unlo_herkomst", "unlo_bestemming", "sk_code"])
+    return pd.read_parquet(ivs_file)
 
-    voyage_groups = (
-        df.groupby(["unlo_herkomst", "unlo_bestemming", "sk_code"])
+
+def group_voyages(df: pd.DataFrame) -> pd.DataFrame:
+    """Groups and aggregates voyages by origin, destination, vessel class, and commodity."""
+    df = df.dropna(subset=["unlo_herkomst", "unlo_bestemming", "sk_code"])
+    return (
+        df.groupby(
+            ["unlo_herkomst", "unlo_bestemming", "sk_code", "nstr_nw"], dropna=False
+        )
         .agg(
             cargo_weight=("v38_vervoerd_gewicht", "sum"),
             vessel_capacity=("v18_laadvermogen", "mean"),
@@ -639,24 +621,54 @@ def assign_traffic(
         .reset_index()
     )
 
-    logger.info("Geocoding voyage origins and destinations on main thread...")
+
+def geocode_voyage_groups(
+    voyage_groups: pd.DataFrame,
+    zenodo_coords: dict,
+    node_locode_map: dict,
+    tree: KDTree,
+    node_ids: list,
+    G_merged: nx.Graph,
+) -> pd.DataFrame:
+    """Populates origin_node and destination_node columns for all voyage groups."""
     o_nodes = []
     d_nodes = []
     for _, row in voyage_groups.iterrows():
-        o_nodes.append(geocode_unlocode(row["unlo_herkomst"]))
-        d_nodes.append(geocode_unlocode(row["unlo_bestemming"]))
+        o_nodes.append(
+            geocode_unlocode(
+                row["unlo_herkomst"],
+                zenodo_coords,
+                node_locode_map,
+                tree,
+                node_ids,
+                G_merged,
+            )
+        )
+        d_nodes.append(
+            geocode_unlocode(
+                row["unlo_bestemming"],
+                zenodo_coords,
+                node_locode_map,
+                tree,
+                node_ids,
+                G_merged,
+            )
+        )
+    voyage_groups["origin_node"] = o_nodes
+    voyage_groups["destination_node"] = d_nodes
+    return voyage_groups
 
-    voyage_groups["o_node"] = o_nodes
-    voyage_groups["d_node"] = d_nodes
 
-    # Partition DataFrame into chunks of 1000 for Dask task grouping
+def run_parallel_routing(
+    voyage_groups: pd.DataFrame, G_merged: nx.Graph, lookup: dict, dtv_db: dict
+) -> list:
+    """Initializes Dask cluster, scatters large variables, and submits parallel batch routing."""
     chunk_size = 1000
     chunks = [
         voyage_groups.iloc[i : i + chunk_size].copy()
         for i in range(0, len(voyage_groups), chunk_size)
     ]
 
-    # 6. Dask cluster initialization and scatter
     logger.info("Initializing Dask LocalCluster...")
     cluster = LocalCluster(n_workers=4, threads_per_worker=1)
     client = Client(cluster)
@@ -686,10 +698,11 @@ def assign_traffic(
     client.close()
     cluster.close()
 
-    # Flatten batch results list
-    results = [res for batch in batch_results for res in batch]
+    return [res for batch in batch_results for res in batch]
 
-    # 7. Aggregate results
+
+def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
+    """Aggregates batch routing outputs into intensity counts, penalized segments, and paths."""
     edge_cargo = defaultdict(float)
     edge_trips = defaultdict(int)
     violations_tracker = defaultdict(list)
@@ -699,8 +712,6 @@ def assign_traffic(
         eid = get_edge_key(d)
         if eid:
             edge_geoms[eid] = d["geometry"]
-
-    trips_data = []
 
     edge_penalties = defaultdict(
         lambda: {
@@ -713,6 +724,8 @@ def assign_traffic(
         }
     )
 
+    trips_data = []
+    unique_trips_data = []
     success_count = 0
     no_path_count = 0
     geocode_fail_count = 0
@@ -742,6 +755,7 @@ def assign_traffic(
                             "unlo_herkomst": res["unlo_herkomst"],
                             "unlo_bestemming": res["unlo_bestemming"],
                             "sk_code": res["sk_code"],
+                            "nstr_nw": res.get("nstr_nw"),
                             "trips": res["trips"],
                             "cargo_weight_kg": res["cargo_weight"],
                             "edge_id": edge_id,
@@ -754,6 +768,18 @@ def assign_traffic(
                             "geometry": edge_geoms[edge_id],
                         }
                     )
+
+            unique_trips_data.append(
+                {
+                    "unlo_herkomst": res["unlo_herkomst"],
+                    "unlo_bestemming": res["unlo_bestemming"],
+                    "sk_code": res["sk_code"],
+                    "nstr_nw": res.get("nstr_nw"),
+                    "trips": res["trips"],
+                    "cargo_weight_kg": res["cargo_weight"],
+                    "nodes": res["path_nodes"],
+                }
+            )
         elif status == "geocode_fail":
             geocode_fail_count += 1
         else:
@@ -763,7 +789,7 @@ def assign_traffic(
         f"Dask parallel batch routing complete. Success: {success_count}, No Path: {no_path_count}, Geocode Fail: {geocode_fail_count}"
     )
 
-    # 8. Export Intensity Network
+    # Build intensity data
     intensity_data = []
     for u, v, d in G_merged.edges(data=True):
         edge_id = get_edge_key(d)
@@ -786,14 +812,7 @@ def assign_traffic(
                 }
             )
 
-    if intensity_data:
-        intensity_gdf = gpd.GeoDataFrame(
-            intensity_data, geometry="geometry", crs="EPSG:4326"
-        )
-        intensity_gdf.to_file(output_dir / "intensity.geojson", driver="GeoJSON")
-        intensity_gdf.to_parquet(output_dir / "intensity.geoparquet")
-
-    # 9. Export Penalized Edges layer
+    # Build penalized data
     penalized_data = []
     for (edge_id, v_type), records in violations_tracker.items():
         edge_geom = None
@@ -828,6 +847,24 @@ def assign_traffic(
                 }
             )
 
+    return intensity_data, penalized_data, trips_data, unique_trips_data
+
+
+def export_assignment_outputs(
+    output_dir: pathlib.Path,
+    intensity_data: list,
+    penalized_data: list,
+    trips_data: list,
+    unique_trips_data: list,
+):
+    """Exports geodataframes and unique trips path data to GeoJSON, Parquet and GPKG."""
+    if intensity_data:
+        intensity_gdf = gpd.GeoDataFrame(
+            intensity_data, geometry="geometry", crs="EPSG:4326"
+        )
+        intensity_gdf.to_file(output_dir / "intensity.geojson", driver="GeoJSON")
+        intensity_gdf.to_parquet(output_dir / "intensity.geoparquet")
+
     gpkg_path = output_dir / "routing_detailed_analysis.gpkg"
     if penalized_data:
         penalized_gdf = gpd.GeoDataFrame(
@@ -843,5 +880,75 @@ def assign_traffic(
         trips_gdf = gpd.GeoDataFrame(trips_data, geometry="geometry", crs="EPSG:4326")
         trips_gdf.to_file(gpkg_path, layer="assigned_trips", driver="GPKG")
         logger.info(f"Saved individual trip routes to {gpkg_path}.")
+
+    if unique_trips_data:
+        unique_df = pd.DataFrame(unique_trips_data)
+        unique_df.to_parquet(output_dir / "trips_with_paths.parquet")
+        logger.info(
+            f"Saved unique trip paths to {output_dir / 'trips_with_paths.parquet'}."
+        )
+
+
+def assign_traffic(
+    graph_path: pathlib.Path,
+    base_graph: pathlib.Path,
+    ivs_dir: pathlib.Path,
+    output_dir: pathlib.Path,
+    year: int,
+    month: int,
+):
+    """Assigns IVS voyages with clean, decoupled helper functions."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    reference_dir = pathlib.Path("reference")
+
+    # 1. Load inputs
+    zenodo_coords = load_unlocode_coordinates(reference_dir)
+    dtv_db = load_shiptypes(reference_dir)
+
+    logger.info(f"Loading base merged graph from {base_graph}...")
+    with open(base_graph, "rb") as f:
+        G_merged = pickle.load(f)
+
+    lookup = build_edge_structures_lookup()
+
+    # 2. Build spatial lookup for geocoding
+    node_list = []
+    for n_id, n_data in G_merged.nodes(data=True):
+        d = dict(n_data)
+        d["node_id_key"] = n_id
+        node_list.append(d)
+
+    nodes_gdf = gpd.GeoDataFrame(
+        node_list,
+        index=[d["node_id_key"] for d in node_list],
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+    nodes_gdf = nodes_gdf[nodes_gdf.geometry.notnull() & ~nodes_gdf.geometry.is_empty]
+    node_ids = list(nodes_gdf.index)
+    coords = np.array([(p.x, p.y) for p in nodes_gdf.geometry])
+    tree = KDTree(coords)
+
+    node_locode_map = build_locode_node_lookup(G_merged)
+
+    # 3. Load, group, and geocode voyages
+    df_voyages = load_voyages(ivs_dir, year, month)
+    voyage_groups = group_voyages(df_voyages)
+    voyage_groups = geocode_voyage_groups(
+        voyage_groups, zenodo_coords, node_locode_map, tree, node_ids, G_merged
+    )
+
+    # 4. Execute routing
+    results = run_parallel_routing(voyage_groups, G_merged, lookup, dtv_db)
+
+    # 5. Aggregate results
+    intensity_data, penalized_data, trips_data, unique_trips_data = aggregate_results(
+        results, G_merged
+    )
+
+    # 6. Export outputs
+    export_assignment_outputs(
+        output_dir, intensity_data, penalized_data, trips_data, unique_trips_data
+    )
 
     logger.info("Traffic assignment complete!")
