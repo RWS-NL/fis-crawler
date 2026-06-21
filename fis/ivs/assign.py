@@ -3,7 +3,6 @@ import pathlib
 import json
 import math
 import pickle
-import requests
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -31,52 +30,13 @@ def is_valid(val):
     return True
 
 
-def download_zenodo_data(reference_dir: pathlib.Path) -> pathlib.Path:
-    """Downloads Zenodo geocoded UN/LOCODE database if not present locally and applies corrections."""
-    reference_dir.mkdir(parents=True, exist_ok=True)
-    local_path = reference_dir / "unlo-geocoded-v0.1.gpkg"
-    if not local_path.exists():
-        logger.info(
-            f"Downloading Zenodo reference UN/LOCODE data from {ZENODO_URL} to {local_path}..."
-        )
-        r = requests.get(ZENODO_URL, timeout=120)
-        r.raise_for_status()
-        local_path.write_bytes(r.content)
-        logger.info("Zenodo data downloaded successfully.")
-
-    # Ensure geocoding correction for NLNTJ is applied in the local file
-    try:
-        df = gpd.read_file(local_path)
-        df["key"] = df["country_code"] + df["location_code"]
-        nlntj_rows = df[df["key"] == "NLNTJ"]
-        if not nlntj_rows.empty:
-            geom = nlntj_rows.geometry.iloc[0]
-            if geom and abs(geom.y - 53.63333) < 1e-4:
-                logger.info(
-                    "Applying geocoding correction for NLNTJ (Neeltje Jans) to local GPKG..."
-                )
-                from shapely.geometry import Point
-
-                df.loc[df["key"] == "NLNTJ", "geometry"] = Point(3.7115, 51.6391)
-                df = df.drop(columns=["key"], errors="ignore")
-                df.to_file(local_path, driver="GPKG")
-                logger.info("Geocoding corrections saved back to local GPKG.")
-    except Exception as e:
-        logger.error(f"Failed to apply geocoding fixes to local GPKG: {e}")
-
-    return local_path
-
-
 def load_shiptypes(reference_dir: pathlib.Path) -> dict:
     """Loads and indexes the DTV ship types database."""
     dtv_path = reference_dir / "DTV_shiptypes_database.json"
     if not dtv_path.exists():
-        logger.info(f"DTV shiptypes database not found at {dtv_path}. Downloading...")
-        url = "https://raw.githubusercontent.com/SiggyF/digitaltwin-waterway/refs/heads/master/dtv_backend/data/DTV_shiptypes_database.json"
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        dtv_path.parent.mkdir(parents=True, exist_ok=True)
-        dtv_path.write_text(r.text, encoding="utf-8")
+        raise FileNotFoundError(
+            f"DTV shiptypes database not found at {dtv_path}. Run 'make download-reference' first."
+        )
 
     with open(dtv_path, "r", encoding="utf-8") as f:
         ships = json.load(f)
@@ -187,7 +147,7 @@ def get_ship_dimensions(
     }
 
 
-def get_edge_key(d: dict) -> str:
+def get_edge_key(d: dict) -> str | None:
     """Extracts the lookup ID key from a merged graph edge."""
     val = d.get("fis_id") or d.get("code")
     return str(val) if is_valid(val) else None
@@ -528,7 +488,11 @@ def route_batch_voyages_dask(
 
 def load_unlocode_coordinates(reference_dir: pathlib.Path) -> dict:
     """Downloads and loads Zenodo coordinates reference data."""
-    zenodo_path = download_zenodo_data(reference_dir)
+    zenodo_path = reference_dir / "unlo-geocoded-v0.1.gpkg"
+    if not zenodo_path.exists():
+        raise FileNotFoundError(
+            f"Zenodo reference UN/LOCODE data not found at {zenodo_path}. Run 'make download-reference' first."
+        )
     zenodo_gdf = gpd.read_file(zenodo_path)
     zenodo_gdf["key"] = zenodo_gdf["country_code"] + zenodo_gdf["location_code"]
 

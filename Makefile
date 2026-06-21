@@ -1,5 +1,5 @@
 .PHONY: all crawl crawl-fis crawl-euris crawl-disk crawl-ivs process-ivs build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas \
-	schematize-dropins-fis-detailed schematize-dropins-fis-simplified schematize-dropins-euris
+	schematize-dropins-fis-detailed schematize-dropins-fis-simplified schematize-dropins-euris download-reference
 
 # Default target
 all: crawl build-graphs merge-graphs schematize validate
@@ -10,6 +10,26 @@ logs-dir:
 # --- Crawling Steps ---
 crawl: crawl-fis crawl-euris crawl-disk crawl-ivs
 
+download-reference: reference/unlo-geocoded-v0.1.gpkg reference/DTV_shiptypes_database.json
+
+reference/unlo-geocoded-v0.1.gpkg:
+	mkdir -p reference
+	@echo "Downloading Zenodo UN/LOCODE reference data..."
+	curl -L "https://zenodo.org/records/11191511/files/unlo-geocoded-v0.1.gpkg?download=1" -o reference/unlo-geocoded-v0.1.gpkg
+	@echo "Applying geocoding correction for NLNTJ to reference/unlo-geocoded-v0.1.gpkg..."
+	uv run python -c '\
+	import geopandas as gpd; \
+	from shapely.geometry import Point; \
+	df = gpd.read_file("reference/unlo-geocoded-v0.1.gpkg"); \
+	df["key"] = df["country_code"] + df["location_code"]; \
+	df.loc[df["key"] == "NLNTJ", "geometry"] = Point(3.7115, 51.6391); \
+	df = df.drop(columns=["key"], errors="ignore"); \
+	df.to_file("reference/unlo-geocoded-v0.1.gpkg", driver="GPKG")'
+
+reference/DTV_shiptypes_database.json:
+	mkdir -p reference
+	@echo "Downloading DTV shiptypes database..."
+	curl -L "https://raw.githubusercontent.com/SiggyF/digitaltwin-waterway/refs/heads/master/dtv_backend/data/DTV_shiptypes_database.json" -o reference/DTV_shiptypes_database.json
 
 reference/Bivas.5.10.1.sqlite:
 	mkdir -p reference
