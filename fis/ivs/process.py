@@ -80,7 +80,7 @@ def get_zip_year_month(zf_path: pathlib.Path):
     )
     if match2:
         y = int(match2.group(1))
-        # Default fallback month to the first digit of export date
+        # Fallback month derived from export date (YYYYMMDD -> MM)
         m = int(match2.group(3))
         return y, m
 
