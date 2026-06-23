@@ -78,6 +78,19 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     fairways = utils.normalize_attributes(fairways, "fairways", schema)
 
     disk_locks = read_geo_or_parquet(disk_dir, "schutsluis")
+
+    # Filter out ignored/historical DISK locks based on configuration mappings
+    mappings = utils.load_lock_bridge_mappings()
+    ignored_locks = mappings.get("ignored_disk_locks", {})
+    if not disk_locks.empty and ignored_locks:
+        ignored_ids = [str(k) for k in ignored_locks.keys()]
+        initial_count = len(disk_locks)
+        disk_locks = disk_locks[~disk_locks["id"].astype(str).isin(ignored_ids)]
+        logger.info(
+            "Filtered out %d historical/deactivated DISK locks from configuration",
+            initial_count - len(disk_locks),
+        )
+
     brug_vast = read_geo_or_parquet(disk_dir, "brug_vast")
     brug_beweegbaar = read_geo_or_parquet(disk_dir, "brug_beweegbaar")
 
@@ -545,6 +558,18 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     berths = data["berths"]
     sections = data["sections"]
     disk_locks = data["disk_locks"]
+
+    # Filter out ignored/historical DISK locks based on configuration mappings
+    mappings = utils.load_lock_bridge_mappings()
+    ignored_locks = mappings.get("ignored_disk_locks", {})
+    if not disk_locks.empty and ignored_locks:
+        ignored_ids = [str(k) for k in ignored_locks.keys()]
+        initial_count = len(disk_locks)
+        disk_locks = disk_locks[~disk_locks["id"].astype(str).isin(ignored_ids)]
+        logger.info(
+            "Filtered out %d historical/deactivated DISK locks in group_complexes from configuration",
+            initial_count - len(disk_locks),
+        )
     disk_bridges = data["disk_bridges"]
     operatingtimes = data["operatingtimes"]
     bridges = data["bridges"]

@@ -59,6 +59,22 @@ def load_schema(
         return tomllib.load(f)
 
 
+def load_lock_bridge_mappings(
+    config_path: pathlib.Path = pathlib.Path("config/lock_bridge_mappings.toml"),
+) -> Dict[str, Any]:
+    """Load lock/bridge manual mappings from TOML file."""
+    if not config_path.exists():
+        # Fallback for when running from subdirectories
+        config_path = (
+            pathlib.Path(__file__).parent.parent
+            / "config"
+            / "lock_bridge_mappings.toml"
+        )
+
+    with open(config_path, "rb") as f:
+        return tomllib.load(f)
+
+
 def camel_to_snake(name: str) -> str:
     """Convert CamelCase to snake_case."""
     import re

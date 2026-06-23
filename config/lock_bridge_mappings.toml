@@ -55,3 +55,20 @@ lorentzsluizen = { split_north = [53.07508413, 5.33457122], merge_south = [53.06
 [exceptional_navigational_structures]
 # Weirs that should be loaded from exceptionalnavigationalstructure dataset
 "46058" = { name = "Stuw Grave", type = "STW", navigable = false, geometry = [51.7687924650035, 5.73579871342707] }
+
+
+[ignored_disk_locks]
+# Locks in the DISK dataset that are decommissioned/historical and should be ignored
+"2121" = "Zederiksluisje (decommissioned monument)"
+"5100" = "Sluis bij Den Hommel (historical, Utrecht)"
+"2691" = "Sluis V (bypassed/deactivated Wilhelminakanaal)"
+"2075" = "Dalemsche Inundatiesluis (afgedamd)"
+"5101" = "Sluis Vleutense Wetering (historical)"
+"3749" = "Roggebotsluis (demolished 2023)"
+"4276" = "Sluis Zeebrug westelijke sluis (decommissioned)"
+"7943" = "Sluis Borgharen (historical/deactivated Grensmaas)"
+"7937" = "Sluis Limmel oost (demolished/decommissioned)"
+"7936" = "Sluis Limmel west (demolished/decommissioned)"
+"9563" = "Zuidersluizen Halfweg (Oostsluis, historical drainage)"
+"7151" = "Sluizencomplex Wemeldinge (decommissioned)"
+"7763" = "Sluis Hulsen (Noordervaart, decommissioned)"
