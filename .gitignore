@@ -9,6 +9,9 @@ reference/
 /output/
 /files-store/
 
+# Temporary hackathon data staging (one-off, see issue tracker)
+/hackaton/
+
 
 # data files
 notebooks/data/*.json
