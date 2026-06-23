@@ -8,8 +8,8 @@ from fis import utils
 def test_historical_locks_ignored_in_grouping():
     """
     Verify that historical/deactivated locks present in the DISK dataset
-    (like Wemeldinge or Limmel) are not matched and are ignored during grouping
-    if they do not correspond to any active FIS lock complex.
+    (like Wemeldinge or Limmel) are ignored by configuration during grouping
+    even if they would otherwise match spatially.
     """
     # 1. Mock FIS Locks (representing an active lock Volkerak, and a mocked Wemeldinge FIS lock)
     locks = pd.DataFrame(

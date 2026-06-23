@@ -65,16 +65,11 @@ def load_lock_bridge_mappings(
     """Load lock/bridge manual mappings from TOML file."""
     if not config_path.exists():
         # Fallback for when running from subdirectories
-        root_path = (
+        config_path = (
             pathlib.Path(__file__).parent.parent
             / "config"
             / "lock_bridge_mappings.toml"
         )
-        if root_path.exists():
-            config_path = root_path
-
-    if not config_path.exists():
-        return {}
 
     with open(config_path, "rb") as f:
         return tomllib.load(f)

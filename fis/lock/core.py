@@ -564,7 +564,12 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     ignored_locks = mappings.get("ignored_disk_locks", {})
     if not disk_locks.empty and ignored_locks:
         ignored_ids = [str(k) for k in ignored_locks.keys()]
+        initial_count = len(disk_locks)
         disk_locks = disk_locks[~disk_locks["id"].astype(str).isin(ignored_ids)]
+        logger.info(
+            "Filtered out %d historical/deactivated DISK locks in group_complexes from configuration",
+            initial_count - len(disk_locks),
+        )
     disk_bridges = data["disk_bridges"]
     operatingtimes = data["operatingtimes"]
     bridges = data["bridges"]
