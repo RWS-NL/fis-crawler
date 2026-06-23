@@ -74,3 +74,29 @@ The processed 2024 dataset was verified against official macro-level statistics 
 * **Processed IVS Dataset (Deduplicated):** **363.8 million tonnes** of total cargo weight across **388,708** unique trips.
 * **CBS StatLine (2024):** **332.4 million tonnes** of cargo weight, yielding **42.3 billion tonne-kilometres**.
 * **Analysis:** The minor ~9.5% difference is expected and matches the inclusion of all international transit and entry/exit voyages in the raw Rijkswaterstaat logs before specific territorial or commercial filter rules are applied by CBS.
+
+---
+
+## 6. Traffic Assignment (Routing)
+The `fis ivs assign` command routes the partitioned IVS voyages onto the detailed waterway network, producing traffic-intensity and routed-path datasets. It takes **two graphs** as input — a detailed dropins graph (routing geometry) and a base merged graph.
+
+Example invocation (route the 2025 voyages):
+
+```bash
+uv run python -m fis.cli ivs assign \
+  --ivs-dir output/ivs-partitioned/year=2025 \
+  --output-dir output/ivs-assignment/year=2025
+```
+
+Omitting `--graph-path` and `--base-graph` (as above) uses the two default graphs.
+
+### Options and defaults
+
+| Option | Default | Meaning |
+| :--- | :--- | :--- |
+| `--graph-path` | `output/dropins-fis-detailed/graph.pickle` | Detailed dropins graph (routing geometry) |
+| `--base-graph` | `output/merged-graph/graph.pickle` | Base merged graph |
+| `--ivs-dir` | `output/ivs-partitioned` (falls back to `/scratch-shared/fbaart/data/ivs/partitioned` if absent) | Partitioned IVS parquet input |
+| `--output-dir` | `output/ivs-assignment` | Output directory for traffic assignment datasets |
+| `--year` | _(unset)_ → all years | Optional year filter for voyages to route |
+| `--month` | _(unset)_ → all months | Optional month filter for voyages to route |

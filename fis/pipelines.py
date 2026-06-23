@@ -174,17 +174,10 @@ class EurisFilesPipeline(FilesPipeline):
                 crs="EPSG:4326",
             )
             ris_gdf = gpd.GeoDataFrame(combined_df, geometry=geometry)
-
-            out_dir = data_dir / version
-            out_dir.mkdir(exist_ok=True)
-            out_path = out_dir / f"ris_index_{version}.gpkg"
+            out_path = data_dir / "ris-index.gpkg"
 
             spider.logger.info(f"Saving RIS GeoDataFrame to {out_path}")
-            # Use engine='pyogrio' if available for faster writing
-            try:
-                ris_gdf.to_file(out_path, engine="pyogrio")
-            except Exception:
-                ris_gdf.to_file(out_path)
+            ris_gdf.to_file(out_path)
 
             spider.logger.info(f"Saved RIS GeoDataFrame to {out_path}")
         else:
