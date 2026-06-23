@@ -258,12 +258,12 @@ def export_euris_graph(
     # Copy ris-index.gpkg
 
     ris_index_candidates = list(
-        pathlib.Path("output/euris-export").glob("**/ris_index.gpkg")
-    ) + list(pathlib.Path("output/euris-export").glob("**/ris-index.gpkg"))
+        pathlib.Path("output/euris-export").glob("**/ris-index.gpkg")
+    )
     if ris_index_candidates:
         shutil.copy2(ris_index_candidates[0], output_dir / "ris-index.gpkg")
         logger.info("Copied ris-index.gpkg to %s", output_dir)
     else:
-        logger.warning("Could not find ris_index.gpkg or ris-index.gpkg to copy.")
+        logger.warning("Could not find ris-index.gpkg to copy.")
 
     logger.info("Exported EURIS graph to %s", output_dir)

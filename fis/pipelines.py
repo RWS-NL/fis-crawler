@@ -174,7 +174,7 @@ class EurisFilesPipeline(FilesPipeline):
                 crs="EPSG:4326",
             )
             ris_gdf = gpd.GeoDataFrame(combined_df, geometry=geometry)
-            out_path = data_dir / "ris_index.gpkg"
+            out_path = data_dir / "ris-index.gpkg"
 
             spider.logger.info(f"Saving RIS GeoDataFrame to {out_path}")
             ris_gdf.to_file(out_path)
