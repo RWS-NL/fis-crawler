@@ -10,9 +10,8 @@ import networkx as nx
 import pandas as pd
 import pyproj
 import shapely
-from tqdm.auto import tqdm
 import json
-import shutil
+from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -254,16 +253,5 @@ def export_euris_graph(
     }
     with open(output_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
-
-    # Copy ris-index.gpkg
-
-    ris_index_candidates = list(
-        pathlib.Path("output/euris-export").glob("**/ris-index.gpkg")
-    )
-    if ris_index_candidates:
-        shutil.copy2(ris_index_candidates[0], output_dir / "ris-index.gpkg")
-        logger.info("Copied ris-index.gpkg to %s", output_dir)
-    else:
-        logger.warning("Could not find ris-index.gpkg to copy.")
 
     logger.info("Exported EURIS graph to %s", output_dir)
