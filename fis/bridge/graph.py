@@ -108,15 +108,11 @@ def _build_opening_features(
         )
 
     if split_point:
-        approach_geom = (
-            LineString([split_point, op_start_geom])
-            if not split_point.equals(op_start_geom)
-            else None
-        )
+        approach_geom = LineString([split_point, op_start_geom])
         features.append(
             {
                 "type": "Feature",
-                "geometry": mapping(approach_geom) if approach_geom else None,
+                "geometry": mapping(approach_geom),
                 "properties": {
                     "id": f"bridge_approach_{bridge_id}_{op_id}",
                     "feature_type": "fairway_segment",
@@ -128,9 +124,7 @@ def _build_opening_features(
                     "section_id": best_sec_id,
                     "source_node": split_node_id,
                     "target_node": op_start_node,
-                    "length_m": geod.geometry_length(approach_geom)
-                    if approach_geom
-                    else 0.0,
+                    "length_m": geod.geometry_length(approach_geom),
                 },
             }
         )
@@ -169,15 +163,11 @@ def _build_opening_features(
     )
 
     if merge_point:
-        exit_geom = (
-            LineString([op_end_geom, merge_point])
-            if not op_end_geom.equals(merge_point)
-            else None
-        )
+        exit_geom = LineString([op_end_geom, merge_point])
         features.append(
             {
                 "type": "Feature",
-                "geometry": mapping(exit_geom) if exit_geom else None,
+                "geometry": mapping(exit_geom),
                 "properties": {
                     "id": f"bridge_exit_{bridge_id}_{op_id}",
                     "feature_type": "fairway_segment",
@@ -189,7 +179,7 @@ def _build_opening_features(
                     "section_id": best_sec_id,
                     "source_node": op_end_node,
                     "target_node": merge_node_id,
-                    "length_m": geod.geometry_length(exit_geom) if exit_geom else 0.0,
+                    "length_m": geod.geometry_length(exit_geom),
                 },
             }
         )
