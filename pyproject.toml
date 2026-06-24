@@ -37,6 +37,8 @@ dev = [
     "pytest>=9.0.3",
     "jupyterlab>=4.4.3",
     "radon>=6.0.1",
+    "websockets>=16.0",
+    "python-dotenv>=1.2.2",
 ]
 
 [build-system]
