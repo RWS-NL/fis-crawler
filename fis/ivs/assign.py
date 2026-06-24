@@ -234,23 +234,8 @@ def build_edge_structures_lookup() -> dict:
     return lookup
 
 
-def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict):
-    """
-    Evaluates physical constraints of the edge and outputs heuristic penalties and violations.
-    """
-    penalties = {
-        "lock": 0.0,
-        "bridge": 0.0,
-        "fairway": 0.0,
-        "sea": 0.0,
-        "cemt": 0.0,
-        "total": 0.0,
-    }
-    violations = []
-
-    chambers = struct_data.get("chambers", [])
-    openings = struct_data.get("openings", [])
-
+def _find_min_width(chambers, openings, d_edge):
+    """Return (min_width, limiting_struct) across chambers, bridge openings, and the edge."""
     min_width = 999.0
     limiting_struct = None
 
@@ -276,6 +261,40 @@ def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict
                 d_edge.get("name", "Fairway"),
                 "fairway",
             )
+
+    return min_width, limiting_struct
+
+
+def _find_min_length(chambers):
+    """Return (min_length, limiting_chamber) across lock chambers."""
+    min_len = 999.0
+    limiting_ch = None
+    for ch in chambers:
+        ch_length = ch.get("dim_usable_length", ch.get("length"))
+        if is_valid(ch_length) and float(ch_length) < min_len:
+            min_len = float(ch_length)
+            limiting_ch = (ch.get("id"), ch.get("name", "Lock Chamber"))
+    return min_len, limiting_ch
+
+
+def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict):
+    """
+    Evaluates physical constraints of the edge and outputs heuristic penalties and violations.
+    """
+    penalties = {
+        "lock": 0.0,
+        "bridge": 0.0,
+        "fairway": 0.0,
+        "sea": 0.0,
+        "cemt": 0.0,
+        "total": 0.0,
+    }
+    violations = []
+
+    chambers = struct_data.get("chambers", [])
+    openings = struct_data.get("openings", [])
+
+    min_width, limiting_struct = _find_min_width(chambers, openings, d_edge)
 
     if ship_dims["beam"] > min_width:
         struct_id = limiting_struct[0] if limiting_struct else None
@@ -306,13 +325,7 @@ def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict
             }
         )
 
-    min_len = 999.0
-    limiting_ch = None
-    for ch in chambers:
-        ch_length = ch.get("dim_usable_length", ch.get("length"))
-        if is_valid(ch_length) and float(ch_length) < min_len:
-            min_len = float(ch_length)
-            limiting_ch = (ch.get("id"), ch.get("name", "Lock Chamber"))
+    min_len, limiting_ch = _find_min_length(chambers)
 
     if limiting_ch and ship_dims["length"] > min_len:
         penalties["lock"] += 1000.0

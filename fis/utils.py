@@ -17,6 +17,66 @@ from fis import settings
 logger = logging.getLogger(__name__)
 
 
+def _build_disallowed_mask(disallowed_sections, sections_gdf):
+    """Return a buffered union of disallowed section geometries, or None."""
+    if not disallowed_sections or sections_gdf is None:
+        return None
+    from shapely.ops import unary_union
+
+    disallowed_geoms = sections_gdf[
+        sections_gdf["id"].isin(disallowed_sections)
+    ].geometry.tolist()
+    if not disallowed_geoms:
+        return None
+    return unary_union(disallowed_geoms).buffer(
+        settings.BERTH_INTERNAL_SECTION_BUFFER_DEG
+    )
+
+
+def _parse_line_geom(geom):
+    """Parse a WKT string or LineString to a LineString, or return None."""
+    from shapely.geometry import LineString
+
+    if isinstance(geom, str):
+        return wkt.loads(geom)
+    if isinstance(geom, LineString):
+        return geom
+    return None
+
+
+def _collect_berth_attrs(berth, geom_before, geom_after, dist_m):
+    """Build the berth result dict with scalar attributes, relation, and distance."""
+    relation = "unknown"
+    if geom_before and geom_after and berth.geometry:
+        if geom_before.distance(berth.geometry) < geom_after.distance(berth.geometry):
+            relation = "before"
+        else:
+            relation = "after"
+
+    berth_attrs = {}
+    for k, v in berth.to_dict().items():
+        if k == "geometry":
+            continue
+        try:
+            if isinstance(v, (list, dict, pd.Series, pd.Index, np.ndarray)):
+                berth_attrs[k] = v
+            elif pd.notna(v):
+                berth_attrs[k] = v
+        except (ValueError, TypeError):
+            berth_attrs[k] = v
+
+    berth_attrs.update(
+        {
+            "geometry": berth.geometry.wkt
+            if hasattr(berth, "geometry") and berth.geometry
+            else None,
+            "relation": relation,
+            "dist_m": round(dist_m, 1) if dist_m is not None else None,
+        }
+    )
+    return berth_attrs
+
+
 def timer(func: Callable) -> Callable:
     """Decorator to log the execution time of a function."""
 
@@ -393,7 +453,7 @@ def find_nearby_berths(
     lock_geom = lock_row.geometry if hasattr(lock_row, "geometry") else None
     if not lock_geom:
         return nearby
-    lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
+    lock_point = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
 
     # 1. Spatial pre-filter using spatial index (if available)
     # Buffer in degrees (approximate) for the spatial query
@@ -402,7 +462,7 @@ def find_nearby_berths(
         # Use 80000 instead of 111000 to be more generous at higher latitudes (like NL)
         buffer_deg = max_dist_m / 80000.0
         possible_matches_index = candidates.sindex.query(
-            lg.buffer(buffer_deg), predicate="intersects"
+            lock_point.buffer(buffer_deg), predicate="intersects"
         )
         candidates = candidates.iloc[possible_matches_index]
 
@@ -410,36 +470,9 @@ def find_nearby_berths(
         return nearby
 
     geod = Geod(ellps="WGS84")
-
-    # Handle disallowed sections (inside lock)
-    disallowed_mask = None
-    if disallowed_sections and sections_gdf is not None:
-        from shapely.ops import unary_union
-
-        invalid_mask = sections_gdf["id"].isin(disallowed_sections)
-        disallowed_geoms = sections_gdf[invalid_mask].geometry.tolist()
-        if disallowed_geoms:
-            disallowed_mask = unary_union(disallowed_geoms).buffer(
-                settings.BERTH_INTERNAL_SECTION_BUFFER_DEG
-            )
-
-    # Pre-parse fairway geometries
-    from shapely.geometry import LineString
-
-    g_before = (
-        wkt.loads(fairway_geom_before)
-        if isinstance(fairway_geom_before, str)
-        else fairway_geom_before
-        if isinstance(fairway_geom_before, LineString)
-        else None
-    )
-    g_after = (
-        wkt.loads(fairway_geom_after)
-        if isinstance(fairway_geom_after, str)
-        else fairway_geom_after
-        if isinstance(fairway_geom_after, LineString)
-        else None
-    )
+    disallowed_mask = _build_disallowed_mask(disallowed_sections, sections_gdf)
+    geom_before = _parse_line_geom(fairway_geom_before)
+    geom_after = _parse_line_geom(fairway_geom_after)
 
     for _, berth in candidates.iterrows():
         is_nearby = False
@@ -448,60 +481,26 @@ def find_nearby_berths(
         if not berth.geometry:
             continue
 
-        if disallowed_mask:
-            if disallowed_mask.intersects(berth.geometry):
-                continue
+        if disallowed_mask and disallowed_mask.intersects(berth.geometry):
+            continue
 
-        lg = lock_geom if isinstance(lock_geom, Point) else lock_geom.centroid
-        bg = (
+        berth_point = (
             berth.geometry
             if isinstance(berth.geometry, Point)
             else berth.geometry.centroid
         )
 
-        if lg and bg:
-            _, _, dist_m = geod.inv(lg.x, lg.y, bg.x, bg.y)
+        if lock_point and berth_point:
+            _, _, dist_m = geod.inv(
+                lock_point.x, lock_point.y, berth_point.x, berth_point.y
+            )
             if dist_m <= max_dist_m:
                 is_nearby = True
 
         if not is_nearby:
             continue
 
-        # Determine relation (before/after)
-        relation = "unknown"
-        if g_before and g_after and berth.geometry:
-            if g_before.distance(berth.geometry) < g_after.distance(berth.geometry):
-                relation = "before"
-            else:
-                relation = "after"
-
-        # Propagate ALL scalar attributes
-        b_obj = {}
-        for k, v in berth.to_dict().items():
-            if k == "geometry":
-                continue
-
-            # Use a robust way to check for NA on potentially complex types
-            try:
-                if isinstance(v, (list, dict, pd.Series, pd.Index, np.ndarray)):
-                    # Keep complex types as-is (might be problematic for downstream but avoids error)
-                    b_obj[k] = v
-                elif pd.notna(v):
-                    b_obj[k] = v
-            except (ValueError, TypeError):
-                # If truth value is still ambiguous, just include it to be safe
-                b_obj[k] = v
-
-        b_obj.update(
-            {
-                "geometry": berth.geometry.wkt
-                if hasattr(berth, "geometry") and berth.geometry
-                else None,
-                "relation": relation,
-                "dist_m": round(dist_m, 1) if dist_m is not None else None,
-            }
-        )
-        nearby.append(b_obj)
+        nearby.append(_collect_berth_attrs(berth, geom_before, geom_after, dist_m))
 
     return nearby
 

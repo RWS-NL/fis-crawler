@@ -120,9 +120,16 @@ if _raw_version_for_paths == "unknown":
 VERSION = _raw_version_for_paths.split("+", 1)[0]
 # --- Graph Integration & Splicing Parameters ---
 
-# Coordinate Reference System for Projected/Metric Operations
-# Used for all metric calculations (distance, area, splicing).
-# TODO: Replace with dynamic estimation (e.g., estimate_utm_crs) for non-NL support.
+# Coordinate Reference System for projected/metric operations (distance, area, splicing).
+#
+# EPSG:28992  RD New (Rijksdriehoek) — conformal Stereographic, accurate for distances
+#             and angles across the Netherlands. Default and recommended for NL data.
+#
+# EPSG:3035   ETRS89-LAEA — equal-area, used by Eurostat/EEA for EU-wide datasets.
+#             Suitable for area comparisons across the EU, but NOT for precise distance
+#             measurements: the projection centre is at 52°N 10°E and the Netherlands
+#             sits ~500 km west of it, giving a typical distance error of ~0.5% (~5 m/km).
+#             Angles and shapes are also distorted.
 PROJECTED_CRS = "EPSG:28992"
 
 # --- Splicing Buffers (Meters) ---

@@ -10,6 +10,58 @@ from fis.utils import normalize_attributes
 logger = logging.getLogger(__name__)
 
 
+def _associate_nodes_with_sections(sections_gdf, nodes_gdf):
+    """Add StartJunctionId/EndJunctionId columns to sections_gdf based on node linkage."""
+    id_col = "id" if "id" in nodes_gdf.columns else "locode"
+    nodes_gdf = nodes_gdf.copy()
+    nodes_gdf["countrycode"] = nodes_gdf[id_col].apply(lambda x: x[:2] if x else "XX")
+    obj_col = "objectcode" if "objectcode" in nodes_gdf.columns else "object_code"
+    nodes_gdf["node_id"] = nodes_gdf.apply(
+        lambda row: f"{row['countrycode']}_{row[obj_col]}", axis=1
+    )
+
+    node_section = sections_gdf[["id"]].merge(
+        nodes_gdf[["section_id", "node_id"]], left_on="id", right_on="section_id"
+    )[["section_id", "node_id"]]
+
+    if node_section.empty:
+        return sections_gdf
+
+    left_df = node_section.groupby("section_id").first()
+    right_df = node_section.groupby("section_id").last()
+    edge_nodes = pd.merge(
+        left_df, right_df, left_index=True, right_index=True, suffixes=["_from", "_to"]
+    )
+    sections_gdf = sections_gdf.merge(
+        edge_nodes.reset_index(), left_on="id", right_on="section_id", how="left"
+    )
+    sections_gdf["StartJunctionId"] = sections_gdf["node_id_from"]
+    sections_gdf["EndJunctionId"] = sections_gdf["node_id_to"]
+    return sections_gdf
+
+
+def _process_euris_chambers(relevant_chambers, lock_chamber_areas_gdf):
+    """Convert chamber dicts to the expected format, matching area geometry where available."""
+    chambers = []
+    for chamber_dict in relevant_chambers:
+        c_geom = chamber_dict["geometry"]
+        if isinstance(c_geom, str):
+            c_geom = wkt.loads(c_geom)
+        chamber_dict["topological_anchor"] = c_geom.wkt
+        area_match_id = chamber_dict.get("id")
+        if not lock_chamber_areas_gdf.empty:
+            areas = lock_chamber_areas_gdf[
+                lock_chamber_areas_gdf["locode"] == area_match_id
+            ]
+            chamber_dict["geometry"] = (
+                areas.iloc[0].geometry.wkt if not areas.empty else c_geom.wkt
+            )
+        else:
+            chamber_dict["geometry"] = c_geom.wkt
+        chambers.append(chamber_dict)
+    return chambers
+
+
 def load_dropins_with_explicit_linking(
     export_dir: pathlib.Path, bbox=None
 ) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict], pd.DataFrame, pd.DataFrame]:
@@ -39,6 +91,7 @@ def load_dropins_with_explicit_linking(
                     gdfs.append(gdf)
             except Exception as e:
                 logger.error(f"Error reading {f.name}: {e}")
+                raise
         if not gdfs:
             return gpd.GeoDataFrame(columns=["geometry"], crs="EPSG:4326")
 
@@ -84,44 +137,7 @@ def load_dropins_with_explicit_linking(
     # Associate nodes with sections
     if not sections_gdf.empty and not nodes_gdf.empty:
         logger.info("Associating nodes with sections...")
-        # node_id construction logic from fis.graph.euris
-        # In this context, we already normalized nodes_gdf, so locode might be 'id'
-        # but normalize_attributes might have converted 'locode' to 'id'
-        # Let's use the raw column if available or normalized one
-        id_col = "id" if "id" in nodes_gdf.columns else "locode"
-        nodes_gdf["countrycode"] = nodes_gdf[id_col].apply(
-            lambda x: x[:2] if x else "XX"
-        )
-
-        # objectcode might have been normalized to snake_case if not in schema.toml nodes section
-        obj_col = "objectcode" if "objectcode" in nodes_gdf.columns else "object_code"
-        nodes_gdf["node_id"] = nodes_gdf.apply(
-            lambda row: f"{row['countrycode']}_{row[obj_col]}", axis=1
-        )
-
-        node_section = sections_gdf[["id"]].merge(
-            nodes_gdf[["section_id", "node_id"]], left_on="id", right_on="section_id"
-        )[["section_id", "node_id"]]
-
-        if not node_section.empty:
-            left_df = node_section.groupby("section_id").first()
-            right_df = node_section.groupby("section_id").last()
-
-            edge_nodes = pd.merge(
-                left_df,
-                right_df,
-                left_index=True,
-                right_index=True,
-                suffixes=["_from", "_to"],
-            )
-            sections_gdf = sections_gdf.merge(
-                edge_nodes.reset_index(),
-                left_on="id",
-                right_on="section_id",
-                how="left",
-            )
-            sections_gdf["StartJunctionId"] = sections_gdf["node_id_from"]
-            sections_gdf["EndJunctionId"] = sections_gdf["node_id_to"]
+        sections_gdf = _associate_nodes_with_sections(sections_gdf, nodes_gdf)
 
     # 1. Group Locks
     logger.info("Grouping Locks (Explicit)...")
@@ -163,33 +179,9 @@ def load_dropins_with_explicit_linking(
         complex_dict["geometry"] = complex_row.geometry.wkt
 
         # Chambers
-        chambers = []
-        relevant_chambers = chambers_by_parent.get(cid, [])
-        for chamber_dict in relevant_chambers:
-            # Ensure geometry is a shapely object if it came from to_dict
-            c_geom = chamber_dict["geometry"]
-            if isinstance(c_geom, str):
-                c_geom = wkt.loads(c_geom)
-
-            # Preserve the Point geometry for splicing (Topological Anchor)
-            chamber_dict["topological_anchor"] = c_geom.wkt
-
-            # Match Area for visualization
-            # Use raw 'locode' for area matching if available, otherwise 'id'
-            area_match_id = chamber_dict.get("id")
-            if not lock_chamber_areas_gdf.empty:
-                # lock_chamber_areas_gdf wasn't normalized, so it has 'locode'
-                areas = lock_chamber_areas_gdf[
-                    lock_chamber_areas_gdf["locode"] == area_match_id
-                ]
-                if not areas.empty:
-                    chamber_dict["geometry"] = areas.iloc[0].geometry.wkt
-                else:
-                    chamber_dict["geometry"] = c_geom.wkt
-            else:
-                chamber_dict["geometry"] = c_geom.wkt
-
-            chambers.append(chamber_dict)
+        chambers = _process_euris_chambers(
+            chambers_by_parent.get(cid, []), lock_chamber_areas_gdf
+        )
 
         complex_dict["locks"] = [{"chambers": chambers}]
         lock_complexes.append(complex_dict)

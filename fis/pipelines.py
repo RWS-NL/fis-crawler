@@ -107,14 +107,7 @@ class EurisFilesPipeline(FilesPipeline):
         ris_dfs = []
         for excel_file in tqdm(excel_files, desc="Processing RIS Excel files"):
             spider.logger.info(f"Reading {excel_file}")
-            # Use calamine engine for much faster excel reading if available
-            try:
-                df = pd.read_excel(excel_file, engine="calamine")
-            except Exception as e:
-                spider.logger.warning(
-                    f"Calamine engine failed for {excel_file}, falling back: {e}"
-                )
-                df = pd.read_excel(excel_file)
+            df = pd.read_excel(excel_file, engine="calamine")
 
             if df.empty:
                 continue
