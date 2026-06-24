@@ -36,6 +36,7 @@ dev = [
     "ipdb>=0.13.13",
     "pytest>=9.0.3",
     "jupyterlab>=4.4.3",
+    "radon>=6.0.1",
 ]
 
 [build-system]

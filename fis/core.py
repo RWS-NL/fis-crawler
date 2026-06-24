@@ -12,6 +12,67 @@ from fis.lock.core import find_fairway_junctions
 logger = logging.getLogger(__name__)
 
 
+def _collect_lock_complex_geoms(lock, lock_chambers):
+    """Collect lock + chamber geometries for section intersection."""
+    geoms = [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
+    if "geometry" in lock_chambers.columns:
+        for _, chamber_row in lock_chambers.iterrows():
+            if pd.isna(chamber_row["geometry"]):
+                continue
+            geoms.append(
+                wkt.loads(chamber_row["geometry"])
+                if isinstance(chamber_row["geometry"], str)
+                else chamber_row["geometry"]
+            )
+    return geoms
+
+
+def _build_chamber_attrs(chamber, chamber_routes):
+    """Build the chamber attribute dict including the virtual route geometry."""
+    route_wkt = None
+    if (
+        "split_point" in chamber_routes
+        and "merge_point" in chamber_routes
+        and "geometry" in chamber
+        and pd.notna(chamber["geometry"])
+    ):
+        chamber_geom = (
+            wkt.loads(chamber["geometry"])
+            if isinstance(chamber["geometry"], str)
+            else chamber["geometry"]
+        )
+        route = LineString(
+            [
+                chamber_routes["split_point"],
+                chamber_geom.centroid,
+                chamber_routes["merge_point"],
+            ]
+        )
+        route_wkt = route.wkt
+
+    chamber_attrs = sanitize_attrs(chamber)
+    chamber_attrs.update(
+        {
+            "id": chamber["id"],
+            "name": chamber["name"],
+            "dim_usable_length": float(chamber["dim_usable_length"])
+            if pd.notna(chamber.get("dim_usable_length"))
+            else None,
+            "dim_gate_width": float(chamber["dim_gate_width"])
+            if pd.notna(chamber.get("dim_gate_width"))
+            else None,
+            "dim_structural_length": float(chamber["dim_structural_length"])
+            if pd.notna(chamber.get("dim_structural_length"))
+            else None,
+            "dim_structural_width": float(chamber["dim_structural_width"])
+            if pd.notna(chamber.get("dim_structural_width"))
+            else None,
+            "route_geometry": route_wkt,
+        }
+    )
+    return chamber_attrs
+
+
 def load_data(export_dir: pathlib.Path):
     """Load necessary parquet files."""
 
@@ -28,7 +89,7 @@ def load_data(export_dir: pathlib.Path):
 
         df = pd.read_parquet(pq)
         if "Geometry" in df.columns and df["Geometry"].dtype == "object":
-            df["geometry"] = df["Geometry"].apply(lambda x: wkt.loads(x) if x else None)
+            df["geometry"] = df["Geometry"].apply(wkt.loads)
             return gpd.GeoDataFrame(df, geometry="geometry")
         return pd.DataFrame(df)
 
@@ -132,23 +193,7 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
 
         # Section Overlap Identification
         sections_data = []
-        # Define complex geometry: Union of lock + chambers
-        # Start with lock geometry
-        complex_geoms = (
-            [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
-        )
-
-        # Add chamber geometries
-        if "geometry" in lock_chambers.columns:
-            for _, c_row in lock_chambers.iterrows():
-                if pd.isna(c_row["geometry"]):
-                    continue
-                c_geom = (
-                    wkt.loads(c_row["geometry"])
-                    if isinstance(c_row["geometry"], str)
-                    else c_row["geometry"]
-                )
-                complex_geoms.append(c_geom)
+        complex_geoms = _collect_lock_complex_geoms(lock, lock_chambers)
 
         if complex_geoms:
             complex_union = unary_union([g for g in complex_geoms if g])
@@ -185,50 +230,9 @@ def group_complexes(locks, chambers, isrs, ris_df, fairways, berths, sections):
 
         # Add chambers
         for _, chamber in lock_chambers.iterrows():
-            # Add Chamber Route (Virtual Fairway)
-            route_wkt = None
-            if (
-                "split_point" in chamber_routes
-                and "merge_point" in chamber_routes
-                and "geometry" in chamber
-                and pd.notna(chamber["geometry"])
-            ):
-                ch_geom = (
-                    wkt.loads(chamber["geometry"])
-                    if isinstance(chamber["geometry"], str)
-                    else chamber["geometry"]
-                )
-                centroid = ch_geom.centroid
-                route = LineString(
-                    [
-                        chamber_routes["split_point"],
-                        centroid,
-                        chamber_routes["merge_point"],
-                    ]
-                )
-                route_wkt = route.wkt
-
-            chamber_attrs = sanitize_attrs(chamber)
-            chamber_attrs.update(
-                {
-                    "id": chamber["id"],
-                    "name": chamber["name"],
-                    "dim_usable_length": float(chamber["dim_usable_length"])
-                    if pd.notna(chamber.get("dim_usable_length"))
-                    else None,
-                    "dim_gate_width": float(chamber["dim_gate_width"])
-                    if pd.notna(chamber.get("dim_gate_width"))
-                    else None,
-                    "dim_structural_length": float(chamber["dim_structural_length"])
-                    if pd.notna(chamber.get("dim_structural_length"))
-                    else None,
-                    "dim_structural_width": float(chamber["dim_structural_width"])
-                    if pd.notna(chamber.get("dim_structural_width"))
-                    else None,
-                    "route_geometry": route_wkt,
-                }
+            complex_obj["locks"][0]["chambers"].append(
+                _build_chamber_attrs(chamber, chamber_routes)
             )
-            complex_obj["locks"][0]["chambers"].append(chamber_attrs)
 
         complexes.append(complex_obj)
 

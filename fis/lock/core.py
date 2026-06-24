@@ -15,6 +15,20 @@ from fis.ris_index import load_ris_index
 logger = logging.getLogger(__name__)
 
 
+def _collect_complex_geoms(lock, lock_chambers):
+    """Collect lock + chamber geometries for spatial matching."""
+    geoms = [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
+    if not lock_chambers.empty and "geometry" in lock_chambers.columns:
+        for _, c_row in lock_chambers.iterrows():
+            if pd.notna(c_row["geometry"]):
+                geoms.append(
+                    wkt.loads(c_row["geometry"])
+                    if isinstance(c_row["geometry"], str)
+                    else c_row["geometry"]
+                )
+    return geoms
+
+
 def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     """Load necessary parquet files and normalize attributes."""
 
@@ -491,18 +505,7 @@ def _find_connected_sections_optimized(
                             connected_fairways.add(stringify_id(fid_val))
 
     # 3. Spatial matching using pre-built spatial index
-    complex_geoms = (
-        [lock.geometry] if hasattr(lock, "geometry") and lock.geometry else []
-    )
-    if not lock_chambers.empty and "geometry" in lock_chambers.columns:
-        for _, c_row in lock_chambers.iterrows():
-            if pd.notna(c_row["geometry"]):
-                c_geom = (
-                    wkt.loads(c_row["geometry"])
-                    if isinstance(c_row["geometry"], str)
-                    else c_row["geometry"]
-                )
-                complex_geoms.append(c_geom)
+    complex_geoms = _collect_complex_geoms(lock, lock_chambers)
 
     if complex_geoms:
         complex_union = unary_union([g for g in complex_geoms if g])

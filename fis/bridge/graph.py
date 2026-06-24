@@ -10,6 +10,183 @@ geod = Geod(ellps="WGS84")
 CRS = "EPSG:4326"
 
 
+def _build_split_merge_nodes(c, bridge_id, split_node_id, merge_node_id):
+    """Build the split and merge junction nodes for a bridge complex."""
+    features = []
+    split_point = None
+    merge_point = None
+
+    if c.get("geometry_before_wkt"):
+        g_before = wkt.loads(c["geometry_before_wkt"])
+        split_point = Point(g_before.coords[-1])
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(split_point),
+                "properties": {
+                    "id": split_node_id,
+                    "feature_type": "node",
+                    "node_type": "bridge_split",
+                    "node_id": split_node_id,
+                    "bridge_id": bridge_id,
+                },
+            }
+        )
+
+    if c.get("geometry_after_wkt"):
+        g_after = wkt.loads(c["geometry_after_wkt"])
+        merge_point = Point(g_after.coords[0])
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(merge_point),
+                "properties": {
+                    "id": merge_node_id,
+                    "feature_type": "node",
+                    "node_type": "bridge_merge",
+                    "node_id": merge_node_id,
+                    "bridge_id": bridge_id,
+                },
+            }
+        )
+
+    return split_point, merge_point, features
+
+
+def _build_opening_features(
+    opening,
+    bridge_id,
+    op_id,
+    split_node_id,
+    merge_node_id,
+    split_point,
+    merge_point,
+    best_sec_id,
+):
+    """Build all features (nodes + edges) for a single bridge opening passage."""
+    features = []
+
+    op_geom_raw = wkt.loads(opening["geometry"])
+    if not isinstance(op_geom_raw, Point):
+        op_geom_raw = op_geom_raw.centroid
+    assert isinstance(op_geom_raw, Point), (
+        f"Bridge passage opening {op_id} could not be resolved to a Point."
+    )
+    op_geom = op_geom_raw
+
+    azimuth = 0.0
+    if split_point and merge_point and not split_point.equals(merge_point):
+        azimuth, _, _ = geod.inv(
+            split_point.x, split_point.y, merge_point.x, merge_point.y
+        )
+
+    half_len = settings.BRIDGE_PASSAGE_LENGTH_M / 2.0
+    lon1, lat1, _ = geod.fwd(op_geom.x, op_geom.y, azimuth, -half_len)
+    lon2, lat2, _ = geod.fwd(op_geom.x, op_geom.y, azimuth, half_len)
+    op_start_geom = Point(lon1, lat1)
+    op_end_geom = Point(lon2, lat2)
+    op_start_node = f"opening_{op_id}_start"
+    op_end_node = f"opening_{op_id}_end"
+
+    for node_id, node_geom, node_type in [
+        (op_start_node, op_start_geom, "opening_start"),
+        (op_end_node, op_end_geom, "opening_end"),
+    ]:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(node_geom),
+                "properties": {
+                    "id": node_id,
+                    "feature_type": "node",
+                    "node_type": node_type,
+                    "node_id": node_id,
+                    "bridge_id": bridge_id,
+                    "opening_id": op_id,
+                },
+            }
+        )
+
+    if split_point:
+        approach_geom = LineString([split_point, op_start_geom])
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(approach_geom),
+                "properties": {
+                    "id": f"bridge_approach_{bridge_id}_{op_id}",
+                    "feature_type": "fairway_segment",
+                    "segment_type": "bridge_approach",
+                    "structure_type": "bridge",
+                    "structure_id": bridge_id,
+                    "bridge_id": bridge_id,
+                    "opening_id": op_id,
+                    "section_id": best_sec_id,
+                    "source_node": split_node_id,
+                    "target_node": op_start_node,
+                    "length_m": geod.geometry_length(approach_geom),
+                },
+            }
+        )
+
+    passage_geom = LineString([op_start_geom, op_end_geom])
+    op_attrs = {}
+    for k, v in opening.items():
+        if k in ["id", "geometry"]:
+            continue
+        if isinstance(v, (list, dict)):
+            op_attrs[k] = json.dumps(v)
+        elif pd.isna(v):
+            op_attrs[k] = None
+        else:
+            op_attrs[k] = v
+
+    features.append(
+        {
+            "type": "Feature",
+            "geometry": mapping(passage_geom),
+            "properties": {
+                **op_attrs,
+                "id": f"bridge_passage_{bridge_id}_{op_id}",
+                "feature_type": "fairway_segment",
+                "segment_type": "bridge_passage",
+                "structure_type": "bridge",
+                "structure_id": bridge_id,
+                "bridge_id": bridge_id,
+                "opening_id": op_id,
+                "section_id": best_sec_id,
+                "source_node": op_start_node,
+                "target_node": op_end_node,
+                "length_m": settings.BRIDGE_PASSAGE_LENGTH_M,
+            },
+        }
+    )
+
+    if merge_point:
+        exit_geom = LineString([op_end_geom, merge_point])
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": mapping(exit_geom),
+                "properties": {
+                    "id": f"bridge_exit_{bridge_id}_{op_id}",
+                    "feature_type": "fairway_segment",
+                    "segment_type": "bridge_exit",
+                    "structure_type": "bridge",
+                    "structure_id": bridge_id,
+                    "bridge_id": bridge_id,
+                    "opening_id": op_id,
+                    "section_id": best_sec_id,
+                    "source_node": op_end_node,
+                    "target_node": merge_node_id,
+                    "length_m": geod.geometry_length(exit_geom),
+                },
+            }
+        )
+
+    return features
+
+
 def build_nodes_gdf(complexes) -> gpd.GeoDataFrame:
     features = build_graph_features(complexes)
     rows = [
@@ -118,222 +295,50 @@ def build_graph_features(complexes):
 
     for c in complexes:
         bridge_id = utils.stringify_id(c["id"])
-
         split_node_id = f"bridge_{bridge_id}_split"
         merge_node_id = f"bridge_{bridge_id}_merge"
 
-        split_point = None
-        if c.get("geometry_before_wkt"):
-            g_before = wkt.loads(c["geometry_before_wkt"])
-            split_point = Point(g_before.coords[-1])
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(split_point),
-                    "properties": {
-                        "id": split_node_id,
-                        "feature_type": "node",
-                        "node_type": "bridge_split",
-                        "node_id": split_node_id,
-                        "bridge_id": bridge_id,
-                    },
-                }
+        split_point, merge_point, junction_features = _build_split_merge_nodes(
+            c, bridge_id, split_node_id, merge_node_id
+        )
+        features.extend(junction_features)
+
+        openings = c.get("openings", []) or [
+            {
+                "id": f"virtual_{bridge_id}",
+                "width": None,
+                "height": None,
+                "geometry": c.get("geometry"),
+            }
+        ]
+
+        sections = c.get("sections", [])
+        best_sec_id = None
+        if sections:
+            best_sec = next(
+                (s for s in sections if s.get("relation") == "direct"),
+                next(
+                    (s for s in sections if s.get("relation") == "overlap"), sections[0]
+                ),
             )
-
-        merge_point = None
-        if c.get("geometry_after_wkt"):
-            g_after = wkt.loads(c["geometry_after_wkt"])
-            merge_point = Point(g_after.coords[0])
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(merge_point),
-                    "properties": {
-                        "id": merge_node_id,
-                        "feature_type": "node",
-                        "node_type": "bridge_merge",
-                        "node_id": merge_node_id,
-                        "bridge_id": bridge_id,
-                    },
-                }
-            )
-
-        if split_point and merge_point and not split_point.equals(merge_point):
-            LineString([split_point, merge_point])
-
-        openings = c.get("openings", [])
-        if not openings:
-            openings = [
-                {
-                    "id": f"virtual_{bridge_id}",
-                    "width": None,
-                    "height": None,
-                    "geometry": c.get("geometry"),
-                }
-            ]
+            best_sec_id = utils.stringify_id(best_sec.get("id"))
 
         for opening in openings:
             op_id = utils.stringify_id(opening["id"])
-
             assert "geometry" in opening and opening["geometry"], (
                 f"Bridge passage opening {op_id} is missing a geometry definition."
             )
-            op_geom_raw = wkt.loads(opening["geometry"])
-            if not isinstance(op_geom_raw, Point):
-                op_geom_raw = op_geom_raw.centroid
-            assert isinstance(op_geom_raw, Point), (
-                f"Bridge passage opening {op_id} could not be resolved to a Point."
+            features.extend(
+                _build_opening_features(
+                    opening,
+                    bridge_id,
+                    op_id,
+                    split_node_id,
+                    merge_node_id,
+                    split_point,
+                    merge_point,
+                    best_sec_id,
+                )
             )
-
-            op_geom = op_geom_raw
-
-            # Calculate orientation and offset points to give the passage a real length
-            azimuth = 0.0
-            if split_point and merge_point and not split_point.equals(merge_point):
-                azimuth, _, _ = geod.inv(
-                    split_point.x, split_point.y, merge_point.x, merge_point.y
-                )
-
-            # Offset 1m back and 1m forward along the azimuth
-            half_len = settings.BRIDGE_PASSAGE_LENGTH_M / 2.0
-            lon1, lat1, _ = geod.fwd(op_geom.x, op_geom.y, azimuth, -half_len)
-            lon2, lat2, _ = geod.fwd(op_geom.x, op_geom.y, azimuth, half_len)
-            op_start_geom = Point(lon1, lat1)
-            op_end_geom = Point(lon2, lat2)
-
-            op_start_node = f"opening_{op_id}_start"
-            op_end_node = f"opening_{op_id}_end"
-
-            sections = c.get("sections", [])
-            best_sec_id = None
-            if sections:
-                best_sec = next(
-                    (s for s in sections if s.get("relation") == "direct"),
-                    next(
-                        (s for s in sections if s.get("relation") == "overlap"),
-                        sections[0],
-                    ),
-                )
-                best_sec_id = utils.stringify_id(best_sec.get("id"))
-
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(op_start_geom),
-                    "properties": {
-                        "id": op_start_node,
-                        "feature_type": "node",
-                        "node_type": "opening_start",
-                        "node_id": op_start_node,
-                        "bridge_id": bridge_id,
-                        "opening_id": op_id,
-                    },
-                }
-            )
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(op_end_geom),
-                    "properties": {
-                        "id": op_end_node,
-                        "feature_type": "node",
-                        "node_type": "opening_end",
-                        "node_id": op_end_node,
-                        "bridge_id": bridge_id,
-                        "opening_id": op_id,
-                    },
-                }
-            )
-
-            if split_point:
-                approach_geom = (
-                    LineString([split_point, op_start_geom])
-                    if not split_point.equals(op_start_geom)
-                    else None
-                )
-                features.append(
-                    {
-                        "type": "Feature",
-                        "geometry": mapping(approach_geom) if approach_geom else None,
-                        "properties": {
-                            "id": f"bridge_approach_{bridge_id}_{op_id}",
-                            "feature_type": "fairway_segment",
-                            "segment_type": "bridge_approach",
-                            "structure_type": "bridge",
-                            "structure_id": bridge_id,
-                            "bridge_id": bridge_id,
-                            "opening_id": op_id,
-                            "section_id": best_sec_id,
-                            "source_node": split_node_id,
-                            "target_node": op_start_node,
-                            "length_m": geod.geometry_length(approach_geom)
-                            if approach_geom
-                            else 0.0,
-                        },
-                    }
-                )
-
-            passage_geom = LineString([op_start_geom, op_end_geom])
-
-            # Serialize metadata and handle nominal length
-            op_attrs = {}
-            for k, v in opening.items():
-                if k in ["id", "geometry"]:
-                    continue
-                if isinstance(v, (list, dict)):
-                    op_attrs[k] = json.dumps(v)
-                elif pd.isna(v):
-                    op_attrs[k] = None
-                else:
-                    op_attrs[k] = v
-
-            features.append(
-                {
-                    "type": "Feature",
-                    "geometry": mapping(passage_geom),
-                    "properties": {
-                        **op_attrs,
-                        "id": f"bridge_passage_{bridge_id}_{op_id}",
-                        "feature_type": "fairway_segment",
-                        "segment_type": "bridge_passage",
-                        "structure_type": "bridge",
-                        "structure_id": bridge_id,
-                        "bridge_id": bridge_id,
-                        "opening_id": op_id,
-                        "section_id": best_sec_id,
-                        "source_node": op_start_node,
-                        "target_node": op_end_node,
-                        "length_m": settings.BRIDGE_PASSAGE_LENGTH_M,  # Nominal length for simulation compatibility
-                    },
-                }
-            )
-
-            if merge_point:
-                exit_geom = (
-                    LineString([op_end_geom, merge_point])
-                    if not op_end_geom.equals(merge_point)
-                    else None
-                )
-                features.append(
-                    {
-                        "type": "Feature",
-                        "geometry": mapping(exit_geom) if exit_geom else None,
-                        "properties": {
-                            "id": f"bridge_exit_{bridge_id}_{op_id}",
-                            "feature_type": "fairway_segment",
-                            "segment_type": "bridge_exit",
-                            "structure_type": "bridge",
-                            "structure_id": bridge_id,
-                            "bridge_id": bridge_id,
-                            "opening_id": op_id,
-                            "section_id": best_sec_id,
-                            "source_node": op_end_node,
-                            "target_node": merge_node_id,
-                            "length_m": geod.geometry_length(exit_geom)
-                            if exit_geom
-                            else 0.0,
-                        },
-                    }
-                )
 
     return features

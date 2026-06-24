@@ -11,6 +11,34 @@ import jinja2
 logger = logging.getLogger(__name__)
 
 
+def _check_compliance_for_elements(data_iter, canonical_attrs, schema):
+    non_compliant = {}
+    missing_counts = {k: 0 for k in canonical_attrs}
+    attribute_docs = {
+        k: "Mapped from " + str([old for old, new in schema.items() if new == k])
+        for k in canonical_attrs
+        if k in schema.values()
+    }
+    for k in canonical_attrs:
+        if k not in attribute_docs:
+            attribute_docs[k] = "Standard/Base Attribute"
+
+    for d in data_iter:
+        for k in d.keys():
+            if k not in canonical_attrs and k not in schema:
+                if any(x.isupper() for x in k) and k != "geometry":
+                    non_compliant[k] = non_compliant.get(k, 0) + 1
+        for k in canonical_attrs:
+            if k not in d or d[k] is None or d[k] == "":
+                missing_counts[k] += 1
+
+    return {
+        "non_compliant": non_compliant,
+        "missing_counts": missing_counts,
+        "attribute_docs": attribute_docs,
+    }
+
+
 class GraphValidator:
     """Validator for FIS-EURIS merged graph."""
 
@@ -214,8 +242,9 @@ class GraphValidator:
         """Check if attributes comply with schema and track completeness."""
         logger.info("Checking schema compliance...")
 
-        node_schema = self.schema.get("attributes", {}).get("nodes", {})
-        edge_schema = self.schema.get("attributes", {}).get("edges", {})
+        attr_schema = self.schema.get("attributes", {})
+        node_schema = attr_schema.get("nodes", {})
+        edge_schema = attr_schema.get("edges", {})
 
         canonical_node_attrs = set(node_schema.values()) | {
             "data_source",
@@ -232,70 +261,34 @@ class GraphValidator:
             "connection_type",
         }
 
-        non_compliant_node_keys = {}
-        node_missing_counts = {k: 0 for k in canonical_node_attrs}
-        node_attribute_docs = {
-            k: "Mapped from "
-            + str([old for old, new in node_schema.items() if new == k])
-            for k in canonical_node_attrs
-            if k in node_schema.values()
-        }
-        for k in canonical_node_attrs:
-            if k not in node_attribute_docs:
-                node_attribute_docs[k] = "Standard/Base Attribute"
+        node_data = (d for _, d in self.graph.nodes(data=True))
+        edge_data = (d for _, _, d in self.graph.edges(data=True))
 
-        for n, d in self.graph.nodes(data=True):
-            for k in d.keys():
-                if k not in canonical_node_attrs and k not in node_schema:
-                    if any(x.isupper() for x in k) and k != "geometry":
-                        non_compliant_node_keys[k] = (
-                            non_compliant_node_keys.get(k, 0) + 1
-                        )
-            for k in canonical_node_attrs:
-                if k not in d or d[k] is None or d[k] == "":
-                    node_missing_counts[k] += 1
-
-        non_compliant_edge_keys = {}
-        edge_missing_counts = {k: 0 for k in canonical_edge_attrs}
-        edge_attribute_docs = {
-            k: "Mapped from "
-            + str([old for old, new in edge_schema.items() if new == k])
-            for k in canonical_edge_attrs
-            if k in edge_schema.values()
-        }
-        for k in canonical_edge_attrs:
-            if k not in edge_attribute_docs:
-                edge_attribute_docs[k] = "Standard/Base Attribute"
-
-        for u, v, d in self.graph.edges(data=True):
-            for k in d.keys():
-                if k not in canonical_edge_attrs and k not in edge_schema:
-                    if any(x.isupper() for x in k) and k != "geometry":
-                        non_compliant_edge_keys[k] = (
-                            non_compliant_edge_keys.get(k, 0) + 1
-                        )
-            for k in canonical_edge_attrs:
-                if k not in d or d[k] is None or d[k] == "":
-                    edge_missing_counts[k] += 1
+        node_result = _check_compliance_for_elements(
+            node_data, canonical_node_attrs, node_schema
+        )
+        edge_result = _check_compliance_for_elements(
+            edge_data, canonical_edge_attrs, edge_schema
+        )
 
         compliance = {
             "nodes": {
                 "non_standard_attributes_detected": list(
-                    non_compliant_node_keys.keys()
+                    node_result["non_compliant"].keys()
                 ),
-                "attribute_counts": non_compliant_node_keys,
-                "missing_counts": node_missing_counts,
+                "attribute_counts": node_result["non_compliant"],
+                "missing_counts": node_result["missing_counts"],
                 "expected_attributes": list(canonical_node_attrs),
-                "attribute_docs": node_attribute_docs,
+                "attribute_docs": node_result["attribute_docs"],
             },
             "edges": {
                 "non_standard_attributes_detected": list(
-                    non_compliant_edge_keys.keys()
+                    edge_result["non_compliant"].keys()
                 ),
-                "attribute_counts": non_compliant_edge_keys,
-                "missing_counts": edge_missing_counts,
+                "attribute_counts": edge_result["non_compliant"],
+                "missing_counts": edge_result["missing_counts"],
                 "expected_attributes": list(canonical_edge_attrs),
-                "attribute_docs": edge_attribute_docs,
+                "attribute_docs": edge_result["attribute_docs"],
             },
         }
         self.results["schema_compliance"] = compliance

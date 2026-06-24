@@ -167,17 +167,19 @@ def _slice_section_with_dropins(
     all_features, sec, visible_dropins, original_dropins_on_sec, mode="detailed"
 ):
     line_geom = sec.geometry
+    projected_crs = settings.PROJECTED_CRS
     line_rd_series = gpd.GeoSeries([line_geom], crs="EPSG:4326")
-    utm_crs = line_rd_series.estimate_utm_crs()
-    line_rd = line_rd_series.to_crs(utm_crs).iloc[0]
+    line_rd = line_rd_series.to_crs(projected_crs).iloc[0]
 
     splicer = FairwaySplicer(line_rd)
-    cuts = _generate_structure_cuts(line_rd, visible_dropins, utm_crs, mode=mode)
+    cuts = _generate_structure_cuts(line_rd, visible_dropins, projected_crs, mode=mode)
     segments = splicer.splice(cuts)
 
     for i, segment in enumerate(segments):
         seg_4326 = (
-            gpd.GeoSeries([segment.geometry], crs=utm_crs).to_crs("EPSG:4326").iloc[0]
+            gpd.GeoSeries([segment.geometry], crs=projected_crs)
+            .to_crs("EPSG:4326")
+            .iloc[0]
         )
         source_node, is_start_junc = _determine_source_node(
             segment, sec.get("StartJunctionId"), original_dropins_on_sec, seg_4326
@@ -264,7 +266,7 @@ def _determine_target_node(
 
 
 def _generate_structure_cuts(
-    line_rd: Any, dropins_on_sec: List[Dict], utm_crs: str, mode: str = "detailed"
+    line_rd: Any, dropins_on_sec: List[Dict], projected_crs: str, mode: str = "detailed"
 ) -> List[StructureCut]:
     cuts = []
     for dropin in dropins_on_sec:
@@ -279,7 +281,7 @@ def _generate_structure_cuts(
             )
 
         geom = wkt.loads(geom_val) if isinstance(geom_val, str) else geom_val
-        geom_rd = gpd.GeoSeries([geom], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
+        geom_rd = gpd.GeoSeries([geom], crs="EPSG:4326").to_crs(projected_crs).iloc[0]
         if geom_rd.geom_type != "Point":
             geom_rd = geom_rd.centroid
 
