@@ -695,7 +695,7 @@ def main():
                 or not ref_bobi
                 or str(ref_bobi).upper() in ["BO/BI", "BE/BU"]
             ):
-                ref_bobi = "KP/SP"
+                ref_bobi = "KP/SP (nog te controleren via kaarten)"
 
             ref_bebu = m_row.get("ref_level_name")
             if (
@@ -703,7 +703,7 @@ def main():
                 or not ref_bebu
                 or str(ref_bebu).upper() in ["BO/BI", "BE/BU"]
             ):
-                ref_bebu = "KP/SP"
+                ref_bebu = "KP/SP (nog te controleren via kaarten)"
 
             # Retrieve waterway levels for high/low sides
             waterway_hoog, peil_hoog, waterway_laag, peil_laag = get_waterway_levels(
