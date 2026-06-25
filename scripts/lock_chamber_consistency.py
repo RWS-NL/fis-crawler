@@ -99,7 +99,7 @@ def main():
     import glob
 
     euris_search_path = os.path.join(
-        os.path.dirname(args.euris_chambers), "LockChamber_*.geojson"
+        os.path.dirname(args.euris_chambers), "LockChamber_NL_*.geojson"
     )
     euris_files = glob.glob(euris_search_path)
     if not euris_files:
