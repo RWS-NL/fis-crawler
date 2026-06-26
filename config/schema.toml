@@ -131,8 +131,10 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "slslocode" = "parent_id"
 "mlengthcm" = "dim_usable_length_cm"
 "mwidthcm" = "dim_gate_width_cm"
-"avl_length" = "dim_structural_length"
-"cl_width" = "dim_structural_width"
+# EURIS structural fields are in centimeters (e.g. avl_length=26000 -> 260 m), so
+# map them to the *_cm canonical names and let normalize_attributes convert to meters.
+"avl_length" = "dim_structural_length_cm"
+"cl_width" = "dim_structural_width_cm"
 "mheightcm" = "dim_height_cm"
 "mlencon" = "dim_usable_length_convoy_cm"
 "mwidcon" = "dim_gate_width_convoy_cm"

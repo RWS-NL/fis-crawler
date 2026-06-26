@@ -1,8 +1,11 @@
 import os
+import glob
 import json
+import math
 import subprocess
 import re
 import sqlite3
+import argparse
 import pandas as pd
 import geopandas as gpd
 import numpy as np
@@ -15,15 +18,143 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Target output files
 OUTPUT_DIR = "output"
 REPORT_PATH = os.path.join(OUTPUT_DIR, "lock_dimensions_validation_report.md")
 HTML_REPORT_PATH = os.path.join(OUTPUT_DIR, "lock_dimensions_validation_report.html")
-LOCAL_EXCEL = "/Users/baart_f/.gemini/antigravity-cli/brain/4f10c31d-c0eb-4451-bbc8-1899998278a4/Chamber_comparison.xlsx"
+# Target lock list. Defaults to the copy committed alongside this script; override
+# with --excel or the LOCK_VALIDATION_EXCEL environment variable.
+DEFAULT_EXCEL = os.path.join(SCRIPT_DIR, "data", "Chamber_comparison.xlsx")
+LOCAL_EXCEL = os.environ.get("LOCK_VALIDATION_EXCEL", DEFAULT_EXCEL)
 BIVAS_DB = "reference/Bivas.5.10.1.sqlite"
 FIS_CHAMBERS = "output/fis-export/chamber.geoparquet"
-EURIS_CHAMBERS = "output/euris-export/LockChamber_NL_20260224.geojson"
+EURIS_DIR = "output/euris-export"
 AIMED_LEVELS = "output/fis-export/aimedlevel.geoparquet"
+AIMED_WATERLEVELS = "output/fis-export/aimedwaterlevel.geoparquet"
+
+
+def find_euris_chambers(euris_dir=EURIS_DIR, country="NL"):
+    """Return the newest EURIS LockChamber export for a country code."""
+    pattern = os.path.join(euris_dir, f"LockChamber_{country}_*.geojson")
+    files = glob.glob(pattern)
+    if not files:
+        raise FileNotFoundError(f"No EURIS lock chamber files match: {pattern}")
+    return max(files, key=os.path.getmtime)
+
+
+def oriented_bbox_dims(geom):
+    """Length and width (m) of a chamber polygon's minimum rotated rectangle.
+
+    This is an independent *geometric* measurement of the physical footprint,
+    derived from the chamber polygon rather than the FIS attribute. It runs
+    systematically ~8-15% larger than the FIS structural length because it
+    includes the lock walls, so it is used as a per-chamber cross-check and
+    gross-error detector, not as an exact match against FIS.
+    """
+    from shapely import minimum_rotated_rectangle
+
+    if geom is None or geom.is_empty:
+        return None, None
+    rect = minimum_rotated_rectangle(geom)
+    if not hasattr(rect, "exterior") or rect.exterior is None:
+        return None, None
+    xs, ys = rect.exterior.coords.xy
+    edges = [math.hypot(xs[i + 1] - xs[i], ys[i + 1] - ys[i]) for i in range(4)]
+    return max(edges), min(edges)
+
+
+def parse_note_sill_nap(note_text, side):
+    """Parse FIS Note for explicit NAP sill heights.
+
+    side: 'bobi' (boven/binnen) or 'bebu' (beneden/buiten).
+    Returns (nap_float, source_str) or (None, None).
+    """
+    if not note_text or not isinstance(note_text, str):
+        return None, None
+    note = note_text.replace("\r\n", " ").replace("\n", " ")
+
+    if side == "bobi":
+        m = re.search(
+            r"[Dd]rempeldiepte\s+boven.{0,80}?Drempelhoogte\s+NAP\+\s*([\d,]+)",
+            note,
+            re.IGNORECASE,
+        )
+    else:
+        m = re.search(
+            r"[Dd]rempeldiepte\s+beneden.{0,80}?Drempelhoogte\s+NAP\+\s*([\d,]+)",
+            note,
+            re.IGNORECASE,
+        )
+    if m:
+        try:
+            return float(m.group(1).replace(",", ".")), "Note (NAP+ expliciet)"
+        except ValueError:
+            pass
+
+    # "Drempels SP-X,XX m=NAP+Y,YY m" pattern (applies to both sides equally)
+    m2 = re.search(r"[Dd]rempel[s]?\s+\S+-[\d,]+\s*m?\s*=\s*NAP\+([\d,]+)", note)
+    if m2:
+        try:
+            return float(m2.group(1).replace(",", ".")), "Note (NAP= expliciet)"
+        except ValueError:
+            pass
+
+    return None, None
+
+
+def resolve_sill_nap(
+    raw_val, height_ref_str, fairway_ref_level, peil_side, note_text, side
+):
+    """Convert a FIS sill value to an absolute NAP height with explicit source tracking.
+
+    Precedence (highest to lowest confidence):
+    1. Explicit "Drempelhoogte NAP+X" in the Note field
+    2. HeightReferenceLevel = 'NAP' → value is already a NAP height
+    3. Positive value + known streefpeil → depth below KP/SP, compute NAP
+    4. Negative value → probably a NAP height, but flag as uncertain
+
+    Returns (nap_height_or_None, source_str, is_uncertain: bool).
+    """
+    # 1. Note field
+    note_val, note_src = parse_note_sill_nap(note_text, side)
+    if note_val is not None:
+        return note_val, note_src, False
+
+    if raw_val is None:
+        return None, "Geen waarde in FIS", True
+    try:
+        val = float(raw_val)
+        if pd.isna(val):
+            return None, "Geen waarde in FIS", True
+    except (ValueError, TypeError):
+        return None, "Geen geldige waarde", True
+
+    # 2. Explicit NAP reference
+    ref = str(height_ref_str).strip().upper() if height_ref_str else ""
+    if ref == "NAP":
+        return val, "FIS (HeightReferenceLevel=NAP, direct)", False
+
+    # 3. Positive value → depth below local KP/SP reference
+    if val > 0 and peil_side is not None:
+        try:
+            peil = float(peil_side)
+            ref_label = fairway_ref_level if fairway_ref_level else "KP/SP"
+            return (
+                peil - val,
+                f"FIS (berekend: streefpeil {peil:.2f} − {val:.2f}m via {ref_label})",
+                False,
+            )
+        except (ValueError, TypeError):
+            pass
+
+    # 4. Negative value → probably already a NAP height, but we cannot be sure
+    if val < 0:
+        return val, "FIS (vermoedelijk NAP-hoogte, negatieve waarde — onzeker)", True
+
+    return None, "Onbepaald (waarde=0 of onbekend)", True
+
 
 IMAGES_DIR = os.path.join(OUTPUT_DIR, "images")
 AERIALS_DIR = os.path.join(IMAGES_DIR, "aerials")
@@ -137,6 +268,81 @@ def download_aerial_photo(sluis_clean, chamber_clean, centroid):
     return None
 
 
+FOOTPRINTS_DIR = os.path.join(IMAGES_DIR, "footprints")
+os.makedirs(FOOTPRINTS_DIR, exist_ok=True)
+
+
+def generate_footprint_map(
+    sluis_clean, chamber_clean, geom_rd, fis_struct_len, fis_struct_wid, centroid_rd
+):
+    """Plot FIS chamber polygon directly in RD coordinates on the PDOK aerial background."""
+    filename = f"{sluis_clean}_{chamber_clean}_footprint.png"
+    path = os.path.join(FOOTPRINTS_DIR, filename)
+    if os.path.exists(path):
+        return f"images/footprints/{filename}"
+
+    aerial_rel = download_aerial_photo(sluis_clean, chamber_clean, centroid_rd)
+    aerial_abs = os.path.join(OUTPUT_DIR, aerial_rel) if aerial_rel else None
+    if not aerial_abs or not os.path.exists(aerial_abs):
+        return None
+
+    half_size = 350
+    xmin = centroid_rd.x - half_size
+    xmax = centroid_rd.x + half_size
+    ymin = centroid_rd.y - half_size
+    ymax = centroid_rd.y + half_size
+
+    try:
+        img_arr = plt.imread(aerial_abs)
+    except Exception:
+        return None
+
+    fig, ax = plt.subplots(figsize=(5, 5))
+    # aerial image already has north-up; extent maps RD coords directly
+    ax.imshow(img_arr, extent=[xmin, xmax, ymin, ymax], origin="upper")
+
+    if geom_rd is not None and not geom_rd.is_empty:
+        try:
+            xs, ys = geom_rd.exterior.coords.xy
+            ax.plot(
+                list(xs), list(ys), color="#00aaff", linewidth=2.5, label="FIS kolk"
+            )
+            ax.fill(list(xs), list(ys), color="#00aaff", alpha=0.25)
+        except Exception:
+            pass
+
+    ann = []
+    if fis_struct_len is not None:
+        ann.append(
+            f"FIS: {fis_struct_len:.0f} × {fis_struct_wid:.0f} m"
+            if fis_struct_wid
+            else f"FIS L: {fis_struct_len:.0f} m"
+        )
+    if ann:
+        ax.text(
+            xmin + 8,
+            ymax - 8,
+            "\n".join(ann),
+            fontsize=8,
+            va="top",
+            color="white",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#0f172a", alpha=0.8),
+        )
+
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.legend(loc="lower right", fontsize=7, framealpha=0.85)
+    ax.set_title(
+        f"Sluiskolk: {sluis_clean} ({chamber_clean})", fontsize=9, fontweight="bold"
+    )
+    fig.tight_layout(pad=0.3)
+    plt.savefig(path, dpi=150)
+    plt.close(fig)
+    return f"images/footprints/{filename}"
+
+
 def generate_comparison_chart(
     sluis_clean,
     chamber_clean,
@@ -212,18 +418,446 @@ def generate_comparison_chart(
     return f"images/charts/{filename}"
 
 
+SIDEVIEWS_DIR = os.path.join(IMAGES_DIR, "sideviews")
+DECISIONS_DIR = os.path.join(IMAGES_DIR, "decisions")
+os.makedirs(SIDEVIEWS_DIR, exist_ok=True)
+os.makedirs(DECISIONS_DIR, exist_ok=True)
+
+
+def generate_sideview_chart(
+    sluis_clean,
+    chamber_clean,
+    waterway_hoog,
+    peil_hoog,
+    waterway_laag,
+    peil_laag,
+    sill_bobi_nap,
+    sill_bobi_uncertain,
+    sill_bebu_nap,
+    sill_bebu_uncertain,
+    fis_struct_len=None,
+):
+    """Engineering cross-section: lock chamber with walls, sill depths, and water levels per side."""
+    filename = f"{sluis_clean}_{chamber_clean}_sideview.png"
+    path = os.path.join(SIDEVIEWS_DIR, filename)
+    if os.path.exists(path):
+        return f"images/sideviews/{filename}"
+
+    levels = [
+        v for v in [peil_hoog, peil_laag, sill_bobi_nap, sill_bebu_nap] if v is not None
+    ]
+    if not levels:
+        return None
+
+    # Normalized x layout (total width = 20)
+    # 0-2: BoBi water zone | 2-3: left wall | 3-17: chamber | 17-18: right wall | 18-20: BeBu water zone
+    XL_W0, _XL_W1 = 0, 2  # BoBi water
+    XL_WL0, XL_WL1 = 2, 3  # left wall
+    XCH0, XCH1 = 3, 17  # chamber
+    XR_WL0, XR_WL1 = 17, 18  # right wall
+    _XR_W0, XR_W1 = 18, 20  # BeBu water
+
+    lowest = min(levels)
+    highest = max(levels)
+    floor_nap = lowest - 1.5
+    wall_top = highest + 1.0
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    wall_color = "#6b7280"
+    c_bobi = "#2b5c8f"
+    c_bebu = "#20b2aa"
+    c_sill_bobi = "#c0392b"
+    c_sill_bebu = "#e67e22"
+
+    # Floor slab
+    ax.fill_between(
+        [XL_WL0, XR_WL1], floor_nap, floor_nap + 0.4, color=wall_color, zorder=3
+    )
+
+    # Left wall
+    ax.fill_betweenx(
+        [floor_nap, wall_top], XL_WL0, XL_WL1, color=wall_color, alpha=0.85, zorder=3
+    )
+    # Right wall
+    ax.fill_betweenx(
+        [floor_nap, wall_top], XR_WL0, XR_WL1, color=wall_color, alpha=0.85, zorder=3
+    )
+
+    # BoBi water body
+    if peil_hoog is not None:
+        ax.fill_between(
+            [XL_W0, XL_WL0], floor_nap, peil_hoog, color=c_bobi, alpha=0.2, zorder=2
+        )
+        ax.plot([XL_W0, XL_WL0], [peil_hoog, peil_hoog], color=c_bobi, lw=2, zorder=4)
+        name_str = (waterway_hoog or "Bo/Bi")[:20]
+        ax.text(
+            -0.2,
+            peil_hoog + 0.05,
+            f"{name_str}\n{peil_hoog:+.2f} m NAP",
+            fontsize=7,
+            ha="right",
+            va="bottom",
+            color=c_bobi,
+        )
+
+    # BeBu water body
+    if peil_laag is not None:
+        ax.fill_between(
+            [XR_WL1, XR_W1], floor_nap, peil_laag, color=c_bebu, alpha=0.2, zorder=2
+        )
+        ax.plot([XR_WL1, XR_W1], [peil_laag, peil_laag], color=c_bebu, lw=2, zorder=4)
+        name_str = (waterway_laag or "Be/Bu")[:20]
+        ax.text(
+            20.2,
+            peil_laag + 0.05,
+            f"{name_str}\n{peil_laag:+.2f} m NAP",
+            fontsize=7,
+            ha="left",
+            va="bottom",
+            color=c_bebu,
+        )
+
+    # BoBi sill at left gate
+    if sill_bobi_nap is not None:
+        lstyle = ":" if sill_bobi_uncertain else "-"
+        # Sill block: from floor to sill level, at gate position
+        ax.fill_between(
+            [XL_WL0 - 0.4, XL_WL1 + 0.4],
+            floor_nap + 0.4,
+            sill_bobi_nap,
+            color=c_sill_bobi,
+            alpha=0.5,
+            zorder=4,
+        )
+        ax.hlines(
+            sill_bobi_nap,
+            XL_WL0 - 0.4,
+            XL_WL1 + 0.4,
+            colors=c_sill_bobi,
+            lw=2.5,
+            linestyles=lstyle,
+            zorder=5,
+        )
+        unc = " (?)" if sill_bobi_uncertain else ""
+        ax.text(
+            (XL_WL0 + XL_WL1) / 2,
+            sill_bobi_nap + 0.1,
+            f"Bo/Bi: {sill_bobi_nap:+.2f} m{unc}",
+            fontsize=6.5,
+            ha="center",
+            va="bottom",
+            color=c_sill_bobi,
+            bbox=dict(boxstyle="round,pad=0.1", facecolor="white", alpha=0.75),
+        )
+        # Depth arrow from sill to water level
+        if peil_hoog is not None and peil_hoog > sill_bobi_nap:
+            mid_x = 1.5
+            ax.annotate(
+                "",
+                xy=(mid_x, sill_bobi_nap),
+                xytext=(mid_x, peil_hoog),
+                arrowprops=dict(arrowstyle="<->", color=c_sill_bobi, lw=1.2),
+            )
+            depth = peil_hoog - sill_bobi_nap
+            ax.text(
+                mid_x - 0.15,
+                (sill_bobi_nap + peil_hoog) / 2,
+                f"{depth:.2f} m",
+                fontsize=6.5,
+                ha="right",
+                va="center",
+                color=c_sill_bobi,
+            )
+
+    # BeBu sill at right gate
+    if sill_bebu_nap is not None:
+        lstyle = ":" if sill_bebu_uncertain else "-"
+        ax.fill_between(
+            [XR_WL0 - 0.4, XR_WL1 + 0.4],
+            floor_nap + 0.4,
+            sill_bebu_nap,
+            color=c_sill_bebu,
+            alpha=0.5,
+            zorder=4,
+        )
+        ax.hlines(
+            sill_bebu_nap,
+            XR_WL0 - 0.4,
+            XR_WL1 + 0.4,
+            colors=c_sill_bebu,
+            lw=2.5,
+            linestyles=lstyle,
+            zorder=5,
+        )
+        unc = " (?)" if sill_bebu_uncertain else ""
+        ax.text(
+            (XR_WL0 + XR_WL1) / 2,
+            sill_bebu_nap + 0.1,
+            f"Be/Bu: {sill_bebu_nap:+.2f} m{unc}",
+            fontsize=6.5,
+            ha="center",
+            va="bottom",
+            color=c_sill_bebu,
+            bbox=dict(boxstyle="round,pad=0.1", facecolor="white", alpha=0.75),
+        )
+        if peil_laag is not None and peil_laag > sill_bebu_nap:
+            mid_x = 18.5
+            ax.annotate(
+                "",
+                xy=(mid_x, sill_bebu_nap),
+                xytext=(mid_x, peil_laag),
+                arrowprops=dict(arrowstyle="<->", color=c_sill_bebu, lw=1.2),
+            )
+            depth = peil_laag - sill_bebu_nap
+            ax.text(
+                mid_x + 0.15,
+                (sill_bebu_nap + peil_laag) / 2,
+                f"{depth:.2f} m",
+                fontsize=6.5,
+                ha="left",
+                va="center",
+                color=c_sill_bebu,
+            )
+
+    # NAP datum line
+    if floor_nap < 0 < wall_top:
+        ax.axhline(0, color="black", lw=1.0, linestyle="--", zorder=3)
+        ax.text(20.2, 0, "NAP", fontsize=7, va="center", ha="left", color="black")
+
+    # Length annotation
+    if fis_struct_len is not None:
+        arr_y = floor_nap + 0.7
+        ax.annotate(
+            "",
+            xy=(XCH1, arr_y),
+            xytext=(XCH0, arr_y),
+            arrowprops=dict(arrowstyle="<->", color="black", lw=1.2),
+        )
+        ax.text(
+            (XCH0 + XCH1) / 2,
+            arr_y + 0.15,
+            f"Constructielengte: {fis_struct_len:.0f} m",
+            ha="center",
+            fontsize=8,
+            color="black",
+        )
+
+    # Side labels at top
+    ax.text(
+        (XL_W0 + XL_WL0) / 2,
+        wall_top + 0.2,
+        "Bo/Bi\n(hoog)",
+        ha="center",
+        fontsize=8,
+        color=c_bobi,
+        fontweight="bold",
+    )
+    ax.text(
+        (XR_WL1 + XR_W1) / 2,
+        wall_top + 0.2,
+        "Be/Bu\n(laag)",
+        ha="center",
+        fontsize=8,
+        color=c_bebu,
+        fontweight="bold",
+    )
+
+    ax.set_xlim(-1.5, 21.5)
+    ax.set_ylim(floor_nap - 0.3, wall_top + 0.8)
+    ax.set_ylabel("Hoogte t.o.v. NAP (m)")
+    ax.set_xticks([])
+    ax.set_title(
+        f"Doorsnede: {sluis_clean} ({chamber_clean})", fontsize=10, fontweight="bold"
+    )
+    ax.grid(True, axis="y", linestyle="--", alpha=0.25, zorder=1)
+    fig.tight_layout()
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return f"images/sideviews/{filename}"
+
+
+def generate_decision_figure(
+    sluis_clean,
+    chamber_clean,
+    fis_len,
+    osm_len,
+    bivas_len,
+    survey_len,
+    euris_neq_fis,
+    n_violations,
+    n_checks,
+    is_single_kolk,
+):
+    """Per-lock evidence panel: available sources and their agreement with FIS."""
+    filename = f"{sluis_clean}_{chamber_clean}_decision.png"
+    path = os.path.join(DECISIONS_DIR, filename)
+    if os.path.exists(path):
+        return f"images/decisions/{filename}"
+
+    def _f(v):
+        try:
+            return float(v) if v is not None and pd.notna(v) else None
+        except Exception:
+            return None
+
+    fis_val = _f(fis_len)
+    sources = {
+        "FIS": fis_val,
+        "OSM": _f(osm_len),
+        "BIVAS": _f(bivas_len) if is_single_kolk else None,
+        "Enquête": _f(survey_len),
+    }
+    bivas_raw = _f(bivas_len)
+
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+
+    colors = []
+    labels = []
+    values = []
+    for src, val in sources.items():
+        labels.append(src)
+        if val is None:
+            values.append(0)
+            colors.append("#cccccc")
+        else:
+            values.append(val)
+            if src == "FIS":
+                colors.append("#2b5c8f")
+            elif (
+                fis_val is not None and abs(val - fis_val) / max(abs(fis_val), 1) < 0.05
+            ):
+                colors.append("#27ae60")
+            else:
+                colors.append("#e74c3c")
+
+    x = range(len(labels))
+    bars = ax.bar(list(x), values, color=colors, edgecolor="white", linewidth=0.5)
+
+    for bar, val, src in zip(bars, values, labels):
+        label_y = bar.get_height()
+        if val > 0:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                label_y + 0.5,
+                f"{val:.0f} m",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+        else:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                1,
+                "n.b.",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color="#999",
+            )
+
+    # Note when BIVAS is excluded due to multi-kolk
+    if bivas_raw is not None and not is_single_kolk:
+        nonzero = [v for v in values if v]
+        y_mid = (max(nonzero) * 0.5) if nonzero else 10
+        ax.text(
+            2,
+            y_mid,
+            f"BIVAS={bivas_raw:.0f}m\n(niet meegewogen:\nmulti-kolk complex)",
+            ha="center",
+            va="center",
+            fontsize=6.5,
+            color="#888",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="#f5f5f5", alpha=0.8),
+        )
+
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels)
+    ax.set_ylabel("Lengte (m)")
+    ax.set_title(
+        f"Databronnen lengte: {sluis_clean} ({chamber_clean})",
+        fontsize=9,
+        fontweight="bold",
+    )
+
+    if euris_neq_fis:
+        ax.text(
+            0.01,
+            0.97,
+            "⚠ EURIS ≠ FIS (data-propagatiefout)",
+            transform=ax.transAxes,
+            fontsize=7,
+            va="top",
+            color="#c0392b",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="#fdecea", alpha=0.9),
+        )
+
+    # Violations badge
+    if n_checks > 0:
+        conf_color = (
+            "#27ae60"
+            if n_violations == 0
+            else ("#f39c12" if n_violations < n_checks else "#e74c3c")
+        )
+        ax.text(
+            0.99,
+            0.97,
+            f"{n_violations}/{n_checks} checks afwijkend",
+            transform=ax.transAxes,
+            fontsize=8,
+            va="top",
+            ha="right",
+            color=conf_color,
+            fontweight="bold",
+            bbox=dict(
+                boxstyle="round,pad=0.3",
+                facecolor="white",
+                edgecolor=conf_color,
+                alpha=0.9,
+            ),
+        )
+
+    ax.grid(True, axis="y", linestyle="--", alpha=0.3)
+    fig.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.close(fig)
+    return f"images/decisions/{filename}"
+
+
+ISSUE_NUMBER = 58
+ISSUE_REPO = "RWS-NL/fis-crawler"
+
+
 def get_issue_body():
-    """Fetch GitHub Issue 58 markdown body using gh CLI."""
-    print("Fetching Issue 58 body via GitHub CLI...")
+    """Fetch the GitHub issue markdown body.
+
+    Prefers the GitHub REST API (works in CI/containers with GITHUB_TOKEN or
+    GH_TOKEN) and falls back to the ``gh`` CLI. Returns "" on failure, in which
+    case the survey columns simply stay empty.
+    """
+    api_url = f"https://api.github.com/repos/{ISSUE_REPO}/issues/{ISSUE_NUMBER}"
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        print(f"Fetching Issue {ISSUE_NUMBER} body via GitHub REST API...")
+        resp = requests.get(api_url, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            return resp.json().get("body", "") or ""
+        print(f"GitHub API returned HTTP {resp.status_code}; falling back to gh CLI.")
+    except Exception as e:
+        print(f"GitHub API request failed ({e}); falling back to gh CLI.")
+
     try:
         res = subprocess.run(
             [
                 "gh",
                 "issue",
                 "view",
-                "58",
+                str(ISSUE_NUMBER),
                 "--repo",
-                "RWS-NL/fis-crawler",
+                ISSUE_REPO,
                 "--json",
                 "body",
             ],
@@ -231,8 +865,7 @@ def get_issue_body():
             text=True,
             check=True,
         )
-        data = json.loads(res.stdout)
-        return data.get("body", "")
+        return json.loads(res.stdout).get("body", "")
     except Exception as e:
         print(f"Error fetching issue body: {e}")
         return ""
@@ -274,15 +907,20 @@ def parse_survey_table(body):
     return df
 
 
-def parse_local_excel():
-    """Read target lock complexes and manual dimensions from Chamber_comparison.xlsx."""
-    print(f"Reading {LOCAL_EXCEL}...")
-    if not os.path.exists(LOCAL_EXCEL):
-        print(f"Excel file {LOCAL_EXCEL} not found.")
+def parse_local_excel(excel_path=LOCAL_EXCEL):
+    """Read target lock complexes and manual dimensions from Chamber_comparison.xlsx.
+
+    The "Sluizen" sheet has three side-by-side source blocks below a header row at
+    index 4: FIS (cols 0-10), wiki (cols 12-19) and disk (cols 21-28). Columns are
+    addressed positionally below (e.g. ``length_18``), matching that layout.
+    """
+    print(f"Reading {excel_path}...")
+    if not os.path.exists(excel_path):
+        print(f"Excel file {excel_path} not found.")
         return pd.DataFrame()
 
     # Read Sluizen sheet
-    df = pd.read_excel(LOCAL_EXCEL, sheet_name="Sluizen")
+    df = pd.read_excel(excel_path, sheet_name="Sluizen")
 
     # Headers are in row index 4 (5th row)
     headers = list(df.iloc[4].values)
@@ -387,7 +1025,9 @@ def save_osm_cache(cache):
 def query_osm_lock(lon, lat, chamber_name=None, radius_m=250):
     """Query OSM lock details near a coordinate using Overpass API with local JSON caching."""
     cache = load_osm_cache()
-    cache_key = f"{lat:.4f}_{lon:.4f}"
+    # Include query parameters and use higher coordinate precision so nearby
+    # parallel chambers (e.g. Weurt Oost/West) don't collide on one cache entry.
+    cache_key = f"{lat:.6f}_{lon:.6f}_{radius_m}_{normalize_name(chamber_name or '')}"
     if cache_key in cache and cache[cache_key]:
         return cache[cache_key]
 
@@ -487,6 +1127,44 @@ def query_osm_lock(lon, lat, chamber_name=None, radius_m=250):
     return result
 
 
+def normalize_name(value):
+    """Lowercase and collapse whitespace for robust chamber-name comparison."""
+    return re.sub(r"\s+", " ", str(value).strip().lower())
+
+
+def match_chamber(matches_bivas, sluis_name, chamber_name):
+    """Match a single Excel target to its specific FIS lock chamber.
+
+    The Excel ``name`` column corresponds almost 1:1 with the FIS chamber name
+    (e.g. "Oostkolk Volkeraksluizen"), and FIS assigns a distinct ISRS code per
+    kolk, so we resolve each kolk individually. We deliberately do NOT match on
+    the complex suffix (``chamber_name.split()[-1]``), which collapses every kolk
+    of a complex onto a single row.
+    """
+    names = matches_bivas["name_fis"]
+    target = normalize_name(chamber_name)
+
+    # 1. Exact normalized name match (resolves each kolk uniquely).
+    match = matches_bivas[names.apply(normalize_name) == target]
+    if not match.empty:
+        return match
+
+    # 2. Full chamber name contained in the FIS name.
+    match = matches_bivas[
+        names.str.contains(re.escape(chamber_name), case=False, na=False)
+    ]
+    if not match.empty:
+        return match
+
+    # 3. Loose fallback: complex name + the distinguishing first word
+    #    ("Oostkolk", "Westkolk", "Jachtensluis", ...), never the shared suffix.
+    kolk_word = chamber_name.split()[0]
+    return matches_bivas[
+        names.str.contains(re.escape(sluis_name), case=False, na=False)
+        & names.str.contains(re.escape(kolk_word), case=False, na=False)
+    ]
+
+
 def get_val(series, name):
     """Safely get column value from Series checking for _fis suffixes and case insensitivity."""
     # Check suffixes
@@ -501,19 +1179,20 @@ def get_val(series, name):
     return None
 
 
-def main():
+def main(excel_path=LOCAL_EXCEL, euris_path=None):
     print("Starting validation report generator...")
 
     # 1. Load Survey Data and Target Locks Excel
     issue_body = get_issue_body()
     survey_df = parse_survey_table(issue_body)
-    excel_df = parse_local_excel()
+    excel_df = parse_local_excel(excel_path)
 
     # 2. Load and normalize primary GIS datasets
     print("Loading FIS chambers...")
     fis = gpd.read_parquet(FIS_CHAMBERS)
-    print("Loading EURIS chambers...")
-    euris = gpd.read_file(EURIS_CHAMBERS)
+    euris_path = euris_path or find_euris_chambers()
+    print(f"Loading EURIS chambers from {euris_path}...")
+    euris = gpd.read_file(euris_path)
 
     print("Normalizing attributes based on schema.toml...")
     schema = utils.load_schema()
@@ -526,6 +1205,11 @@ def main():
     # 3. Load aimed water levels for vertical datum conversions
     print("Loading Aimed Levels...")
     aimed_levels = gpd.read_parquet(AIMED_LEVELS)
+    # aimedwaterlevel carries the operating range (max +/- deviation) per fairway,
+    # used for the water-level cross-section figure.
+    aimed_waterlevels = None
+    if os.path.exists(AIMED_WATERLEVELS):
+        aimed_waterlevels = gpd.read_parquet(AIMED_WATERLEVELS)
 
     # Standardize crs to RD (EPSG:28992) for spatial processing
     if fis.crs is None:
@@ -538,6 +1222,63 @@ def main():
     fis_rd = fis.to_crs(epsg=28992)
     euris_rd = euris.to_crs(epsg=28992)
     aimed_rd = aimed_levels.to_crs(epsg=28992)
+
+    # Independent geometric measurement from the chamber footprint polygon.
+    obb = fis_rd.geometry.apply(oriented_bbox_dims)
+    fis_rd["obb_length"] = obb.apply(lambda t: t[0])
+    fis_rd["obb_width"] = obb.apply(lambda t: t[1])
+
+    # Spatially join nearest fairwaydepth ReferenceLevel to each chamber.
+    # This tells us whether the sill depth is relative to KP, SP, or NAP.
+    FAIRWAY_DEPTH = "output/fis-export/fairwaydepth.geoparquet"
+    if os.path.exists(FAIRWAY_DEPTH):
+        fd = gpd.read_parquet(FAIRWAY_DEPTH)
+        if fd.crs is None:
+            fd = fd.set_crs(epsg=4326)
+        fd_rd = fd.to_crs(epsg=28992)
+        fis_centroids_fd = gpd.GeoDataFrame(
+            fis_rd[["id"]], geometry=fis_rd.geometry.centroid, crs="EPSG:28992"
+        )
+        fd_joined = gpd.sjoin_nearest(
+            fis_centroids_fd,
+            fd_rd[["ReferenceLevel", "geometry"]],
+            how="left",
+            max_distance=500,
+        ).drop_duplicates(subset=["id"])
+        fis_rd = fis_rd.merge(
+            fd_joined[["id", "ReferenceLevel"]].rename(
+                columns={"ReferenceLevel": "fairway_ref_level"}
+            ),
+            on="id",
+            how="left",
+        )
+    else:
+        fis_rd["fairway_ref_level"] = None
+
+    # Nearest operating-range deviations per chamber (for the cross-section figure).
+    if aimed_waterlevels is not None:
+        if aimed_waterlevels.crs is None:
+            aimed_waterlevels.set_crs(epsg=4326, inplace=True)
+        awl_rd = aimed_waterlevels.to_crs(epsg=28992)
+        awl_cols = ["MaximumNegativeDeviation", "MaximumPositiveDeviation", "geometry"]
+        awl_centroids = gpd.GeoDataFrame(
+            fis_rd[["id"]], geometry=fis_rd.geometry.centroid, crs="EPSG:28992"
+        )
+        joined_range = gpd.sjoin_nearest(
+            awl_centroids, awl_rd[awl_cols], how="left", max_distance=1000
+        ).drop_duplicates(subset=["id"])
+        fis_rd = fis_rd.merge(
+            joined_range[
+                ["id", "MaximumNegativeDeviation", "MaximumPositiveDeviation"]
+            ].rename(
+                columns={
+                    "MaximumNegativeDeviation": "level_dev_neg",
+                    "MaximumPositiveDeviation": "level_dev_pos",
+                }
+            ),
+            on="id",
+            how="left",
+        )
 
     # 4. Join Aimed Water Levels to FIS Chambers
     print("Joining target waterway levels to FIS chambers...")
@@ -597,6 +1338,11 @@ def main():
     # 7. Query OSM dimensions and generate final stats for target locks
     results_list = []
 
+    # Count chambers per complex to determine if BIVAS check is applicable.
+    # BIVAS averages parallel chambers, so BIVAS divergence is only meaningful
+    # for single-chamber complexes.
+    kolk_count = excel_df.groupby("Sluis_0").size().to_dict()
+
     total_chambers = len(excel_df)
     print(f"\nValidating dimensions for target locks ({total_chambers} chambers)...")
     from tqdm import tqdm
@@ -607,31 +1353,8 @@ def main():
         sluis_name = row["Sluis_0"]
         chamber_name = row["name_1"]
         tqdm.write(f"Processing {sluis_name} - {chamber_name}...")
-        excel_id = str(row["route_id_2"]).split(".")[0]
-
-        # Find match in matches_bivas using Name or Id
-        match = matches_bivas[
-            (matches_bivas["name_fis"].str.contains(sluis_name, case=False, na=False))
-            & (
-                matches_bivas["name_fis"].str.contains(
-                    chamber_name.split()[-1], case=False, na=False
-                )
-            )
-        ]
-
-        if match.empty:
-            # Fallback to loose name match
-            match = matches_bivas[
-                matches_bivas["name_fis"].str.contains(
-                    chamber_name, case=False, na=False
-                )
-            ]
-
-        if match.empty:
-            # Fallback to Excel route_id matching ParentId
-            match = matches_bivas[
-                matches_bivas["parent_id_fis"].astype(str) == excel_id
-            ]
+        # Match this Excel target to its specific FIS chamber (per kolk).
+        match = match_chamber(matches_bivas, sluis_name, chamber_name)
 
         if not match.empty:
             m_row = match.iloc[0]
@@ -654,85 +1377,68 @@ def main():
             fis_struct_len = get_val(m_row, "dim_structural_length")
             fis_struct_wid = get_val(m_row, "dim_structural_width")
 
-            # Convert EURIS cm to m
+            # EURIS dimensions are already in meters here: schema.toml maps the
+            # centimeter source fields (mlengthcm, mwidthcm, avl_length, cl_width)
+            # to *_cm canonical names, and normalize_attributes converts them.
             euris_len = m_row.get("dim_usable_length_euris")
             euris_wid = m_row.get("dim_gate_width_euris")
-
-            # EURIS structural dimensions are in cm, divide by 100
             euris_struct_len = m_row.get("dim_structural_length_euris")
-            if pd.notna(euris_struct_len):
-                euris_struct_len = float(euris_struct_len) / 100.0
             euris_struct_wid = m_row.get("dim_structural_width_euris")
-            if pd.notna(euris_struct_wid):
-                euris_struct_wid = float(euris_struct_wid) / 100.0
+
+            # Independent geometric footprint measurement (per chamber).
+            obb_len = m_row.get("obb_length")
+            obb_wid = m_row.get("obb_width")
+
+            # EURIS is a derivative of FIS, so agreement is expected and adds no
+            # confidence. Only a *mismatch* is a signal (data-propagation error).
+            def _diff(a, b, tol):
+                return pd.notna(a) and pd.notna(b) and abs(float(a) - float(b)) > tol
+
+            euris_neq_fis = (
+                _diff(fis_struct_len, euris_struct_len, 0.5)
+                or _diff(fis_struct_wid, euris_struct_wid, 0.1)
+                or _diff(fis_len, euris_len, 0.5)
+                or _diff(fis_wid, euris_wid, 0.1)
+            )
 
             bivas_len = m_row.get("bivas_length")
             bivas_wid = m_row.get("bivas_width")
 
-            # Threshold calculations
-            # Extract streefpeil (aimed level)
-            streefpeil = m_row.get("target_water_level_nap")
+            # Sill depth from FIS
+            sill_raw_bobi = get_val(m_row, "SillDepthBoBi")
+            if pd.isna(sill_raw_bobi):
+                sill_raw_bobi = get_val(m_row, "ThresholdLowerLevel")
+            sill_raw_bebu = get_val(m_row, "SillDepthBeBu")
+            if pd.isna(sill_raw_bebu):
+                sill_raw_bebu = get_val(m_row, "ThresholdUpperLevel")
 
-            # sill depth
-            sill_depth_bobi = get_val(m_row, "sill_depth_bo_bi")
-            if pd.isna(sill_depth_bobi):
-                sill_depth_bobi = get_val(m_row, "ThresholdLowerLevel")
-            if pd.isna(sill_depth_bobi):
-                sill_depth_bobi = get_val(m_row, "dim_threshold_lower")
-
-            sill_depth_bebu = get_val(m_row, "sill_depth_be_bu")
-            if pd.isna(sill_depth_bebu):
-                sill_depth_bebu = get_val(m_row, "ThresholdUpperLevel")
-            if pd.isna(sill_depth_bebu):
-                sill_depth_bebu = get_val(m_row, "dim_threshold_upper")
-
-            # Get reference level datums
-            ref_bobi = m_row.get("reference_level_inner")
-            if pd.isna(ref_bobi) or not ref_bobi:
-                ref_bobi = m_row.get("height_reference_level")
-            if (
-                pd.isna(ref_bobi)
-                or not ref_bobi
-                or str(ref_bobi).upper() in ["BO/BI", "BE/BU"]
-            ):
-                ref_bobi = "KP/SP (nog te controleren via kaarten)"
-
-            ref_bebu = m_row.get("ref_level_name")
-            if (
-                pd.isna(ref_bebu)
-                or not ref_bebu
-                or str(ref_bebu).upper() in ["BO/BI", "BE/BU"]
-            ):
-                ref_bebu = "KP/SP (nog te controleren via kaarten)"
+            height_ref_str = m_row.get("HeightReferenceLevel") or m_row.get(
+                "height_reference_level"
+            )
+            fairway_ref = m_row.get("fairway_ref_level")
+            note_text = get_val(m_row, "Note") or get_val(m_row, "note")
 
             # Retrieve waterway levels for high/low sides
             waterway_hoog, peil_hoog, waterway_laag, peil_laag = get_waterway_levels(
                 sluis_name
             )
 
-            # Calculate absolute threshold heights
-            threshold_height_bobi = None
-            threshold_height_bebu = None
-            if pd.notna(sill_depth_bobi):
-                try:
-                    val = float(sill_depth_bobi)
-                    ref_peil = peil_hoog if peil_hoog is not None else streefpeil
-                    if pd.notna(ref_peil):
-                        threshold_height_bobi = ref_peil - abs(val)
-                    else:
-                        threshold_height_bobi = val if val < 0 else -val
-                except Exception:
-                    pass
-            if pd.notna(sill_depth_bebu):
-                try:
-                    val = float(sill_depth_bebu)
-                    ref_peil = peil_laag if peil_laag is not None else streefpeil
-                    if pd.notna(ref_peil):
-                        threshold_height_bebu = ref_peil - abs(val)
-                    else:
-                        threshold_height_bebu = val if val < 0 else -val
-                except Exception:
-                    pass
+            # Resolve sill heights to NAP with explicit source tracking
+            sill_bobi_nap, sill_bobi_source, sill_bobi_uncertain = resolve_sill_nap(
+                sill_raw_bobi, height_ref_str, fairway_ref, peil_hoog, note_text, "bobi"
+            )
+            sill_bebu_nap, sill_bebu_source, sill_bebu_uncertain = resolve_sill_nap(
+                sill_raw_bebu, height_ref_str, fairway_ref, peil_laag, note_text, "bebu"
+            )
+
+            # Legacy aliases (used in report)
+            threshold_height_bobi = sill_bobi_nap
+            threshold_height_bebu = sill_bebu_nap
+            ref_bobi = sill_bobi_source
+            ref_bebu = sill_bebu_source
+            sill_depth_bobi = sill_raw_bobi
+            sill_depth_bebu = sill_raw_bebu
+            streefpeil = m_row.get("target_water_level_nap")
 
             # Operator survey match
             survey_match = survey_df[
@@ -809,6 +1515,14 @@ def main():
             aerial_path = download_aerial_photo(
                 sluis_clean, chamber_clean, m_row["geometry_fis"].centroid
             )
+            footprint_path = generate_footprint_map(
+                sluis_clean,
+                chamber_clean,
+                m_row["geometry_fis"],
+                fis_struct_len,
+                fis_struct_wid,
+                m_row["geometry_fis"].centroid,
+            )
             chart_path = generate_comparison_chart(
                 sluis_clean,
                 chamber_clean,
@@ -824,48 +1538,64 @@ def main():
                 selected_wid,
             )
 
-            # Calculate discrepancy flags
-            mismatch_fis_euris = False
-            if (
-                pd.notna(fis_len)
-                and pd.notna(euris_len)
-                and abs(fis_len - euris_len) > 0.5
-            ):
-                mismatch_fis_euris = True
-            if (
-                pd.notna(fis_wid)
-                and pd.notna(euris_wid)
-                and abs(fis_wid - euris_wid) > 0.1
-            ):
-                mismatch_fis_euris = True
+            # Kolk count for this complex (determines if BIVAS check applies)
+            n_kolken = kolk_count.get(sluis_name, 1)
+            is_single_kolk = n_kolken == 1
 
-            outlier_bivas = False
-            if (
-                pd.notna(fis_len)
-                and pd.notna(bivas_len)
-                and abs(fis_len - bivas_len) > 2.0
-            ):
-                outlier_bivas = True
-            if (
-                pd.notna(fis_wid)
-                and pd.notna(bivas_wid)
-                and abs(fis_wid - bivas_wid) > 0.2
-            ):
-                outlier_bivas = True
+            # Violation counter: track available checks and how many fail
+            n_checks = 0
+            n_violations = 0
+            check_details = []
+
+            def _check(label, val_a, val_b, tol):
+                nonlocal n_checks, n_violations
+                a, b = to_f(val_a), to_f(val_b)
+                if a is not None and b is not None:
+                    n_checks += 1
+                    if abs(a - b) > tol:
+                        n_violations += 1
+                        check_details.append(f"✗ {label}")
+                    else:
+                        check_details.append(f"✓ {label}")
+
+            _check("Enquête≠FIS lengte", survey_len, fis_len, 2.0)
+            _check("Enquête≠FIS breedte", survey_wid, fis_wid, 0.1)
+            if is_single_kolk:
+                _check("BIVAS≠FIS lengte", bivas_len, fis_len, 2.0)
+                _check("BIVAS≠FIS breedte", bivas_wid, fis_wid, 0.1)
+            disk_len = (
+                row.get("schut_lengte_25")
+                if pd.notna(row.get("schut_lengte_25", float("nan")))
+                else row.get("length_27")
+            )
+            _check("DISK≠FIS lengte", disk_len, fis_len, 2.0)
+
+            violations_str = (
+                f"{n_violations}/{n_checks} checks afwijkend"
+                if n_checks > 0
+                else "Geen checks beschikbaar"
+            )
+
+            # Calculate discrepancy flags
+            mismatch_fis_euris = euris_neq_fis  # already computed above
 
             outlier_survey = False
-            if pd.notna(fis_len) and pd.notna(survey_len):
-                try:
-                    if abs(fis_len - float(survey_len)) > 2.0:
-                        outlier_survey = True
-                except Exception:
-                    pass
-            if pd.notna(fis_wid) and pd.notna(survey_wid):
-                try:
-                    if abs(fis_wid - float(survey_wid)) > 0.2:
-                        outlier_survey = True
-                except Exception:
-                    pass
+            if to_f(survey_len) is not None and to_f(fis_len) is not None:
+                if abs(to_f(survey_len) - to_f(fis_len)) > 2.0:
+                    outlier_survey = True
+            if to_f(survey_wid) is not None and to_f(fis_wid) is not None:
+                if abs(to_f(survey_wid) - to_f(fis_wid)) > 0.2:
+                    outlier_survey = True
+
+            # BIVAS divergence is only meaningful for single-kolk complexes
+            outlier_bivas = False
+            if is_single_kolk:
+                if to_f(fis_len) is not None and to_f(bivas_len) is not None:
+                    if abs(to_f(fis_len) - to_f(bivas_len)) > 2.0:
+                        outlier_bivas = True
+                if to_f(fis_wid) is not None and to_f(bivas_wid) is not None:
+                    if abs(to_f(fis_wid) - to_f(bivas_wid)) > 0.2:
+                        outlier_bivas = True
 
             status_str = "Consistent"
             action_desc = "Akkoord (Geen actie vereist)"
@@ -885,6 +1615,33 @@ def main():
                     action_desc = "Akkoord (Geen actie): BIVAS gebruikt complex-gemiddelde; FIS & Enquête bevestigen waarde"
                 else:
                     action_desc = "Handmatige controle vereist: Controleer of BIVAS-afwijking door complex-gemiddelde komt"
+
+            # Generate side-view and decision figures
+            sideview_path = generate_sideview_chart(
+                sluis_clean,
+                chamber_clean,
+                waterway_hoog,
+                peil_hoog,
+                waterway_laag,
+                peil_laag,
+                sill_bobi_nap,
+                sill_bobi_uncertain,
+                sill_bebu_nap,
+                sill_bebu_uncertain,
+                fis_struct_len=fis_struct_len,
+            )
+            decision_path = generate_decision_figure(
+                sluis_clean,
+                chamber_clean,
+                fis_len,
+                osm_dims.get("osm_length"),
+                bivas_len,
+                survey_len,
+                euris_neq_fis,
+                n_violations,
+                n_checks,
+                is_single_kolk,
+            )
 
             # Build result
             results_list.append(
@@ -931,6 +1688,7 @@ def main():
                     "ref_bebu": ref_bebu,
                     "note": get_val(m_row, "note"),
                     "aerial_path": aerial_path,
+                    "footprint_path": footprint_path,
                     "chart_path": chart_path,
                     # New parameters: physical/structural dimensions and side-specific water levels
                     "fis_struct_len": fis_struct_len,
@@ -941,6 +1699,22 @@ def main():
                     "peil_hoog": peil_hoog,
                     "waterway_laag": waterway_laag,
                     "peil_laag": peil_laag,
+                    # Independent geometric footprint measurement + integrity flag.
+                    "obb_len": obb_len,
+                    "obb_wid": obb_wid,
+                    "euris_neq_fis": euris_neq_fis,
+                    "level_dev_neg": m_row.get("level_dev_neg"),
+                    "level_dev_pos": m_row.get("level_dev_pos"),
+                    "sideview_path": sideview_path,
+                    "decision_path": decision_path,
+                    "violations_str": violations_str,
+                    "n_violations": n_violations,
+                    "n_checks": n_checks,
+                    "is_single_kolk": is_single_kolk,
+                    "sill_bobi_source": sill_bobi_source,
+                    "sill_bebu_source": sill_bebu_source,
+                    "sill_bobi_uncertain": sill_bobi_uncertain,
+                    "sill_bebu_uncertain": sill_bebu_uncertain,
                 }
             )
         else:
@@ -977,20 +1751,17 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
 ### Vergelijking Fysieke vs. Schut/Toegestane Afmetingen (meters)
 *Opmerking: Fysieke afmetingen representeren de constructie. Schut/toegestane afmetingen representeren de bruikbare scheepsmaat.*
 
-| Sluis | Kolknaam | ISRS-code | Fysieke Lengte (FIS) | Fysieke Lengte (EURIS) | Schutlengte (FIS) | Schutlengte (EURIS) | BIVAS Lengte | Enquête Lengte | Geselecteerde Schutlengte | Fysieke Breedte (FIS) | Fysieke Breedte (EURIS) | Schutbreedte (FIS) | Schutbreedte (EURIS) | BIVAS Breedte | Enquête Breedte | Geselecteerde Schutbreedte | Uitkomst & Actie |
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| Sluis | Kolknaam | ISRS-code | Constr. Lengte (m) | Schutlengte (m) | Schutbreedte (m) | BIVAS Lengte | Enquête Lengte | DISK Lengte | Checks |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 """
     for r in results_list:
+        bivas_note = "" if r.get("is_single_kolk", True) else " (multi-kolk)"
         report_content += (
             f"| **{r['Sluis']}** | {r['name']} | `{r['isrs']}` | "
-            f"{r['fis_struct_len'] or 'nan'} | {r['euris_struct_len'] or 'nan'} | "
-            f"{r['fis_len'] or 'nan'} | {r['euris_len'] or 'nan'} | "
-            f"{r['bivas_len'] or 'nan'} | {r['survey_len'] or 'nan'} | "
-            f"**{r['selected_len'] or 'nan'}** | "
-            f"{r['fis_struct_wid'] or 'nan'} | {r['euris_struct_wid'] or 'nan'} | "
-            f"{r['fis_wid'] or 'nan'} | {r['euris_wid'] or 'nan'} | "
-            f"{r['bivas_wid'] or 'nan'} | {r['survey_wid'] or 'nan'} | "
-            f"**{r['selected_wid'] or 'nan'}** | {r['action_desc']} |\n"
+            f"{r['fis_struct_len'] or 'nan'} | {r['fis_len'] or 'nan'} | "
+            f"{r['fis_wid'] or 'nan'} | "
+            f"{r['bivas_len'] or 'nan'}{bivas_note} | {r['survey_len'] or 'nan'} | "
+            f"{r.get('disk_len') or 'nan'} | {r.get('violations_str', 'n.v.t.')} |\n"
         )
 
     report_content += """
@@ -1482,13 +2253,13 @@ def write_html_report(results_list):
                             <th>Waterweg</th>
                             <th>Streefpeil (NAP)</th>
                             <th>FIS Drempel</th>
-                            <th>Berekend (NAP)</th>
+                            <th>NAP Hoogte (bron)</th>
                             <th>Referentie</th>
                             <th>Enquête</th>
                             <th>Waterweg</th>
                             <th>Streefpeil (NAP)</th>
                             <th>FIS Drempel</th>
-                            <th>Berekend (NAP)</th>
+                            <th>NAP Hoogte (bron)</th>
                             <th>Referentie</th>
                             <th>Enquête</th>
                         </tr>
@@ -1524,13 +2295,13 @@ def write_html_report(results_list):
                             <td><span style="font-size:0.75rem;">{r["waterway_hoog"]}</span></td>
                             <td>{peil_h}</td>
                             <td>{r["raw_bobi"] or "nan"}</td>
-                            <td><strong>{calc_bobi} m</strong></td>
+                            <td><strong>{calc_bobi} m</strong><br><span style="font-size:0.7rem;color:#64748b;">{r.get("sill_bobi_source", "?")}</span>{"⚠" if r.get("sill_bobi_uncertain") else ""}</td>
                             <td><span class="isrs">{r["ref_bobi"]}</span></td>
                             <td>{r["survey_drempel_bobi"] or "nan"}</td>
                             <td><span style="font-size:0.75rem;">{r["waterway_laag"]}</span></td>
                             <td>{peil_l}</td>
                             <td>{r["raw_bebu"] or "nan"}</td>
-                            <td><strong>{calc_bebu} m</strong></td>
+                            <td><strong>{calc_bebu} m</strong><br><span style="font-size:0.7rem;color:#64748b;">{r.get("sill_bebu_source", "?")}</span>{"⚠" if r.get("sill_bebu_uncertain") else ""}</td>
                             <td><span class="isrs">{r["ref_bebu"]}</span></td>
                             <td>{r["survey_drempel_bebu"] or "nan"}</td>
                             <td style="color:#64748b; font-style:italic; font-size:0.75rem;">{note_snippet}</td>
@@ -1560,15 +2331,31 @@ def write_html_report(results_list):
         peil_h = f"{r['peil_hoog']:.2f} m" if pd.notna(r["peil_hoog"]) else "nan"
         peil_l = f"{r['peil_laag']:.2f} m" if pd.notna(r["peil_laag"]) else "nan"
 
+        _no_img = '<div style="background:#e2e8f0; height:200px; display:flex; align-items:center; justify-content:center; border-radius:0.375rem; border:1px solid #cbd5e1; color:#94a3b8;">Niet beschikbaar</div>'
         aerial_html = (
             f'<img src="{r["aerial_path"]}" alt="PDOK Luchtfoto">'
-            if r["aerial_path"]
-            else '<div style="background:#e2e8f0; height:200px; display:flex; align-items:center; justify-content:center; border-radius:0.375rem; border:1px solid #cbd5e1; color:#94a3b8;">Geen luchtfoto beschikbaar</div>'
+            if r.get("aerial_path")
+            else _no_img
         )
-        chart_html = (
-            f'<img src="{r["chart_path"]}" alt="Matplotlib vergelijkingstabel">'
-            if r["chart_path"]
-            else '<div style="background:#e2e8f0; height:200px; display:flex; align-items:center; justify-content:center; border-radius:0.375rem; border:1px solid #cbd5e1; color:#94a3b8;">Geen grafiek beschikbaar</div>'
+        footprint_html = (
+            f'<img src="{r["footprint_path"]}" alt="Voetafdruk met OBB">'
+            if r.get("footprint_path")
+            else aerial_html
+        )
+        (
+            f'<img src="{r["chart_path"]}" alt="Afmetingen vergelijking">'
+            if r.get("chart_path")
+            else _no_img
+        )
+        sideview_html = (
+            f'<img src="{r["sideview_path"]}" alt="Zijaanzicht waterstanden">'
+            if r.get("sideview_path")
+            else _no_img
+        )
+        decision_html = (
+            f'<img src="{r["decision_path"]}" alt="Databronnen betrouwbaarheid">'
+            if r.get("decision_path")
+            else _no_img
         )
 
         if r["status_str"] == "Consistent":
@@ -1584,56 +2371,18 @@ def write_html_report(results_list):
             card_badge = '<span class="badge badge-info">BIVAS Afwijking</span>'
             card_class = "lock-card-discrepancy"
 
-        len_method = r["selection_method_len"]
-        style_sf = (
-            "style AgreeSF fill:#dcfce7,stroke:#15803d,stroke-width:2px"
-            if "Enquête & FIS" in len_method
-            else ""
-        )
-        style_fb = (
-            "style AgreeFB fill:#dcfce7,stroke:#15803d,stroke-width:2px"
-            if "FIS & BIVAS" in len_method
-            else ""
-        )
-        style_unsure = (
-            "style UnsureManual fill:#fee2e2,stroke:#b91c1c,stroke-width:2px"
-            if "Onzeker" in len_method
-            else ""
-        )
+        r["selection_method_len"]
 
-        style_peil_yes = (
+        (
             "style Calc1 fill:#dcfce7,stroke:#15803d,stroke-width:2px"
             if pd.notna(r["streefpeil"])
             else ""
         )
-        style_peil_no = (
+        (
             "style Calc2 fill:#dcfce7,stroke:#15803d,stroke-width:2px"
             if pd.isna(r["streefpeil"])
             else ""
         )
-
-        mermaid_len = f"""
-graph TD
-    Start[Kies Afmeting] --> Check1{{{{Komen Enquête & FIS overeen?}}}}
-    Check1 -- Ja --> AgreeSF[Overeenstemming: Enquête & FIS]
-    Check1 -- Nee --> Check2{{{{Komen FIS & BIVAS overeen?}}}}
-    Check2 -- Ja --> AgreeFB[Overeenstemming: FIS & BIVAS]
-    Check2 -- Nee --> UnsureManual[Onzeker: Handmatige controle vereist]
-    
-    {style_sf}
-    {style_fb}
-    {style_unsure}
-"""
-
-        mermaid_threshold = f"""
-graph TD
-    Start[Drempelhoogte NAP] --> CheckPeil{{{{Is Streefpeil aanwezig?}}}}
-    CheckPeil -- Ja --> Calc1[Hoogte = Streefpeil - Diepte]
-    CheckPeil -- Nee --> Calc2[Hoogte = -Diepte NAP fallback]
-    
-    {style_peil_yes}
-    {style_peil_no}
-"""
 
         html_content += f"""
                 <div class="lock-card {card_class}" id="{r["Sluis"]}_{r["name"]}">
@@ -1642,6 +2391,7 @@ graph TD
                         <div>
                             {card_badge}
                             <span class="isrs" style="margin-left: 0.5rem;">ISRS: {r["isrs"]}</span>
+                            <span style="margin-left: 0.5rem; font-size: 0.75rem; color: #64748b;">{r.get("violations_str", "n.v.t.")}</span>
                         </div>
                     </div>
                     <div class="lock-body">
@@ -1653,28 +2403,26 @@ graph TD
                                     <tr><td>Geselecteerde Schutbreedte</td><td><strong>{r["selected_wid"] or "nan"} m</strong> ({r["selection_method_wid"]})</td></tr>
                                     <tr><td>Fysieke Lengte (FIS)</td><td>{r["fis_struct_len"] or "nan"} m</td></tr>
                                     <tr><td>Fysieke Breedte (FIS)</td><td>{r["fis_struct_wid"] or "nan"} m</td></tr>
-                                    <tr><td>Hoge Zijde ({r["waterway_hoog"]})</td><td>Streefpeil: {peil_h} | Drempel Bo/Bi NAP: <strong>{calc_bobi} m</strong> (Enquête: {r["survey_drempel_bobi"] or "nan"})</td></tr>
-                                    <tr><td>Lage Zijde ({r["waterway_laag"]})</td><td>Streefpeil: {peil_l} | Drempel Be/Bu NAP: <strong>{calc_bebu} m</strong> (Enquête: {r["survey_drempel_bebu"] or "nan"})</td></tr>
+                                    <tr><td>Hoge Zijde ({r["waterway_hoog"]})</td><td>Streefpeil: {peil_h} | Drempel Bo/Bi NAP: <strong>{calc_bobi} m</strong> [{r.get("sill_bobi_source") or ""}] (Enquête: {r["survey_drempel_bobi"] or "nan"})</td></tr>
+                                    <tr><td>Lage Zijde ({r["waterway_laag"]})</td><td>Streefpeil: {peil_l} | Drempel Be/Bu NAP: <strong>{calc_bebu} m</strong> [{r.get("sill_bebu_source") or ""}] (Enquête: {r["survey_drempel_bebu"] or "nan"})</td></tr>
                                 </table>
                             </div>
                             {f'<div class="note-text"><strong>Opmerking:</strong> {r["note"]}</div>' if pd.notna(r["note"]) else ""}
                         </div>
                         <div class="visuals-panel">
-                            <h4>PDOK Luchtfoto (700m)</h4>
-                            {aerial_html}
-                            <h5>Bron: Actueel_ortho25 (WMS)</h5>
+                            <h4>Voetafdruk (FIS kolk)</h4>
+                            {footprint_html}
+                            <h5>Bron: PDOK Actueel_ortho25 + FIS geometrie</h5>
                         </div>
                         <div class="visuals-panel">
-                            <h4>Visualisatie van Afmetingen</h4>
-                            {chart_html}
-                            <h5>Bron: FIS / EURIS / BIVAS / Enquête</h5>
+                            <h4>Zijaanzicht: Waterstanden & Drempels</h4>
+                            {sideview_html}
+                            <h5>Bron: FIS streefpeil + drempelhoogte t.o.v. NAP</h5>
                         </div>
                         <div class="visuals-panel">
-                            <h4>Beslissingslogica</h4>
-                            <div style="font-weight:600; font-size:0.75rem; margin-bottom:0.25rem; color:#475569;">Selectiepad Afmetingen:</div>
-                            <pre class="mermaid">{mermaid_len}</pre>
-                            <div style="font-weight:600; font-size:0.75rem; margin-top:0.5rem; margin-bottom:0.25rem; color:#475569;">Selectiepad Drempelhoogte:</div>
-                            <pre class="mermaid">{mermaid_threshold}</pre>
+                            <h4>Databronnen lengte ({r.get("violations_str", "n.v.t.")})</h4>
+                            {decision_html}
+                            <h5>Bron: FIS / OSM / BIVAS / Enquête</h5>
                         </div>
                     </div>
                 </div>"""
@@ -1697,4 +2445,19 @@ graph TD
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Validate Dutch lock dimensions across FIS/EURIS/BIVAS/survey/OSM."
+    )
+    parser.add_argument(
+        "--excel",
+        default=LOCAL_EXCEL,
+        help="Path to Chamber_comparison.xlsx (default: committed copy; "
+        "env LOCK_VALIDATION_EXCEL also honored).",
+    )
+    parser.add_argument(
+        "--euris-chambers",
+        default=None,
+        help="Path to a EURIS LockChamber_*.geojson (default: newest NL export).",
+    )
+    args = parser.parse_args()
+    main(excel_path=args.excel, euris_path=args.euris_chambers)
