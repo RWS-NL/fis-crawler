@@ -13,6 +13,13 @@ from shapely.geometry import Point, LineString
 import requests
 from fis import utils
 
+# Ensure the lock_validation package directory is on the path so the sibling
+# bathymetry module can be imported regardless of how the script is invoked.
+import sys as _sys
+
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bathymetry as bathy_mod
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -30,6 +37,7 @@ DEFAULT_EXCEL = os.path.join(SCRIPT_DIR, "data", "Chamber_comparison.xlsx")
 LOCAL_EXCEL = os.environ.get("LOCK_VALIDATION_EXCEL", DEFAULT_EXCEL)
 BIVAS_DB = "reference/Bivas.5.10.1.sqlite"
 FIS_CHAMBERS = "output/fis-export/chamber.geoparquet"
+FIS_SECTIONS = "output/fis-export/section.geoparquet"
 EURIS_DIR = "output/euris-export"
 AIMED_LEVELS = "output/fis-export/aimedlevel.geoparquet"
 AIMED_WATERLEVELS = "output/fis-export/aimedwaterlevel.geoparquet"
@@ -262,7 +270,7 @@ def download_aerial_photo(sluis_clean, chamber_clean, centroid):
         f"BBOX={bbox_str}&WIDTH=400&HEIGHT=400&FORMAT=image/jpeg"
     )
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, timeout=30)
         if r.status_code == 200 and len(r.content) > 1000:
             with open(path, "wb") as f:
                 f.write(r.content)
@@ -289,6 +297,7 @@ def generate_footprint_map(
     centroid_rd,
     obb_len=None,
     obb_wid=None,
+    profile_line_rd=None,
 ):
     """Plot FIS chamber polygon + minimum rotated rectangle on the PDOK aerial background."""
     filename = f"{sluis_clean}_{chamber_clean}_footprint.png"
@@ -357,6 +366,23 @@ def generate_footprint_map(
                             boxstyle="round,pad=0.2", facecolor="#0f172a", alpha=0.8
                         ),
                     )
+        except Exception:
+            pass
+
+    # Draw bathymetry profile centreline as thin white line
+    if profile_line_rd is not None:
+        try:
+            px, py = profile_line_rd.coords.xy
+            ax.plot(
+                list(px),
+                list(py),
+                color="white",
+                linewidth=1.2,
+                linestyle="-",
+                alpha=0.75,
+                label="Profiel-as",
+                zorder=5,
+            )
         except Exception:
             pass
 
@@ -491,18 +517,43 @@ def generate_sideview_chart(
     sill_bebu_nap,
     sill_bebu_uncertain,
     fis_struct_len=None,
+    bobi_measured=None,
+    bebu_measured=None,
+    lock_type="river",
+    bathy_result=None,
 ):
-    """Engineering cross-section: lock chamber with walls, sill depths, and water levels per side."""
+    """Engineering cross-section with optional bottom-profile panel below."""
     filename = f"{sluis_clean}_{chamber_clean}_sideview.png"
     path = os.path.join(SIDEVIEWS_DIR, filename)
     if os.path.exists(path):
         return f"images/sideviews/{filename}"
 
     levels = [
-        v for v in [peil_hoog, peil_laag, sill_bobi_nap, sill_bebu_nap] if v is not None
+        v
+        for v in [
+            peil_hoog,
+            peil_laag,
+            sill_bobi_nap,
+            sill_bebu_nap,
+            bobi_measured,
+            bebu_measured,
+        ]
+        if v is not None
     ]
     if not levels:
         return None
+
+    # Side terminology: river/canal vs sea lock
+    if lock_type == "sea":
+        label_bobi = "Binnenhoofd (Bi)"
+        label_bebu = "Buitenhoofd (Bu)"
+        abbr_bobi = "Bi"
+        abbr_bebu = "Bu"
+    else:
+        label_bobi = "Bovenhoofd (Bo)"
+        label_bebu = "Benedenhoofd (Be)"
+        abbr_bobi = "Bo"
+        abbr_bebu = "Be"
 
     # Normalized x layout (total width = 20)
     # 0-2: BoBi water zone | 2-3: left wall | 3-17: chamber | 17-18: right wall | 18-20: BeBu water zone
@@ -517,7 +568,24 @@ def generate_sideview_chart(
     floor_nap = lowest - 1.5
     wall_top = highest + 1.0
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    # Determine if we have a valid profile to show as a second panel
+    profile_data = None
+    if bathy_result:
+        _prof = bathy_result.get("profile", [])
+        _ys = [v for _, v in _prof if v is not None]
+        if _ys:
+            profile_data = bathy_result
+
+    if profile_data is not None:
+        import matplotlib.gridspec as gridspec
+
+        fig = plt.figure(figsize=(10, 7), constrained_layout=True)
+        gs = gridspec.GridSpec(2, 1, height_ratios=[2, 1], figure=fig)
+        ax = fig.add_subplot(gs[0])
+        ax_prof = fig.add_subplot(gs[1])
+    else:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax_prof = None
 
     wall_color = "#6b7280"
     c_bobi = "#2b5c8f"
@@ -545,11 +613,11 @@ def generate_sideview_chart(
             [XL_W0, XL_WL0], floor_nap, peil_hoog, color=c_bobi, alpha=0.2, zorder=2
         )
         ax.plot([XL_W0, XL_WL0], [peil_hoog, peil_hoog], color=c_bobi, lw=2, zorder=4)
-        name_str = (waterway_hoog or "Bo/Bi")[:20]
+        name_str = (waterway_hoog or label_bobi)[:22]
         ax.text(
             -0.2,
             peil_hoog + 0.05,
-            f"{name_str}\n{peil_hoog:+.2f} m NAP",
+            f"{name_str}\nStreefpeil: {peil_hoog:+.2f} m NAP",
             fontsize=7,
             ha="right",
             va="bottom",
@@ -562,11 +630,11 @@ def generate_sideview_chart(
             [XR_WL1, XR_W1], floor_nap, peil_laag, color=c_bebu, alpha=0.2, zorder=2
         )
         ax.plot([XR_WL1, XR_W1], [peil_laag, peil_laag], color=c_bebu, lw=2, zorder=4)
-        name_str = (waterway_laag or "Be/Bu")[:20]
+        name_str = (waterway_laag or label_bebu)[:22]
         ax.text(
             20.2,
             peil_laag + 0.05,
-            f"{name_str}\n{peil_laag:+.2f} m NAP",
+            f"{name_str}\nStreefpeil: {peil_laag:+.2f} m NAP",
             fontsize=7,
             ha="left",
             va="bottom",
@@ -598,7 +666,7 @@ def generate_sideview_chart(
         ax.text(
             (XL_WL0 + XL_WL1) / 2,
             sill_bobi_nap + 0.1,
-            f"Bo/Bi: {sill_bobi_nap:+.2f} m{unc}",
+            f"{abbr_bobi} (FIS): {sill_bobi_nap:+.2f} m NAP{unc}",
             fontsize=6.5,
             ha="center",
             va="bottom",
@@ -649,7 +717,7 @@ def generate_sideview_chart(
         ax.text(
             (XR_WL0 + XR_WL1) / 2,
             sill_bebu_nap + 0.1,
-            f"Be/Bu: {sill_bebu_nap:+.2f} m{unc}",
+            f"{abbr_bebu} (FIS): {sill_bebu_nap:+.2f} m NAP{unc}",
             fontsize=6.5,
             ha="center",
             va="bottom",
@@ -702,21 +770,61 @@ def generate_sideview_chart(
     ax.text(
         (XL_W0 + XL_WL0) / 2,
         wall_top + 0.2,
-        "Bo/Bi\n(hoog)",
+        f"{label_bobi}\n(hoge zijde)",
         ha="center",
-        fontsize=8,
+        fontsize=7.5,
         color=c_bobi,
         fontweight="bold",
     )
     ax.text(
         (XR_WL1 + XR_W1) / 2,
         wall_top + 0.2,
-        "Be/Bu\n(laag)",
+        f"{label_bebu}\n(lage zijde)",
         ha="center",
-        fontsize=8,
+        fontsize=7.5,
         color=c_bebu,
         fontweight="bold",
     )
+
+    # Measured bottom at gate from bathymetry (1m raster)
+    c_bathy = "#5b4a2e"
+    if bobi_measured is not None:
+        ax.hlines(
+            bobi_measured,
+            XL_WL0 - 0.6,
+            XCH0 + 1.0,
+            colors=c_bathy,
+            lw=1.5,
+            linestyles="--",
+            zorder=5,
+        )
+        ax.text(
+            XCH0 + 1.1,
+            bobi_measured,
+            f"Meting: {bobi_measured:+.2f} m",
+            fontsize=6,
+            va="center",
+            color=c_bathy,
+        )
+    if bebu_measured is not None:
+        ax.hlines(
+            bebu_measured,
+            XCH1 - 1.0,
+            XR_WL1 + 0.6,
+            colors=c_bathy,
+            lw=1.5,
+            linestyles="--",
+            zorder=5,
+        )
+        ax.text(
+            XCH1 - 1.1,
+            bebu_measured,
+            f"Meting: {bebu_measured:+.2f} m",
+            fontsize=6,
+            va="center",
+            ha="right",
+            color=c_bathy,
+        )
 
     ax.set_xlim(-1.5, 21.5)
     ax.set_ylim(floor_nap - 0.3, wall_top + 0.8)
@@ -726,7 +834,108 @@ def generate_sideview_chart(
         f"Doorsnede: {sluis_clean} ({chamber_clean})", fontsize=10, fontweight="bold"
     )
     ax.grid(True, axis="y", linestyle="--", alpha=0.25, zorder=1)
-    fig.tight_layout()
+
+    # Bottom panel: bathymetry profile along chamber axis
+    if ax_prof is not None and profile_data is not None:
+        _prof = profile_data["profile"]
+        _gate1_d = profile_data["gate1_distance"]
+        _gate2_d = profile_data["gate2_distance"]
+        _crest1 = profile_data.get("crest1")
+        _crest2 = profile_data.get("crest2")
+
+        _xs = [d for d, _ in _prof]
+        _ys_raw = [v for _, v in _prof]
+        _ys = [y if y is not None else float("nan") for y in _ys_raw]
+        _valid = [v for v in _ys if v == v]
+
+        ax_prof.plot(_xs, _ys, color="#5b4a2e", lw=1.5, label="Bodem 1m-kaart")
+        _all_ref = _valid[:]
+        if peil_hoog is not None:
+            _all_ref.append(peil_hoog)
+        if peil_laag is not None:
+            _all_ref.append(peil_laag)
+        _y_lo = min(_all_ref) - 0.5 if _all_ref else -1
+        _y_hi = max(_all_ref) + 0.5 if _all_ref else 1
+        ax_prof.fill_between(_xs, _ys, _y_lo, color="#c8a87a", alpha=0.25)
+        ax_prof.set_ylim(_y_lo, _y_hi)
+
+        ax_prof.axvline(
+            _gate1_d, color=c_bobi, lw=1.2, linestyle="--", label=f"{abbr_bobi} deur"
+        )
+        ax_prof.axvline(
+            _gate2_d, color=c_bebu, lw=1.2, linestyle="--", label=f"{abbr_bebu} deur"
+        )
+
+        if _crest1 is not None:
+            ax_prof.scatter(
+                [_gate1_d],
+                [_crest1],
+                color=c_bobi,
+                zorder=6,
+                s=35,
+                label=f"Meting {abbr_bobi}: {_crest1:+.2f} m",
+            )
+        if _crest2 is not None:
+            ax_prof.scatter(
+                [_gate2_d],
+                [_crest2],
+                color=c_bebu,
+                zorder=6,
+                s=35,
+                label=f"Meting {abbr_bebu}: {_crest2:+.2f} m",
+            )
+
+        if sill_bobi_nap is not None:
+            ax_prof.axhline(
+                sill_bobi_nap,
+                color=c_bobi,
+                lw=0.9,
+                linestyle=":",
+                label=f"FIS {abbr_bobi}: {sill_bobi_nap:+.2f} m",
+            )
+        if sill_bebu_nap is not None:
+            ax_prof.axhline(
+                sill_bebu_nap,
+                color=c_bebu,
+                lw=0.9,
+                linestyle=":",
+                label=f"FIS {abbr_bebu}: {sill_bebu_nap:+.2f} m",
+            )
+
+        if peil_hoog is not None:
+            ax_prof.axhline(
+                peil_hoog,
+                color=c_bobi,
+                lw=0.8,
+                linestyle="-.",
+                alpha=0.5,
+                label=f"Peil {abbr_bobi}: {peil_hoog:+.2f} m",
+            )
+        if peil_laag is not None:
+            ax_prof.axhline(
+                peil_laag,
+                color=c_bebu,
+                lw=0.8,
+                linestyle="-.",
+                alpha=0.5,
+                label=f"Peil {abbr_bebu}: {peil_laag:+.2f} m",
+            )
+
+        if _y_lo < 0 < _y_hi:
+            ax_prof.axhline(0, color="black", lw=0.7, linestyle="--", alpha=0.4)
+            ax_prof.text(
+                _xs[-1], 0.05, "NAP", fontsize=6, ha="right", color="black", alpha=0.5
+            )
+
+        ax_prof.set_xlabel("Afstand langs kolk-as (m)", fontsize=8)
+        ax_prof.set_ylabel("NAP (m)", fontsize=8)
+        ax_prof.set_title("Bodemprofiel (bodemhoogte_1mtr)", fontsize=8)
+        ax_prof.legend(fontsize=6, loc="upper right", ncol=2)
+        ax_prof.grid(True, linestyle="--", alpha=0.2)
+        ax_prof.tick_params(labelsize=7)
+
+    if ax_prof is None:
+        fig.tight_layout()
     plt.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return f"images/sideviews/{filename}"
@@ -1245,6 +1454,12 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     # 2. Load and normalize primary GIS datasets
     print("Loading FIS chambers...")
     fis = gpd.read_parquet(FIS_CHAMBERS)
+    print("Loading FIS sections (vaarwegroutes)...")
+    try:
+        sections_rd = gpd.read_parquet(FIS_SECTIONS).to_crs(epsg=28992)
+    except Exception as e:
+        print(f"Warning: could not load sections ({e}); falling back to OBB axis.")
+        sections_rd = None
     euris_path = euris_path or find_euris_chambers()
     print(f"Loading EURIS chambers from {euris_path}...")
     euris = gpd.read_file(euris_path)
@@ -1406,6 +1621,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     # 7. Query OSM dimensions and generate final stats for target locks
     # 7. Query OSM dimensions and generate final stats for target locks
     results_list = []
+    bathy_cache = bathy_mod.load_cache()
 
     # Count chambers per complex to determine if BIVAS check is applicable.
     # BIVAS averages parallel chambers, so BIVAS divergence is only meaningful
@@ -1598,16 +1814,6 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
             aerial_path = download_aerial_photo(
                 sluis_clean, chamber_clean, m_row["geometry_fis"].centroid
             )
-            footprint_path = generate_footprint_map(
-                sluis_clean,
-                chamber_clean,
-                m_row["geometry_fis"],
-                fis_struct_len,
-                fis_struct_wid,
-                m_row["geometry_fis"].centroid,
-                obb_len=obb_len,
-                obb_wid=obb_wid,
-            )
             chart_path = generate_comparison_chart(
                 sluis_clean,
                 chamber_clean,
@@ -1703,7 +1909,33 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                 else:
                     action_desc = "Handmatige controle vereist: Controleer of BIVAS-afwijking door complex-gemiddelde komt"
 
-            # Generate side-view and decision figures
+            # Sample bottom profile from bodemhoogte_1mtr (1m raster, NAP, EPSG:28992)
+            bathy_result = bathy_mod.measure_sill_crests(
+                m_row["geometry_fis"], bathy_cache, sections_rd=sections_rd
+            )
+            bathy_mod.save_cache(bathy_cache)
+
+            bobi_measured = None
+            bebu_measured = None
+            profile_line_rd = None
+            if bathy_result is not None:
+                bobi_measured = bathy_result["crest1"]
+                bebu_measured = bathy_result["crest2"]
+                profile_line_rd = bathy_result.get("line")
+
+            footprint_path = generate_footprint_map(
+                sluis_clean,
+                chamber_clean,
+                m_row["geometry_fis"],
+                fis_struct_len,
+                fis_struct_wid,
+                m_row["geometry_fis"].centroid,
+                obb_len=obb_len,
+                obb_wid=obb_wid,
+                profile_line_rd=profile_line_rd,
+            )
+
+            # Generate side-view (with embedded profile panel when bathymetry available)
             sideview_path = generate_sideview_chart(
                 sluis_clean,
                 chamber_clean,
@@ -1716,6 +1948,9 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                 sill_bebu_nap,
                 sill_bebu_uncertain,
                 fis_struct_len=fis_struct_len,
+                bobi_measured=bobi_measured,
+                bebu_measured=bebu_measured,
+                bathy_result=bathy_result,
             )
             decision_path = generate_decision_figure(
                 sluis_clean,
@@ -1795,6 +2030,8 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                     "level_dev_pos": m_row.get("level_dev_pos"),
                     "sideview_path": sideview_path,
                     "decision_path": decision_path,
+                    "bobi_measured": bobi_measured,
+                    "bebu_measured": bebu_measured,
                     "violations_str": violations_str,
                     "n_violations": n_violations,
                     "n_checks": n_checks,
@@ -1868,10 +2105,10 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
 
     report_content += """
 ### Drempelhoogtes & Referentiewaterstanden per Sluiszijde
-*NAP Hoogte = absolute drempelhoogte t.o.v. NAP. De bron staat tussen haakjes: **Note** = FIS Note-veld (meest betrouwbaar), **KP-peil** / **SP-peil** = berekend uit streefpeil minus FIS drempeldiepte, **NAP (FIS)** = FIS HeightReferenceLevel=NAP. ⚠ = onzeker.*
+*Drempelkruin FIS = absolute drempelhoogte t.o.v. NAP afgeleid uit FIS. Bron: **Note** = FIS Note-veld (meest betrouwbaar), **KP-peil** / **SP-peil** = berekend uit streefpeil minus FIS drempeldiepte, **NAP (FIS)** = FIS HeightReferenceLevel=NAP. ⚠ = onzeker. Meting 1m = drempelkruin lokaal maximum uit RWS bodemhoogte_1mtr.*
 
-| Sluis | Kolknaam | Hoge Waterweg | Streefpeil (NAP) | NAP Hoogte Bo/Bi (bron) | Enquête Bo/Bi | Lage Waterweg | Streefpeil (NAP) | NAP Hoogte Be/Bu (bron) | Enquête Be/Bu | FIS Note |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| Sluis | Kolknaam | Zijde | Waterweg | Streefpeil (NAP) | Drempelkruin FIS (m NAP) | Meting 1m-kaart (m NAP) | Waterdiepte boven drempel (m) | Enquête |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 """
     for r in results_list:
         peil_h = f"{r['peil_hoog']:.2f}" if pd.notna(r["peil_hoog"]) else "—"
@@ -1882,7 +2119,19 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
                 return "—"
             flag = " ⚠" if uncertain else ""
             src = source or "?"
-            return f"{nap_val:.2f} m ({src}){flag}"
+            return f"{nap_val:.2f} ({src}){flag}"
+
+        def _water_depth(peil, sill):
+            try:
+                if peil is not None and sill is not None:
+                    d = float(peil) - float(sill)
+                    return f"{d:.2f}"
+            except Exception:
+                pass
+            return "—"
+
+        def _meting(v):
+            return f"{v:.2f}" if v is not None else "—"
 
         bobi_cell = _sill_cell(
             r["threshold_height_bobi"], r["ref_bobi"], r.get("sill_bobi_uncertain")
@@ -1891,17 +2140,17 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
             r["threshold_height_bebu"], r["ref_bebu"], r.get("sill_bebu_uncertain")
         )
 
-        note_short = (
-            str(r["note"]).replace("\n", " ").replace("\r", "")[:80]
-            if pd.notna(r["note"])
-            else ""
-        )
-
         report_content += (
-            f"| **{r['Sluis']}** | {r['name']} | "
-            f"{r['waterway_hoog']} | {peil_h} | {bobi_cell} | {r['survey_drempel_bobi'] or '—'} | "
-            f"{r['waterway_laag']} | {peil_l} | {bebu_cell} | {r['survey_drempel_bebu'] or '—'} | "
-            f"*{note_short}* |\n"
+            f"| **{r['Sluis']}** | {r['name']} | Bo/Bi | "
+            f"{r['waterway_hoog']} | {peil_h} | {bobi_cell} | {_meting(r.get('bobi_measured'))} | "
+            f"{_water_depth(r.get('peil_hoog'), r.get('threshold_height_bobi'))} | "
+            f"{r['survey_drempel_bobi'] or '—'} |\n"
+        )
+        report_content += (
+            f"| | | Be/Bu | "
+            f"{r['waterway_laag']} | {peil_l} | {bebu_cell} | {_meting(r.get('bebu_measured'))} | "
+            f"{_water_depth(r.get('peil_laag'), r.get('threshold_height_bebu'))} | "
+            f"{r['survey_drempel_bebu'] or '—'} |\n"
         )
 
     report_content += """
@@ -2249,8 +2498,8 @@ def write_html_report(results_list):
 
         <div style="margin-bottom: 1.5rem; background-color: white; border: 1px solid #e2e8f0; padding: 0.75rem 1.25rem; border-radius: 0.375rem; display: flex; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
             <label style="font-weight: 600; font-size: 0.85rem; color: #334155; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; user-select: none;">
-                <input type="checkbox" id="toggle-consistent" checked onchange="toggleConsistentRows()" style="width: 1rem; height: 1rem; cursor: pointer;">
-                Toon alleen sluiskolken met afwijkingen (verberg consistente sluiskolken standaard)
+                <input type="checkbox" id="toggle-consistent" onchange="toggleConsistentRows()" style="width: 1rem; height: 1rem; cursor: pointer;">
+                Toon alleen sluiskolken met afwijkingen
             </label>
         </div>
         
@@ -2266,10 +2515,6 @@ def write_html_report(results_list):
                     card.style.display = showOnlyDiscrepancies ? 'none' : '';
                 }});
             }}
-            // Run on load
-            document.addEventListener('DOMContentLoaded', () => {{
-                setTimeout(toggleConsistentRows, 100);
-            }});
         </script>
 
          <div class="section-card">
@@ -2351,29 +2596,27 @@ def write_html_report(results_list):
 
         <div class="section-card">
             <div class="section-title">Overzicht: Drempelhoogtes & Referentiewaterstanden per Sluiszijde (NAP)</div>
+            <p style="font-size:0.8rem;color:#64748b;">Drempelkruin FIS = absolute hoogte afgeleid uit FIS (Note, KP/SP-peil, of HeightReferenceLevel). Meting 1m = lokaal maximum uit RWS bodemhoogte_1mtr langs kolk-as. Waterdiepte = streefpeil − drempelkruin. ⚠ = onzeker.</p>
             <div class="table-responsive">
                 <table>
                     <thead>
                         <tr>
                             <th rowspan="2">Sluis</th>
                             <th rowspan="2">Kolknaam</th>
-                            <th colspan="6" style="text-align:center; border-bottom: 1px solid #e2e8f0;">Hoge Zijde (Boven/Binnen - Bo/Bi)</th>
-                            <th colspan="6" style="text-align:center; border-bottom: 1px solid #e2e8f0;">Lage Zijde (Beneden/Buiten - Be/Bu)</th>
-                            <th rowspan="2">Opmerkingen</th>
+                            <th colspan="5" style="text-align:center; border-bottom: 1px solid #e2e8f0;">Bovenhoofd/Binnenhoofd (Bo/Bi) — hoge zijde</th>
+                            <th colspan="5" style="text-align:center; border-bottom: 1px solid #e2e8f0;">Benedenhoofd/Buitenhoofd (Be/Bu) — lage zijde</th>
                         </tr>
                         <tr>
                             <th>Waterweg</th>
-                            <th>Streefpeil (NAP)</th>
-                            <th>FIS Drempel</th>
-                            <th>NAP Hoogte (bron)</th>
-                            <th>Referentie</th>
-                            <th>Enquête</th>
+                            <th>Streefpeil (m NAP)</th>
+                            <th>Drempelkruin FIS (m NAP)</th>
+                            <th>Meting 1m-kaart (m NAP)</th>
+                            <th>Waterdiepte (m)</th>
                             <th>Waterweg</th>
-                            <th>Streefpeil (NAP)</th>
-                            <th>FIS Drempel</th>
-                            <th>NAP Hoogte (bron)</th>
-                            <th>Referentie</th>
-                            <th>Enquête</th>
+                            <th>Streefpeil (m NAP)</th>
+                            <th>Drempelkruin FIS (m NAP)</th>
+                            <th>Meting 1m-kaart (m NAP)</th>
+                            <th>Waterdiepte (m)</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2382,23 +2625,35 @@ def write_html_report(results_list):
         calc_bobi = (
             f"{r['threshold_height_bobi']:.2f}"
             if pd.notna(r["threshold_height_bobi"])
-            else "nan"
+            else "—"
         )
         calc_bebu = (
             f"{r['threshold_height_bebu']:.2f}"
             if pd.notna(r["threshold_height_bebu"])
-            else "nan"
+            else "—"
         )
-        peil_h = f"{r['peil_hoog']:.2f} m" if pd.notna(r["peil_hoog"]) else "nan"
-        peil_l = f"{r['peil_laag']:.2f} m" if pd.notna(r["peil_laag"]) else "nan"
-        note_snippet = (
-            str(r["note"]).replace("\n", " ").replace("\r", "")[:120]
-            if r["note"]
-            else "nan"
-        )
+        peil_h = f"{r['peil_hoog']:.2f}" if pd.notna(r["peil_hoog"]) else "—"
+        peil_l = f"{r['peil_laag']:.2f}" if pd.notna(r["peil_laag"]) else "—"
         row_class = (
             "row-consistent" if r["status_str"] == "Consistent" else "row-discrepancy"
         )
+
+        def _wd(peil_val, sill_val):
+            try:
+                if peil_val is not None and sill_val is not None and pd.notna(sill_val):
+                    return f"{float(peil_val) - float(sill_val):.2f}"
+            except Exception:
+                pass
+            return "—"
+
+        meting_bobi = (
+            f"{r['bobi_measured']:.2f}" if r.get("bobi_measured") is not None else "—"
+        )
+        meting_bebu = (
+            f"{r['bebu_measured']:.2f}" if r.get("bebu_measured") is not None else "—"
+        )
+        wd_bobi = _wd(r.get("peil_hoog"), r.get("threshold_height_bobi"))
+        wd_bebu = _wd(r.get("peil_laag"), r.get("threshold_height_bebu"))
 
         html_content += f"""
                         <tr class="{row_class}">
@@ -2406,17 +2661,14 @@ def write_html_report(results_list):
                             <td>{r["name"]}</td>
                             <td><span style="font-size:0.75rem;">{r["waterway_hoog"]}</span></td>
                             <td>{peil_h}</td>
-                            <td>{r["raw_bobi"] or "nan"}</td>
-                            <td><strong>{calc_bobi} m</strong><br><span style="font-size:0.7rem;color:#64748b;">{r.get("sill_bobi_source", "?")}</span>{"⚠" if r.get("sill_bobi_uncertain") else ""}</td>
-                            <td><span class="isrs">{r["ref_bobi"]}</span></td>
-                            <td>{r["survey_drempel_bobi"] or "nan"}</td>
+                            <td><strong>{calc_bobi}</strong><br><span style="font-size:0.7rem;color:#64748b;">{r.get("sill_bobi_source", "?")}</span>{"⚠" if r.get("sill_bobi_uncertain") else ""}</td>
+                            <td>{meting_bobi}</td>
+                            <td>{wd_bobi}</td>
                             <td><span style="font-size:0.75rem;">{r["waterway_laag"]}</span></td>
                             <td>{peil_l}</td>
-                            <td>{r["raw_bebu"] or "nan"}</td>
-                            <td><strong>{calc_bebu} m</strong><br><span style="font-size:0.7rem;color:#64748b;">{r.get("sill_bebu_source", "?")}</span>{"⚠" if r.get("sill_bebu_uncertain") else ""}</td>
-                            <td><span class="isrs">{r["ref_bebu"]}</span></td>
-                            <td>{r["survey_drempel_bebu"] or "nan"}</td>
-                            <td style="color:#64748b; font-style:italic; font-size:0.75rem;">{note_snippet}</td>
+                            <td><strong>{calc_bebu}</strong><br><span style="font-size:0.7rem;color:#64748b;">{r.get("sill_bebu_source", "?")}</span>{"⚠" if r.get("sill_bebu_uncertain") else ""}</td>
+                            <td>{meting_bebu}</td>
+                            <td>{wd_bebu}</td>
                         </tr>"""
 
     html_content += """
@@ -2515,8 +2767,8 @@ def write_html_report(results_list):
                                     <tr><td>Geselecteerde Deuropening</td><td><strong>{r["selected_wid"] or "nan"} m</strong> ({r["selection_method_wid"]})</td></tr>
                                     <tr><td>Fysieke Lengte (FIS)</td><td>{r["fis_struct_len"] or "nan"} m</td></tr>
                                     <tr><td>Kolkbreedte (FIS)</td><td>{r["fis_struct_wid"] or "nan"} m</td></tr>
-                                    <tr><td>Hoge Zijde ({r["waterway_hoog"]})</td><td>Streefpeil: {peil_h} | Drempel Bo/Bi NAP: <strong>{calc_bobi} m</strong> [{r.get("sill_bobi_source") or ""}] (Enquête: {r["survey_drempel_bobi"] or "nan"})</td></tr>
-                                    <tr><td>Lage Zijde ({r["waterway_laag"]})</td><td>Streefpeil: {peil_l} | Drempel Be/Bu NAP: <strong>{calc_bebu} m</strong> [{r.get("sill_bebu_source") or ""}] (Enquête: {r["survey_drempel_bebu"] or "nan"})</td></tr>
+                                    <tr><td>Bovenhoofd/Binnenhoofd (Bo/Bi) — {r["waterway_hoog"]}</td><td>Streefpeil: {peil_h} | Drempelkruin FIS: <strong>{calc_bobi} m NAP</strong> [{r.get("sill_bobi_source") or ""}] | Meting 1m-kaart: {f"{r['bobi_measured']:.2f} m" if r.get("bobi_measured") is not None else "—"} | Enquête: {r["survey_drempel_bobi"] or "—"}</td></tr>
+                                    <tr><td>Benedenhoofd/Buitenhoofd (Be/Bu) — {r["waterway_laag"]}</td><td>Streefpeil: {peil_l} | Drempelkruin FIS: <strong>{calc_bebu} m NAP</strong> [{r.get("sill_bebu_source") or ""}] | Meting 1m-kaart: {f"{r['bebu_measured']:.2f} m" if r.get("bebu_measured") is not None else "—"} | Enquête: {r["survey_drempel_bebu"] or "—"}</td></tr>
                                 </table>
                             </div>
                             {f'<div class="note-text"><strong>Opmerking:</strong> {r["note"]}</div>' if pd.notna(r["note"]) else ""}
@@ -2527,9 +2779,9 @@ def write_html_report(results_list):
                             <h5>Bron: PDOK Actueel_ortho25 + FIS geometrie</h5>
                         </div>
                         <div class="visuals-panel">
-                            <h4>Zijaanzicht: Waterstanden & Drempels</h4>
+                            <h4>Zijaanzicht & Bodemprofiel</h4>
                             {sideview_html}
-                            <h5>Bron: FIS streefpeil + drempelhoogte t.o.v. NAP</h5>
+                            <h5>Bron: FIS streefpeil + drempelhoogte (NAP) + RWS bodemhoogte_1mtr</h5>
                         </div>
                         <div class="visuals-panel">
                             <h4>Databronnen lengte ({r.get("violations_str", "n.v.t.")})</h4>
