@@ -75,29 +75,37 @@ def parse_note_sill_nap(note_text, side):
         return None, None
     note = note_text.replace("\r\n", " ").replace("\n", " ")
 
-    if side == "bobi":
-        m = re.search(
-            r"[Dd]rempeldiepte\s+boven.{0,80}?Drempelhoogte\s+NAP\+\s*([\d,]+)",
-            note,
-            re.IGNORECASE,
-        )
-    else:
-        m = re.search(
-            r"[Dd]rempeldiepte\s+beneden.{0,80}?Drempelhoogte\s+NAP\+\s*([\d,]+)",
-            note,
-            re.IGNORECASE,
-        )
+    side_kw = r"boven" if side == "bobi" else r"beneden"
+
+    # Pattern 1: "Drempeldiepte boven... Drempelhoogte NAP+ X,XX m" (most common)
+    m = re.search(
+        rf"[Dd]rempeldiepte\s+{side_kw}.{{0,80}}?Drempelhoogte\s+NAP\+\s*([\d,]+)",
+        note,
+        re.IGNORECASE,
+    )
     if m:
         try:
             return float(m.group(1).replace(",", ".")), "Note (NAP+ expliciet)"
         except ValueError:
             pass
 
-    # "Drempels SP-X,XX m=NAP+Y,YY m" pattern (applies to both sides equally)
-    m2 = re.search(r"[Dd]rempel[s]?\s+\S+-[\d,]+\s*m?\s*=\s*NAP\+([\d,]+)", note)
+    # Pattern 2: "Drempeldiepte boven... Drempelhoogte X,XX m+NAP" (Born variant)
+    m2 = re.search(
+        rf"[Dd]rempeldiepte\s+{side_kw}.{{0,80}}?Drempelhoogte\s+([\d,]+)\s*m\+NAP",
+        note,
+        re.IGNORECASE,
+    )
     if m2:
         try:
-            return float(m2.group(1).replace(",", ".")), "Note (NAP= expliciet)"
+            return float(m2.group(1).replace(",", ".")), "Note (m+NAP expliciet)"
+        except ValueError:
+            pass
+
+    # Pattern 3: "Drempels SP-X,XX m=NAP+Y,YY m" (applies to both sides equally)
+    m3 = re.search(r"[Dd]rempel[s]?\s+\S+-[\d,]+\s*m?\s*=\s*NAP\+([\d,]+)", note)
+    if m3:
+        try:
+            return float(m3.group(1).replace(",", ".")), "Note (NAP= expliciet)"
         except ValueError:
             pass
 
@@ -1470,12 +1478,15 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
             bivas_wid = m_row.get("bivas_width")
 
             # Sill depth from FIS
-            sill_raw_bobi = get_val(m_row, "SillDepthBoBi")
+            # normalize_attributes converts CamelCase → snake_case, so
+            # SillDepthBoBi → sill_depth_bo_bi, SillDepthBeBu → sill_depth_be_bu.
+            # ThresholdLowerLevel/ThresholdUpperLevel → dim_threshold_lower/upper (schema.toml).
+            sill_raw_bobi = get_val(m_row, "sill_depth_bo_bi")
             if pd.isna(sill_raw_bobi):
-                sill_raw_bobi = get_val(m_row, "ThresholdLowerLevel")
-            sill_raw_bebu = get_val(m_row, "SillDepthBeBu")
+                sill_raw_bobi = get_val(m_row, "dim_threshold_lower")
+            sill_raw_bebu = get_val(m_row, "sill_depth_be_bu")
             if pd.isna(sill_raw_bebu):
-                sill_raw_bebu = get_val(m_row, "ThresholdUpperLevel")
+                sill_raw_bebu = get_val(m_row, "dim_threshold_upper")
 
             height_ref_str = m_row.get("HeightReferenceLevel") or m_row.get(
                 "height_reference_level"
