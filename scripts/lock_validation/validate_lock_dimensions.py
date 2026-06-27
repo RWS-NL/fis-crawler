@@ -1369,10 +1369,14 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     fis_rd["isrs_clean"] = fis_rd["code"].apply(clean_isrs)
     euris_rd["isrs_clean"] = euris_rd["id"].apply(clean_isrs)
 
-    # Perform inner merge on clean ISRS code
-    gis_merged = fis_rd.merge(euris_rd, on="isrs_clean", suffixes=("_fis", "_euris"))
+    # Left merge: FIS is the authoritative source; EURIS columns are supplementary.
+    # Inner join would silently drop FIS chambers with no EURIS match, hiding their data.
+    gis_merged = fis_rd.merge(
+        euris_rd, on="isrs_clean", suffixes=("_fis", "_euris"), how="left"
+    )
     gis_merged = gpd.GeoDataFrame(gis_merged, geometry="geometry_fis", crs="EPSG:28992")
-    print(f"Matched {len(gis_merged)} chambers by ISRS code.")
+    n_euris = gis_merged["id_euris"].notna().sum()
+    print(f"FIS chambers: {len(gis_merged)}, of which {n_euris} matched to EURIS.")
 
     # 6. Spatial match to BIVAS
     print("Matching to BIVAS locks spatially...")
