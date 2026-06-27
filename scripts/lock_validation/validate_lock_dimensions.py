@@ -273,9 +273,16 @@ os.makedirs(FOOTPRINTS_DIR, exist_ok=True)
 
 
 def generate_footprint_map(
-    sluis_clean, chamber_clean, geom_rd, fis_struct_len, fis_struct_wid, centroid_rd
+    sluis_clean,
+    chamber_clean,
+    geom_rd,
+    fis_struct_len,
+    fis_struct_wid,
+    centroid_rd,
+    obb_len=None,
+    obb_wid=None,
 ):
-    """Plot FIS chamber polygon directly in RD coordinates on the PDOK aerial background."""
+    """Plot FIS chamber polygon + minimum rotated rectangle on the PDOK aerial background."""
     filename = f"{sluis_clean}_{chamber_clean}_footprint.png"
     path = os.path.join(FOOTPRINTS_DIR, filename)
     if os.path.exists(path):
@@ -298,7 +305,6 @@ def generate_footprint_map(
         return None
 
     fig, ax = plt.subplots(figsize=(5, 5))
-    # aerial image already has north-up; extent maps RD coords directly
     ax.imshow(img_arr, extent=[xmin, xmax, ymin, ymax], origin="upper")
 
     if geom_rd is not None and not geom_rd.is_empty:
@@ -311,12 +317,34 @@ def generate_footprint_map(
         except Exception:
             pass
 
+        # Draw minimum rotated rectangle (OBB) as dashed orange line
+        try:
+            obb_geom = geom_rd.minimum_rotated_rectangle
+            if hasattr(obb_geom, "exterior") and obb_geom.exterior is not None:
+                ox, oy = obb_geom.exterior.coords.xy
+                ax.plot(
+                    list(ox),
+                    list(oy),
+                    color="#ff8800",
+                    linewidth=1.5,
+                    linestyle="--",
+                    label="Min. rechthoek",
+                )
+        except Exception:
+            pass
+
     ann = []
     if fis_struct_len is not None:
         ann.append(
             f"FIS: {fis_struct_len:.0f} × {fis_struct_wid:.0f} m"
             if fis_struct_wid
             else f"FIS L: {fis_struct_len:.0f} m"
+        )
+    if obb_len is not None:
+        ann.append(
+            f"Polygoon: {obb_len:.0f} × {obb_wid:.0f} m"
+            if obb_wid
+            else f"Polygoon L: {obb_len:.0f} m"
         )
     if ann:
         ax.text(
@@ -1525,6 +1553,8 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                 fis_struct_len,
                 fis_struct_wid,
                 m_row["geometry_fis"].centroid,
+                obb_len=obb_len,
+                obb_wid=obb_wid,
             )
             chart_path = generate_comparison_chart(
                 sluis_clean,
@@ -1756,16 +1786,24 @@ Uitleg van de gebruikte variabelen en databronnen:
 Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en drempels per sluiskolk.
 
 ### Vergelijking Afmetingen per Sluiskolk (meters)
-*Kolkbreedte = bouwkundige breedte (FIS `Width`). Deuropening = vrije breedte deuropening (FIS `GateWidth`) = beperkende maat voor scheepsbreedte.*
+*Kolkbreedte = bouwkundige breedte (FIS `Width`). Deuropening = vrije breedte deuropening (FIS `GateWidth`) = beperkende maat voor scheepsbreedte. Polygoon lengte = afgeleid van FIS-geometrie via minimale omschreven rechthoek (niet onafhankelijk van FIS).*
 
-| Sluis | Kolknaam | ISRS-code | Constr. Lengte (m) | Kolkbreedte (m) | Schutlengte (m) | Deuropening (m) | BIVAS Lengte | Enquête Lengte | DISK Lengte | Checks |
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| Sluis | Kolknaam | ISRS-code | Constr. Lengte (m) | Polygoon L (m) | Kolkbreedte (m) | Schutlengte (m) | Deuropening (m) | BIVAS Lengte | Enquête Lengte | DISK Lengte | Checks |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 """
     for r in results_list:
         bivas_note = "" if r.get("is_single_kolk", True) else " (multi-kolk)"
+        obb_l = r.get("obb_len")
+        fis_l = r.get("fis_struct_len")
+        # Flag large geometry↔attribute deviation (>15% suggests transcription error)
+        obb_flag = ""
+        if obb_l is not None and fis_l is not None and fis_l > 0:
+            if abs(obb_l - fis_l) / fis_l > 0.15:
+                obb_flag = " ⚠"
+        obb_str = f"{obb_l:.0f}{obb_flag}" if obb_l is not None else "nan"
         report_content += (
             f"| **{r['Sluis']}** | {r['name']} | `{r['isrs']}` | "
-            f"{r['fis_struct_len'] or 'nan'} | {r['fis_struct_wid'] or 'nan'} | "
+            f"{r['fis_struct_len'] or 'nan'} | {obb_str} | {r['fis_struct_wid'] or 'nan'} | "
             f"{r['fis_len'] or 'nan'} | {r['fis_wid'] or 'nan'} | "
             f"{r['bivas_len'] or 'nan'}{bivas_note} | {r['survey_len'] or 'nan'} | "
             f"{r.get('disk_len') or 'nan'} | {r.get('violations_str', 'n.v.t.')} |\n"
