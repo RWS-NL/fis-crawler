@@ -1853,30 +1853,40 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
 
     report_content += """
 ### Drempelhoogtes & Referentiewaterstanden per Sluiszijde
-*Opmerking: Berekende drempelhoogtes zijn absolute niveaus t.o.v. **NAP**, berekend op basis van het streefpeil aan de betreffende zijde van de sluis.*
+*NAP Hoogte = absolute drempelhoogte t.o.v. NAP. De bron staat tussen haakjes: **Note** = FIS Note-veld (meest betrouwbaar), **KP-peil** / **SP-peil** = berekend uit streefpeil minus FIS drempeldiepte, **NAP (FIS)** = FIS HeightReferenceLevel=NAP. ⚠ = onzeker.*
 
-| Sluis | Kolknaam | Hoge Waterweg | Streefpeil Hoge Zijde (NAP) | FIS Drempel Bo/Bi (m) | Berekende Drempel Bo/Bi (NAP) | Referentie Bo/Bi | Enquête Bo/Bi | Lage Waterweg | Streefpeil Lage Zijde (NAP) | FIS Drempel Be/Bu (m) | Berekende Drempel Be/Bu (NAP) | Referentie Be/Bu | Enquête Be/Bu | Opmerkingen / Details Referentieniveau |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| Sluis | Kolknaam | Hoge Waterweg | Streefpeil (NAP) | NAP Hoogte Bo/Bi (bron) | Enquête Bo/Bi | Lage Waterweg | Streefpeil (NAP) | NAP Hoogte Be/Bu (bron) | Enquête Be/Bu | FIS Note |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 """
     for r in results_list:
-        calc_bobi = (
-            f"{r['threshold_height_bobi']:.2f}"
-            if pd.notna(r["threshold_height_bobi"])
-            else "nan"
+        peil_h = f"{r['peil_hoog']:.2f}" if pd.notna(r["peil_hoog"]) else "—"
+        peil_l = f"{r['peil_laag']:.2f}" if pd.notna(r["peil_laag"]) else "—"
+
+        def _sill_cell(nap_val, source, uncertain):
+            if pd.isna(nap_val) or nap_val is None:
+                return "—"
+            flag = " ⚠" if uncertain else ""
+            src = source or "?"
+            return f"{nap_val:.2f} m ({src}){flag}"
+
+        bobi_cell = _sill_cell(
+            r["threshold_height_bobi"], r["ref_bobi"], r.get("sill_bobi_uncertain")
         )
-        calc_bebu = (
-            f"{r['threshold_height_bebu']:.2f}"
-            if pd.notna(r["threshold_height_bebu"])
-            else "nan"
+        bebu_cell = _sill_cell(
+            r["threshold_height_bebu"], r["ref_bebu"], r.get("sill_bebu_uncertain")
         )
-        peil_h = f"{r['peil_hoog']:.2f}" if pd.notna(r["peil_hoog"]) else "nan"
-        peil_l = f"{r['peil_laag']:.2f}" if pd.notna(r["peil_laag"]) else "nan"
+
+        note_short = (
+            str(r["note"]).replace("\n", " ").replace("\r", "")[:80]
+            if pd.notna(r["note"])
+            else ""
+        )
 
         report_content += (
             f"| **{r['Sluis']}** | {r['name']} | "
-            f"{r['waterway_hoog']} | {peil_h} | {r['raw_bobi'] or 'nan'} | {calc_bobi} | {r['ref_bobi']} | {r['survey_drempel_bobi'] or 'nan'} | "
-            f"{r['waterway_laag']} | {peil_l} | {r['raw_bebu'] or 'nan'} | {calc_bebu} | {r['ref_bebu']} | {r['survey_drempel_bebu'] or 'nan'} | "
-            f"*{str(r['note']).replace(chr(10), ' ').replace(chr(13), '')[:100]}* |\n"
+            f"{r['waterway_hoog']} | {peil_h} | {bobi_cell} | {r['survey_drempel_bobi'] or '—'} | "
+            f"{r['waterway_laag']} | {peil_l} | {bebu_cell} | {r['survey_drempel_bebu'] or '—'} | "
+            f"*{note_short}* |\n"
         )
 
     report_content += """
