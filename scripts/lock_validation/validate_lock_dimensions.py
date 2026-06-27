@@ -1486,26 +1486,29 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                 selection_method_len = "Overeenstemming: FIS & BIVAS"
 
             s_wid_val = to_f(survey_wid)
-            f_wid_val = to_f(fis_wid)
+            f_wid_val = to_f(fis_wid)  # deuropening (gate width)
+            f_struct_wid_val = to_f(fis_struct_wid)  # kolkbreedte (structural)
             b_wid_val = to_f(bivas_wid)
 
-            # Selection Rule logic for Width
+            # Selection Rule logic for Width (selected = deuropening = FIS GateWidth)
             selected_wid = fis_wid
             selection_method_wid = "Onzeker: Handmatige controle vereist"
             if (
                 s_wid_val is not None
-                and f_wid_val is not None
-                and abs(s_wid_val - f_wid_val) < 0.1
+                and f_struct_wid_val is not None
+                and abs(s_wid_val - f_struct_wid_val) < 0.1
             ):
+                # Survey kolkbreedte agrees with FIS structural width — add confidence
                 selected_wid = fis_wid
-                selection_method_wid = "Overeenstemming: Enquête & FIS"
+                selection_method_wid = "Enquête kolkbreedte ≈ FIS kolkbreedte"
             elif (
                 f_wid_val is not None
                 and b_wid_val is not None
                 and abs(f_wid_val - b_wid_val) < 0.1
             ):
+                # BIVAS deuropening agrees with FIS deuropening
                 selected_wid = fis_wid
-                selection_method_wid = "Overeenstemming: FIS & BIVAS"
+                selection_method_wid = "FIS deuropening ≈ BIVAS"
 
             # Build file-friendly names
             sluis_clean = re.sub(r"[^a-zA-Z0-9]", "_", sluis_name)
@@ -1559,10 +1562,12 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                         check_details.append(f"✓ {label}")
 
             _check("Enquête≠FIS lengte", survey_len, fis_len, 2.0)
-            _check("Enquête≠FIS breedte", survey_wid, fis_wid, 0.1)
+            # Survey "Kolkbreedte" is the structural chamber width; compare with fis_struct_wid
+            _check("Enquête≠FIS breedte", survey_wid, fis_struct_wid, 0.1)
             if is_single_kolk:
                 _check("BIVAS≠FIS lengte", bivas_len, fis_len, 2.0)
-                _check("BIVAS≠FIS breedte", bivas_wid, fis_wid, 0.1)
+                # BIVAS models navigable width ≈ gate width (deuropening)
+                _check("BIVAS≠FIS deuropening", bivas_wid, fis_wid, 0.1)
             disk_len = (
                 row.get("schut_lengte_25")
                 if pd.notna(row.get("schut_lengte_25", float("nan")))
@@ -1583,8 +1588,8 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
             if to_f(survey_len) is not None and to_f(fis_len) is not None:
                 if abs(to_f(survey_len) - to_f(fis_len)) > 2.0:
                     outlier_survey = True
-            if to_f(survey_wid) is not None and to_f(fis_wid) is not None:
-                if abs(to_f(survey_wid) - to_f(fis_wid)) > 0.2:
+            if to_f(survey_wid) is not None and to_f(fis_struct_wid) is not None:
+                if abs(to_f(survey_wid) - to_f(fis_struct_wid)) > 0.2:
                     outlier_survey = True
 
             # BIVAS divergence is only meaningful for single-kolk complexes
@@ -1737,9 +1742,11 @@ Uitleg van de gebruikte variabelen en databronnen:
 * **Be/Bu (Benedenhoofd / Buitenhoofd)**: De drempel/sluiskop aan de lage waterstandzijde (benedenwinds/stroomafwaarts of richting open water/zee). Dit is de kant van de sluis die grenst aan het water met het lagere streefpeil.
 * **Verticaal Referentieniveau**: Voor beide zijden van de sluis (links/rechts of noord/zuid) is het specifieke streefpeil van de aansluitende waterweg weergegeven. De absolute drempelhoogte (NAP) is berekend ten opzichte van het lokale streefpeil aan die specifieke zijde.
 
-### 2. Structurele vs. Toegestane Afmetingen
-* **Fysieke / Structurele afmetingen (Structural dimensions)**: De daadwerkelijke bouwkundige lengte en breedte van de betonnen/stalen sluiskolk zelf.
-* **Toegestane / Schutafmetingen (Usable/Allowed dimensions)**: De maximale afmetingen die een schip mag hebben om daadwerkelijk veilig geschut te kunnen worden (inclusief noodzakelijke veiligheidsmarges voor drempelstroming en deuren). De toegestane afmetingen zijn in de praktijk vaak kleiner dan de fysieke afmetingen.
+### 2. Afmetingen (terminologie per Ontwerp Schutsluizen / Richtlijn Vaarwegen)
+* **Constructieve lengte**: Bouwkundige lengte van de kolk (betonconstructie) — FIS `Length`.
+* **Schutlengte**: Bruikbare lengte voor schutting, na aftrek van deurruggen en veiligheidsmarges — FIS `SchutLengte`. Dit is de enige erkende "schut*"-term voor lengte.
+* **Kolkbreedte**: Bouwkundige breedte van de kolk — FIS `Width`. In het rapport als "Kolkbreedte (m)".
+* **Deuropening**: Vrije breedte van de deuropening (afstand tussen de sponningen) — FIS `GateWidth`. Dit is de **beperkende maat voor de scheepsbreedte**, kleiner dan of gelijk aan de kolkbreedte. De term "schutbreedte" bestaat niet in de Nederlandse richtlijnen.
 
 ### 3. BIVAS Modellering Beperking
 * **BIVAS Netwerkgemiddelde**: In het BIVAS-netwerkmodel (gebruikt voor transportanalyses) worden parallelle kolken van één complex vaak gemodelleerd als één geaggregeerde verbinding met gemiddelde afmetingen. BIVAS maakt geen functioneel onderscheid tussen de individuele parallelle kolken, wat kan leiden tot afwijkingen ten opzichte van de specifieke kolkgegevens in FIS en EURIS.
@@ -1748,18 +1755,18 @@ Uitleg van de gebruikte variabelen en databronnen:
 
 Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en drempels per sluiskolk.
 
-### Vergelijking Fysieke vs. Schut/Toegestane Afmetingen (meters)
-*Opmerking: Fysieke afmetingen representeren de constructie. Schut/toegestane afmetingen representeren de bruikbare scheepsmaat.*
+### Vergelijking Afmetingen per Sluiskolk (meters)
+*Kolkbreedte = bouwkundige breedte (FIS `Width`). Deuropening = vrije breedte deuropening (FIS `GateWidth`) = beperkende maat voor scheepsbreedte.*
 
-| Sluis | Kolknaam | ISRS-code | Constr. Lengte (m) | Schutlengte (m) | Schutbreedte (m) | BIVAS Lengte | Enquête Lengte | DISK Lengte | Checks |
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| Sluis | Kolknaam | ISRS-code | Constr. Lengte (m) | Kolkbreedte (m) | Schutlengte (m) | Deuropening (m) | BIVAS Lengte | Enquête Lengte | DISK Lengte | Checks |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 """
     for r in results_list:
         bivas_note = "" if r.get("is_single_kolk", True) else " (multi-kolk)"
         report_content += (
             f"| **{r['Sluis']}** | {r['name']} | `{r['isrs']}` | "
-            f"{r['fis_struct_len'] or 'nan'} | {r['fis_len'] or 'nan'} | "
-            f"{r['fis_wid'] or 'nan'} | "
+            f"{r['fis_struct_len'] or 'nan'} | {r['fis_struct_wid'] or 'nan'} | "
+            f"{r['fis_len'] or 'nan'} | {r['fis_wid'] or 'nan'} | "
             f"{r['bivas_len'] or 'nan'}{bivas_note} | {r['survey_len'] or 'nan'} | "
             f"{r.get('disk_len') or 'nan'} | {r.get('violations_str', 'n.v.t.')} |\n"
         )
@@ -2400,9 +2407,9 @@ def write_html_report(results_list):
                                 <h4>Vergelijkingsgegevens</h4>
                                 <table class="lock-meta-table">
                                     <tr><td>Geselecteerde Schutlengte</td><td><strong>{r["selected_len"] or "nan"} m</strong> ({r["selection_method_len"]})</td></tr>
-                                    <tr><td>Geselecteerde Schutbreedte</td><td><strong>{r["selected_wid"] or "nan"} m</strong> ({r["selection_method_wid"]})</td></tr>
+                                    <tr><td>Geselecteerde Deuropening</td><td><strong>{r["selected_wid"] or "nan"} m</strong> ({r["selection_method_wid"]})</td></tr>
                                     <tr><td>Fysieke Lengte (FIS)</td><td>{r["fis_struct_len"] or "nan"} m</td></tr>
-                                    <tr><td>Fysieke Breedte (FIS)</td><td>{r["fis_struct_wid"] or "nan"} m</td></tr>
+                                    <tr><td>Kolkbreedte (FIS)</td><td>{r["fis_struct_wid"] or "nan"} m</td></tr>
                                     <tr><td>Hoge Zijde ({r["waterway_hoog"]})</td><td>Streefpeil: {peil_h} | Drempel Bo/Bi NAP: <strong>{calc_bobi} m</strong> [{r.get("sill_bobi_source") or ""}] (Enquête: {r["survey_drempel_bobi"] or "nan"})</td></tr>
                                     <tr><td>Lage Zijde ({r["waterway_laag"]})</td><td>Streefpeil: {peil_l} | Drempel Be/Bu NAP: <strong>{calc_bebu} m</strong> [{r.get("sill_bebu_source") or ""}] (Enquête: {r["survey_drempel_bebu"] or "nan"})</td></tr>
                                 </table>
