@@ -317,19 +317,38 @@ def generate_footprint_map(
         except Exception:
             pass
 
-        # Draw minimum rotated rectangle (OBB) as dashed orange line
+        # Draw minimum rotated rectangle (OBB) as dashed orange line.
+        # Skip if geometry is near-circular (aspect ratio < 3): the FIS polygon
+        # is then not a chamber shape and the OBB would be misleading.
         try:
             obb_geom = geom_rd.minimum_rotated_rectangle
             if hasattr(obb_geom, "exterior") and obb_geom.exterior is not None:
                 ox, oy = obb_geom.exterior.coords.xy
-                ax.plot(
-                    list(ox),
-                    list(oy),
-                    color="#ff8800",
-                    linewidth=1.5,
-                    linestyle="--",
-                    label="Min. rechthoek",
-                )
+                edges = [
+                    math.hypot(ox[i + 1] - ox[i], oy[i + 1] - oy[i]) for i in range(4)
+                ]
+                L_obb, W_obb = max(edges), min(edges)
+                if W_obb > 0 and L_obb / W_obb >= 3:
+                    ax.plot(
+                        list(ox),
+                        list(oy),
+                        color="#ff8800",
+                        linewidth=1.5,
+                        linestyle="--",
+                        label="Min. rechthoek",
+                    )
+                else:
+                    ax.text(
+                        xmin + 8,
+                        ymin + 8,
+                        "⚠ Geometrie niet-rechthoekig\n(polygoon ≠ sluiskolk)",
+                        fontsize=7,
+                        va="bottom",
+                        color="#ff8800",
+                        bbox=dict(
+                            boxstyle="round,pad=0.2", facecolor="#0f172a", alpha=0.8
+                        ),
+                    )
         except Exception:
             pass
 
@@ -1353,11 +1372,21 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     bivas_to_join = bivas_rd.rename(
         columns={"id": "bivas_id_orig", "name": "bivas_name_orig"}
     )
-    # Perform spatial join
+    # Perform spatial join using a temporary buffer column so geometry_fis is preserved.
+    # Overwriting .geometry would replace the geometry_fis column with circles.
     gis_merged_buffered = gis_merged.copy()
-    gis_merged_buffered.geometry = gis_merged_buffered.geometry.centroid.buffer(150)
+    gis_merged_buffered["_bivas_buffer"] = gis_merged_buffered[
+        "geometry_fis"
+    ].centroid.buffer(150)
+    gis_merged_buffered = gis_merged_buffered.set_geometry(
+        "_bivas_buffer", crs="EPSG:28992"
+    )
     matches_bivas = gpd.sjoin(
         gis_merged_buffered, bivas_to_join, how="left", rsuffix="bivas"
+    )
+    # Restore geometry_fis as the active geometry after the join
+    matches_bivas = matches_bivas.set_geometry("geometry_fis", crs="EPSG:28992").drop(
+        columns=["_bivas_buffer"], errors="ignore"
     )
     # Drop duplicates in case multiple BIVAS arcs matched
     matches_bivas = matches_bivas.drop_duplicates(subset=["id_fis"]).copy()
@@ -1414,8 +1443,16 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
             euris_struct_wid = m_row.get("dim_structural_width_euris")
 
             # Independent geometric footprint measurement (per chamber).
+            # Suppress if geometry is near-circular (L/W < 3) — the FIS polygon is
+            # then not a proper chamber shape and the OBB would be meaningless.
             obb_len = m_row.get("obb_length")
             obb_wid = m_row.get("obb_width")
+            geom_circular = False
+            if obb_len is not None and obb_wid is not None and obb_wid > 0:
+                if obb_len / obb_wid < 3:
+                    geom_circular = True
+                    obb_len = None
+                    obb_wid = None
 
             # EURIS is a derivative of FIS, so agreement is expected and adds no
             # confidence. Only a *mismatch* is a signal (data-propagation error).
@@ -1737,6 +1774,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                     # Independent geometric footprint measurement + integrity flag.
                     "obb_len": obb_len,
                     "obb_wid": obb_wid,
+                    "geom_circular": geom_circular,
                     "euris_neq_fis": euris_neq_fis,
                     "level_dev_neg": m_row.get("level_dev_neg"),
                     "level_dev_pos": m_row.get("level_dev_pos"),
@@ -1795,12 +1833,16 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
         bivas_note = "" if r.get("is_single_kolk", True) else " (multi-kolk)"
         obb_l = r.get("obb_len")
         fis_l = r.get("fis_struct_len")
-        # Flag large geometry↔attribute deviation (>15% suggests transcription error)
-        obb_flag = ""
-        if obb_l is not None and fis_l is not None and fis_l > 0:
-            if abs(obb_l - fis_l) / fis_l > 0.15:
+        if r.get("geom_circular"):
+            obb_str = "⚠ circulaire geom."
+        elif obb_l is not None:
+            # Flag large geometry↔attribute deviation (>15% suggests transcription error)
+            obb_flag = ""
+            if fis_l is not None and fis_l > 0 and abs(obb_l - fis_l) / fis_l > 0.15:
                 obb_flag = " ⚠"
-        obb_str = f"{obb_l:.0f}{obb_flag}" if obb_l is not None else "nan"
+            obb_str = f"{obb_l:.0f}{obb_flag}"
+        else:
+            obb_str = "nan"
         report_content += (
             f"| **{r['Sluis']}** | {r['name']} | `{r['isrs']}` | "
             f"{r['fis_struct_len'] or 'nan'} | {obb_str} | {r['fis_struct_wid'] or 'nan'} | "
