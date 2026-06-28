@@ -191,6 +191,15 @@ uv run scrapy crawl disk -L INFO
 uv run scrapy crawl euris -L INFO
 ```
 
+### Lock validation reference data
+
+`reference/measurements.gpkg` is **handmatig gevalideerde** input voor de
+sluiscontrole (issue #58): drempellocaties (`drempelkruin`), kolk-assen
+(`profiel_as`) en breedtelijnen (`breedte`), in QGIS op de juiste plek gezet.
+Anders dan de overige `reference/`-bestanden wordt dit niet via
+`make download-reference` opgehaald maar is het in de repo vastgelegd, zodat het
+als stabiele input voor toekomstige validatieruns herbruikbaar is.
+
 
 ## Module Documentation
 

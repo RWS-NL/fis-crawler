@@ -53,16 +53,8 @@ def _cache_key(x, y):
     return f"{round(x, 1)},{round(y, 1)}"
 
 
-def identify_bottom(x, y, cache, session=None, tolerance=2):
-    """Bottom height (NAP, m) at an RD point, or None for nodata/failure.
-
-    Results are memoised in ``cache`` (mutated in place). Pass a persistent dict
-    from :func:`load_cache` and persist it with :func:`save_cache`.
-    """
-    key = _cache_key(x, y)
-    if key in cache:
-        return cache[key]
-
+def _query_identify(x, y, tolerance, session):
+    """Raw MapServer identify call; returns float value or None (NoData/error)."""
     params = {
         "geometry": json.dumps({"x": x, "y": y, "spatialReference": {"wkid": 28992}}),
         "geometryType": "esriGeometryPoint",
@@ -75,7 +67,6 @@ def identify_bottom(x, y, cache, session=None, tolerance=2):
         "f": "json",
     }
     getter = session.get if session is not None else requests.get
-    value = None
     try:
         r = getter(f"{SERVICE}/identify", params=params, timeout=30)
         r.raise_for_status()
@@ -85,15 +76,37 @@ def identify_bottom(x, y, cache, session=None, tolerance=2):
             if raw in _NODATA_TOKENS:
                 continue
             try:
-                value = float(raw)
-                break
+                return float(raw)
             except (ValueError, TypeError):
                 continue
     except Exception:
-        value = None
+        pass
+    return None
 
-    cache[key] = value
-    return value
+
+def identify_bottom(x, y, cache, session=None):
+    """Bottom height (NAP, m) at an RD point, or None for confirmed nodata.
+
+    Tries progressively larger tolerances (2 px → 10 px) to handle drempel
+    points placed precisely on gate structures where the 1m raster may have a
+    1-cell gap. Only caches None when the service explicitly returns no raster
+    value (not on network errors, so transient failures do not persist).
+
+    Results are memoised in ``cache`` (mutated in place). Pass a persistent dict
+    from :func:`load_cache` and persist it with :func:`save_cache`.
+    """
+    key = _cache_key(x, y)
+    if key in cache:
+        return cache[key]
+
+    for tol in (2, 10):
+        value = _query_identify(x, y, tol, session)
+        if value is not None:
+            cache[key] = value
+            return value
+
+    cache[key] = None
+    return None
 
 
 def gate_centres(geom_rd):
