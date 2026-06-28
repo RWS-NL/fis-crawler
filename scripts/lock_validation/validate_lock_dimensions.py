@@ -175,10 +175,300 @@ def resolve_sill_nap(
 IMAGES_DIR = os.path.join(OUTPUT_DIR, "images")
 AERIALS_DIR = os.path.join(IMAGES_DIR, "aerials")
 CHARTS_DIR = os.path.join(IMAGES_DIR, "charts")
+MANUAL_CHECKS_DIR = os.path.join(OUTPUT_DIR, "manual_checks")
 
 # Create output dirs
 os.makedirs(AERIALS_DIR, exist_ok=True)
 os.makedirs(CHARTS_DIR, exist_ok=True)
+os.makedirs(MANUAL_CHECKS_DIR, exist_ok=True)
+
+
+CONCEPT_DIAGRAM_PATH = os.path.join(IMAGES_DIR, "concept_diagram.png")
+
+
+def generate_concept_diagram():
+    """Static explanatory figure defining all sill/depth terminology.
+
+    Uses illustrative (not real) values so every label can be shown clearly.
+    Generated once; cached by file existence.
+    """
+    if os.path.exists(CONCEPT_DIAGRAM_PATH):
+        return "images/concept_diagram.png"
+
+    # ── illustrative geometry ───────────────────────────────────────────────
+    # x-coordinates: approach Bo | Bo gate | chamber | Be gate | approach Be
+    x_bo_start, x_bo_gate = 0, 30
+    x_be_gate, x_be_end = 230, 260
+    x_mid = (x_bo_gate + x_be_gate) / 2
+
+    peil_bo = 5.0  # streefpeil Bovenhoofd (NAP m)
+    peil_be = 2.0  # streefpeil Benedenhoofd (NAP m)
+    sill_bo = -2.5  # drempelkruin Bo (NAP m)
+    sill_be = -1.5  # drempelkruin Be (NAP m)
+    floor_chamber = -4.5  # chamber floor
+    floor_approach = -5.5  # approach channel floor
+
+    c_bo = "#2b5c8f"
+    c_be = "#20b2aa"
+    c_floor = "#5b4a2e"
+    c_sill = "#c0392b"
+
+    fig, ax = plt.subplots(figsize=(13, 5.5))
+    ax.set_xlim(-10, 270)
+    ax.set_ylim(-6.5, 8.5)
+    ax.set_aspect("auto")
+    ax.axis("off")
+
+    # ── NAP datum ───────────────────────────────────────────────────────────
+    ax.axhline(0, color="black", lw=0.8, linestyle="--", alpha=0.5, zorder=1)
+    ax.text(263, 0.1, "NAP = 0 m", fontsize=7.5, va="bottom", color="black", alpha=0.7)
+
+    # ── approach-channel floor ───────────────────────────────────────────────
+    ax.fill_between(
+        [x_bo_start, x_bo_gate],
+        floor_approach,
+        -7,
+        color="#c8a87a",
+        alpha=0.35,
+        zorder=2,
+    )
+    ax.fill_between(
+        [x_be_gate, x_be_end], floor_approach, -7, color="#c8a87a", alpha=0.35, zorder=2
+    )
+    ax.plot(
+        [x_bo_start, x_bo_gate],
+        [floor_approach, floor_approach],
+        color=c_floor,
+        lw=1.5,
+        zorder=3,
+    )
+    ax.plot(
+        [x_be_gate, x_be_end],
+        [floor_approach, floor_approach],
+        color=c_floor,
+        lw=1.5,
+        zorder=3,
+    )
+
+    # ── sill crests (raised threshold at each gate) ───────────────────────
+    sill_w = 8
+    # Bo sill block
+    ax.fill_between(
+        [x_bo_gate - sill_w, x_bo_gate],
+        floor_approach,
+        sill_bo,
+        color="#c8a87a",
+        alpha=0.6,
+        zorder=4,
+    )
+    ax.plot(
+        [x_bo_start, x_bo_gate - sill_w],
+        [floor_approach, floor_approach],
+        color=c_floor,
+        lw=1.5,
+        zorder=5,
+    )
+    ax.plot(
+        [x_bo_gate - sill_w, x_bo_gate - sill_w, x_bo_gate],
+        [floor_approach, sill_bo, sill_bo],
+        color=c_floor,
+        lw=1.5,
+        zorder=5,
+    )
+    # Be sill block
+    ax.fill_between(
+        [x_be_gate, x_be_gate + sill_w],
+        floor_approach,
+        sill_be,
+        color="#c8a87a",
+        alpha=0.6,
+        zorder=4,
+    )
+    ax.plot(
+        [x_be_gate + sill_w, x_be_end],
+        [floor_approach, floor_approach],
+        color=c_floor,
+        lw=1.5,
+        zorder=5,
+    )
+    ax.plot(
+        [x_be_gate, x_be_gate + sill_w, x_be_gate + sill_w],
+        [sill_be, sill_be, floor_approach],
+        color=c_floor,
+        lw=1.5,
+        zorder=5,
+    )
+
+    # ── chamber floor ────────────────────────────────────────────────────────
+    ax.fill_between(
+        [x_bo_gate, x_be_gate], floor_chamber, -7, color="#c8a87a", alpha=0.35, zorder=2
+    )
+    ax.plot(
+        [x_bo_gate, x_be_gate],
+        [floor_chamber, floor_chamber],
+        color=c_floor,
+        lw=1.5,
+        zorder=3,
+    )
+
+    # ── water surfaces ───────────────────────────────────────────────────────
+    # Bo approach water
+    ax.fill_between(
+        [x_bo_start, x_bo_gate], sill_bo, peil_bo, color=c_bo, alpha=0.18, zorder=3
+    )
+    ax.plot([x_bo_start, x_bo_gate], [peil_bo, peil_bo], color=c_bo, lw=2.0, zorder=4)
+    # Be approach water
+    ax.fill_between(
+        [x_be_gate, x_be_end], sill_be, peil_be, color=c_be, alpha=0.18, zorder=3
+    )
+    ax.plot([x_be_gate, x_be_end], [peil_be, peil_be], color=c_be, lw=2.0, zorder=4)
+
+    # ── gate symbols (vertical thick lines) ──────────────────────────────────
+    for x in [x_bo_gate, x_be_gate]:
+        ax.plot(
+            [x, x],
+            [floor_chamber - 0.2, max(peil_bo, peil_be) + 0.3],
+            color="#1a1a2e",
+            lw=3.5,
+            zorder=6,
+            solid_capstyle="butt",
+        )
+
+    # ── annotations: gate labels ─────────────────────────────────────────────
+    ax.text(
+        x_bo_gate,
+        max(peil_bo, peil_be) + 0.6,
+        "Bovenhoofd (Bo)",
+        ha="center",
+        va="bottom",
+        fontsize=9,
+        fontweight="bold",
+        color=c_bo,
+    )
+    ax.text(
+        x_be_gate,
+        max(peil_bo, peil_be) + 0.6,
+        "Benedenhoofd (Be)",
+        ha="center",
+        va="bottom",
+        fontsize=9,
+        fontweight="bold",
+        color=c_be,
+    )
+    ax.text(
+        x_mid,
+        max(peil_bo, peil_be) + 0.6,
+        "Sluiskolk",
+        ha="center",
+        va="bottom",
+        fontsize=9,
+        color="#475569",
+    )
+
+    # ── streefpeil labels ────────────────────────────────────────────────────
+    ax.annotate(
+        f"Streefpeil Bo\n{peil_bo:+.1f} m NAP",
+        xy=(x_bo_gate / 2, peil_bo),
+        xytext=(x_bo_gate / 2, peil_bo + 1.2),
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        color=c_bo,
+        arrowprops=dict(arrowstyle="-", color=c_bo, lw=0.8),
+    )
+    ax.annotate(
+        f"Streefpeil Be\n{peil_be:+.1f} m NAP",
+        xy=((x_be_gate + x_be_end) / 2, peil_be),
+        xytext=((x_be_gate + x_be_end) / 2, peil_be + 1.2),
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        color=c_be,
+        arrowprops=dict(arrowstyle="-", color=c_be, lw=0.8),
+    )
+
+    # ── drempelkruin labels ──────────────────────────────────────────────────
+    ax.annotate(
+        f"Drempelkruin Bo\n{sill_bo:+.1f} m NAP",
+        xy=(x_bo_gate - sill_w / 2, sill_bo),
+        xytext=(x_bo_gate - sill_w / 2 - 20, sill_bo - 1.2),
+        ha="right",
+        va="top",
+        fontsize=8,
+        color=c_sill,
+        arrowprops=dict(arrowstyle="->", color=c_sill, lw=0.9),
+    )
+    ax.annotate(
+        f"Drempelkruin Be\n{sill_be:+.1f} m NAP",
+        xy=(x_be_gate + sill_w / 2, sill_be),
+        xytext=(x_be_gate + sill_w / 2 + 20, sill_be - 1.2),
+        ha="left",
+        va="top",
+        fontsize=8,
+        color=c_sill,
+        arrowprops=dict(arrowstyle="->", color=c_sill, lw=0.9),
+    )
+
+    # ── waterdiepte boven drempel: double-headed arrows ──────────────────────
+    def depth_arrow(x, y_bottom, y_top, color, label, side="left"):
+        ax.annotate(
+            "",
+            xy=(x, y_top),
+            xytext=(x, y_bottom),
+            arrowprops=dict(arrowstyle="<->", color=color, lw=1.2),
+        )
+        dx = -12 if side == "left" else 12
+        ha = "right" if side == "left" else "left"
+        ax.text(
+            x + dx,
+            (y_bottom + y_top) / 2,
+            label,
+            ha=ha,
+            va="center",
+            fontsize=7.5,
+            color=color,
+            bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.85),
+        )
+
+    depth_arrow(
+        x_bo_gate - sill_w / 2 - 2,
+        sill_bo,
+        peil_bo,
+        c_bo,
+        f"Waterdiepte\nboven drempel Bo\n= {peil_bo - sill_bo:.1f} m",
+        "left",
+    )
+    depth_arrow(
+        x_be_gate + sill_w / 2 + 2,
+        sill_be,
+        peil_be,
+        c_be,
+        f"Waterdiepte\nboven drempel Be\n= {peil_be - sill_be:.1f} m",
+        "right",
+    )
+
+    # ── "zee-sluis" variant label ────────────────────────────────────────────
+    ax.text(
+        x_mid,
+        floor_chamber - 0.6,
+        "Zeesluis variant: Binnenhoofd (Bi) = Bo  |  Buitenhoofd (Bu) = Be",
+        ha="center",
+        va="top",
+        fontsize=7.5,
+        color="#64748b",
+        style="italic",
+    )
+
+    ax.set_title(
+        "Terminologie sluisdrempels — uitlegfiguur (illustratieve waarden)",
+        fontsize=11,
+        fontweight="bold",
+        pad=12,
+    )
+    fig.tight_layout()
+    plt.savefig(CONCEPT_DIAGRAM_PATH, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return "images/concept_diagram.png"
 
 
 def get_waterway_levels(sluis_name):
@@ -2205,6 +2495,8 @@ def write_html_report(results_list):
         1 for r in results_list if r["status_str"] == "Enquête Afwijking"
     )
 
+    concept_diagram_path = generate_concept_diagram()
+
     html_content = f"""<!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -2468,6 +2760,14 @@ def write_html_report(results_list):
             <div class="kpi-card">
                 <div class="label">Enquête Afwijkingen</div>
                 <div class="value" style="color: #d97706;">{survey_outliers}</div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <div class="section-title">Terminologie sluisdrempels</div>
+            <div style="text-align:center; margin: 0.5rem 0 0.25rem;">
+                <img src="{concept_diagram_path}" alt="Uitlegfiguur drempelterminologie"
+                     style="max-width:100%; border:1px solid #e2e8f0; border-radius:0.375rem;">
             </div>
         </div>
 
