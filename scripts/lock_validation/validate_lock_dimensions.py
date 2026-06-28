@@ -1157,26 +1157,27 @@ def generate_sideview_chart(
         )
 
         # Use manually placed measurement if available, else fall back to auto crest.
-        # Plot as horizontal line so value is always readable regardless of where
-        # the OBB-axis profile happens to pass.
+        # The point sits at the gate position on the axis; it may not lie exactly on
+        # the profile line because the manual point was placed on the actual drempel,
+        # which can be slightly off the OBB centre axis.
         _m_bobi = bobi_measured if bobi_measured is not None else _crest1
         _m_bebu = bebu_measured if bebu_measured is not None else _crest2
         if _m_bobi is not None:
-            ax_prof.axhline(
-                _m_bobi,
+            ax_prof.scatter(
+                [_gate1_d],
+                [_m_bobi],
                 color=c_bobi,
-                lw=1.5,
-                linestyle="--",
                 zorder=6,
+                s=35,
                 label=f"Meting {abbr_bobi}: {_m_bobi:+.2f} m",
             )
         if _m_bebu is not None:
-            ax_prof.axhline(
-                _m_bebu,
+            ax_prof.scatter(
+                [_gate2_d],
+                [_m_bebu],
                 color=c_bebu,
-                lw=1.5,
-                linestyle="--",
                 zorder=6,
+                s=35,
                 label=f"Meting {abbr_bebu}: {_m_bebu:+.2f} m",
             )
 
