@@ -1762,6 +1762,24 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     print("Loading BIVAS locks...")
     bivas_rd = load_bivas_locks()
 
+    # Load manually placed drempelkruin measurements from reference/measurements.gpkg.
+    # Keyed on (sluis, kolk, zijde) → meting_1m_nap; used to override automatic
+    # OBB-axis crest estimates in the sideview chart.
+    MEASUREMENTS_GPKG = "reference/measurements.gpkg"
+    manual_measurements = {}
+    if os.path.exists(MEASUREMENTS_GPKG):
+        try:
+            mdf = gpd.read_file(MEASUREMENTS_GPKG, layer="drempelkruin")
+            for _, mrow in mdf.iterrows():
+                val = mrow.get("meting_1m_nap")
+                if val is not None and val == val:  # not NaN
+                    manual_measurements[
+                        (mrow["sluis"], mrow["kolk"], mrow["zijde"])
+                    ] = float(val)
+            print(f"Loaded {len(manual_measurements)} manual drempel measurements.")
+        except Exception as e:
+            print(f"Warning: could not load manual measurements ({e})")
+
     # 3. Load aimed water levels for vertical datum conversions
     print("Loading Aimed Levels...")
     aimed_levels = gpd.read_parquet(AIMED_LEVELS)
@@ -2212,6 +2230,19 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                 bobi_measured = bathy_result["crest1"]
                 bebu_measured = bathy_result["crest2"]
                 profile_line_rd = bathy_result.get("line")
+
+            # Override with manually placed drempelkruin points where available.
+            # Bo/Bi and Be/Bu are both checked so river and sea locks work.
+            man_bobi = manual_measurements.get(
+                (sluis_name, chamber_name, "Bo")
+            ) or manual_measurements.get((sluis_name, chamber_name, "Bi"))
+            man_bebu = manual_measurements.get(
+                (sluis_name, chamber_name, "Be")
+            ) or manual_measurements.get((sluis_name, chamber_name, "Bu"))
+            if man_bobi is not None:
+                bobi_measured = man_bobi
+            if man_bebu is not None:
+                bebu_measured = man_bebu
 
             footprint_path = generate_footprint_map(
                 sluis_clean,
