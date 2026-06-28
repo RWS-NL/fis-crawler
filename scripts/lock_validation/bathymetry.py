@@ -25,7 +25,7 @@ from shapely.geometry import LineString
 SERVICE = (
     "https://geo.rijkswaterstaat.nl/arcgis/rest/services/GDR/bodemhoogte_1mtr/MapServer"
 )
-CACHE_PATH = "output/bathymetry_cache.json"
+CACHE_PATH = "output/lock-validation/bathymetry_cache.json"
 
 _NODATA_TOKENS = {"NoData", "nodata", "", None}
 

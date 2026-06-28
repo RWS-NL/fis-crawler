@@ -3,7 +3,7 @@
 Reads output/manual_checks/measurements.gpkg (drempelkruin layer), queries the
 bodemhoogte_1mtr MapServer identify endpoint at each point's RD coordinate, and
 updates meting_1m_nap in-place via SQLite (so the other layers are untouched).
-Every query is cached in output/bathymetry_cache.json.
+Every query is cached in output/lock-validation/bathymetry_cache.json.
 
 Sluizen with no bathymetry coverage (Prinses Beatrix, Krammer Noordkolk Be) are
 expected to return None and are written as NULL.

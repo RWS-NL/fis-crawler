@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Target output files
-OUTPUT_DIR = "output"
+OUTPUT_DIR = "output/lock-validation"
 REPORT_PATH = os.path.join(OUTPUT_DIR, "lock_dimensions_validation_report.md")
 HTML_REPORT_PATH = os.path.join(OUTPUT_DIR, "lock_dimensions_validation_report.html")
 # Target lock list. Defaults to the copy committed alongside this script; override
@@ -175,7 +175,7 @@ def resolve_sill_nap(
 IMAGES_DIR = os.path.join(OUTPUT_DIR, "images")
 AERIALS_DIR = os.path.join(IMAGES_DIR, "aerials")
 CHARTS_DIR = os.path.join(IMAGES_DIR, "charts")
-MANUAL_CHECKS_DIR = os.path.join(OUTPUT_DIR, "manual_checks")
+MANUAL_CHECKS_DIR = "output/manual_checks"
 
 # Create output dirs
 os.makedirs(AERIALS_DIR, exist_ok=True)
@@ -2368,20 +2368,25 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
 ### Vergelijking Afmetingen per Sluiskolk (meters)
 *Kolkbreedte = bouwkundige breedte (FIS `Width`). Deuropening = vrije breedte deuropening (FIS `GateWidth`) = beperkende maat voor scheepsbreedte. Polygoon lengte = afgeleid van FIS-geometrie via minimale omschreven rechthoek (niet onafhankelijk van FIS).*
 
-| Sluis | Kolknaam | ISRS-code | Constr. Lengte (m) | Polygoon L (m) | Kolkbreedte (m) | Schutlengte (m) | Deuropening (m) | BIVAS Lengte | Enquête Lengte | DISK Lengte | Checks |
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 """
+    report_content += (
+        "```{=latex}\n\\begin{landscape}\n\\tiny\n```\n\n"
+        "| Sluis | Kolknaam | ISRS-code | Constr. Lengte (m) | Polygoon L (m)"
+        " | Kolkbreedte (m) | Schutlengte (m) | Deuropening (m)"
+        " | BIVAS Lengte | Enquête Lengte | DISK Lengte | Checks |\n"
+        "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n"
+    )
     for r in results_list:
         bivas_note = "" if r.get("is_single_kolk", True) else " (multi-kolk)"
         obb_l = r.get("obb_len")
         fis_l = r.get("fis_struct_len")
         if r.get("geom_circular"):
-            obb_str = "⚠ circulaire geom."
+            obb_str = "[!] circulaire geom."
         elif obb_l is not None:
             # Flag large geometry↔attribute deviation (>15% suggests transcription error)
             obb_flag = ""
             if fis_l is not None and fis_l > 0 and abs(obb_l - fis_l) / fis_l > 0.15:
-                obb_flag = " ⚠"
+                obb_flag = " [!]"
             obb_str = f"{obb_l:.0f}{obb_flag}"
         else:
             obb_str = "nan"
@@ -2393,13 +2398,20 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
             f"{r.get('disk_len') or 'nan'} | {r.get('violations_str', 'n.v.t.')} |\n"
         )
 
-    report_content += """
-### Drempelhoogtes & Referentiewaterstanden per Sluiszijde
-*Drempelkruin FIS = absolute drempelhoogte t.o.v. NAP afgeleid uit FIS. Bron: **Note** = FIS Note-veld (meest betrouwbaar), **KP-peil** / **SP-peil** = berekend uit streefpeil minus FIS drempeldiepte, **NAP (FIS)** = FIS HeightReferenceLevel=NAP. ⚠ = onzeker. Meting 1m = drempelkruin lokaal maximum uit RWS bodemhoogte_1mtr.*
-
-| Sluis | Kolknaam | Zijde | Waterweg | Streefpeil (NAP) | Drempelkruin FIS (m NAP) | Meting 1m-kaart (m NAP) | Waterdiepte boven drempel (m) | Enquête |
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-"""
+    report_content += (
+        "```{=latex}\n\\normalsize\n\\end{landscape}\n```\n\n"
+        "### Drempelhoogtes & Referentiewaterstanden per Sluiszijde\n"
+        "*Drempelkruin FIS = absolute drempelhoogte t.o.v. NAP afgeleid uit FIS."
+        " Bron: **Note** = FIS Note-veld (meest betrouwbaar),"
+        " **KP-peil** / **SP-peil** = berekend uit streefpeil minus FIS drempeldiepte,"
+        " **NAP (FIS)** = FIS HeightReferenceLevel=NAP. [!] = onzeker."
+        " Meting 1m = drempelkruin lokaal maximum uit RWS bodemhoogte_1mtr.*\n\n"
+        "```{=latex}\n\\begin{landscape}\n\\tiny\n```\n\n"
+        "| Sluis | Kolknaam | Zijde | Waterweg | Streefpeil (NAP)"
+        " | Drempelkruin FIS (m NAP) | Meting 1m-kaart (m NAP)"
+        " | Waterdiepte boven drempel (m) | Enquête |\n"
+        "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |\n"
+    )
     for r in results_list:
         peil_h = f"{r['peil_hoog']:.2f}" if pd.notna(r["peil_hoog"]) else "—"
         peil_l = f"{r['peil_laag']:.2f}" if pd.notna(r["peil_laag"]) else "—"
@@ -2407,7 +2419,7 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
         def _sill_cell(nap_val, source, uncertain):
             if pd.isna(nap_val) or nap_val is None:
                 return "—"
-            flag = " ⚠" if uncertain else ""
+            flag = " [!]" if uncertain else ""
             src = source or "?"
             return f"{nap_val:.2f} ({src}){flag}"
 
@@ -2443,8 +2455,8 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
             f"{r['survey_drempel_bebu'] or '—'} |\n"
         )
 
-    report_content += """
-## 2. Belangrijke Uitdagingen & Afwijkingen per Sluiscomplex
+    report_content += "```{=latex}\n\\normalsize\n\\end{landscape}\n```\n\n"
+    report_content += """## 2. Belangrijke Uitdagingen & Afwijkingen per Sluiscomplex
 
 Hieronder volgen de specifieke technische uitdagingen en afwijkingen per sluiscomplex:
 

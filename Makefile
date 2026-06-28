@@ -143,19 +143,20 @@ lock-validation-report:
 
 # Deel A + Deel B → één PDF (vereist pandoc)
 # Deel A = docs/werkwijze_sluiscontrole.md (methodiek, statisch)
-# Deel B = output/lock_dimensions_validation_report.md (data-gegenereerd)
-lock-validation-pdf: output/lock_dimensions_validation_report.md
+# Deel B = output/lock-validation/lock_dimensions_validation_report.md (data-gegenereerd)
+lock-validation-pdf: output/lock-validation/lock_dimensions_validation_report.md
 	pandoc \
 		docs/werkwijze_sluiscontrole.md \
-		output/lock_dimensions_validation_report.md \
+		output/lock-validation/lock_dimensions_validation_report.md \
 		--pdf-engine=xelatex \
+		-H docs/pdf_header.tex \
 		--toc \
 		--toc-depth=2 \
 		-V lang=nl \
 		-V geometry:margin=2cm \
 		-V fontsize=10pt \
-		-o output/lock_validation_eindrapport.pdf
-	@echo "PDF geschreven naar output/lock_validation_eindrapport.pdf"
+		-o output/lock-validation/lock_validation_eindrapport.pdf
+	@echo "PDF geschreven naar output/lock-validation/lock_validation_eindrapport.pdf"
 
 # --- Utilities ---
 clean:
