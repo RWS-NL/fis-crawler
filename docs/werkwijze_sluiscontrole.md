@@ -125,32 +125,98 @@ Voor elke kolk worden twee drempelpunten (Bo en Be) handmatig in QGIS geposition
 
 ### 3.4  Boven/Beneden zijde (Bo/Be, Bi/Bu)
 
-De zijde-toewijzing wordt **per sluiscomplex handmatig vastgesteld** op basis van de waterhuishoudkundige situatie (welke vaarweg is upstream/benedenstrooms, wat zijn de streefpeilen).
+**Definitie.** Boven/beneden (en binnen/buiten bij zeesluizen) is een **vaste,
+per-sluiscomplex toegekende naam**, gebaseerd op streefpeil en positie in het
+watersysteem — **niet** een momentopname-vergelijking van actuele waterstanden:
+- "Beneden"/"buiten" = de zijde die dichter bij zee ligt / de natuurlijke
+  afvoerrichting volgt (rivier of getijgebied), ongeacht welke kant op een
+  gegeven moment toevallig hoger staat.
+- "Boven"/"binnen" = de zijde die verder van zee ligt: een hoger gereguleerd
+  pand, of de kanaalzijde bij een kanaal-naar-rivier/zee-overgang.
 
-**Huidige implementatie:** `get_waterway_levels()` in `validate_lock_dimensions.py` (regels 474-539) geeft per complex:
-- naam van de aansluitende waterweg aan Bo/Be zijde
-- streefpeil van die waterweg (m NAP)
+Onderbouwing: het `Handboek voor het Ontwerpen van Schutsluizen` (RWS) hanteert
+het begrip **"negatief verval"** juist om aan te geven dat de zijden een vaste
+naam hebben die niet meebeweegt met de waterstand: *"Negatief verval wil zeggen
+het verval dat enkele draai- of puntdeuren kan doen openen. Het treedt
+bijvoorbeeld op bij extreem laag water aan de zeezijde of extreem hoog water aan
+de binnenzijde van een sluis."* Als de waterstand toevallig "verkeerd om" staat,
+heet dat een uitzonderingssituatie — de zijden worden niet herbenoemd.
 
-**Automatische bepaling is niet mogelijk** vanuit FIS/aimedlevel-geometrie alleen, omdat de aimedlevel-segmenten de kolk doorkruisen en beide poorten dezelfde vaarwegsectie vinden. Een datagedreven aanpak vereist het traceren van het FIS routenetwerk (toekomstig werk).
+**Eenheid streefpeil (m NAP):** bevestigd door RWS-document *"Vragen en antwoorden
+over doorvaarthoogten bij bruggen op www.vaarweginformatie.nl"* (vaarweginformatie.nl,
+versie april 2024): *"Voor kanalen: StreefPeil (SP): Het StreefPeil is het
+gewenste peil dat wordt nagestreefd in een kanaal onder normale omstandigheden
+[...] ten opzichte van NAP."* `aimedlevel.Value` in FIS komt overeen met dit
+StreefPeil-begrip.
 
-**Beslisregel:** de hardcoded toewijzing is de gezaghebbende bron. Aanpassing is vereist als een sluiscomplex een nieuwe operationele situatie krijgt (bijv. peilwijziging, nieuwbouw).
+**Automatische bepaling (geïmplementeerd, `fis/lock/levels.py`):**
+
+1. `aimedlevel` (streefpeil, m NAP) wordt op de fis-graaf-edges geprojecteerd
+   (`enrich_edges_with_streefpeil()`, ruimtelijke overlap-join op RouteId/RouteKm,
+   analoog aan de bestaande dataset-verrijkingen in `fis/graph/enrich_fis.py`).
+2. Per sluiscomplex wordt vanaf de twee echte graafknopen die de eigen vaarweg van
+   de sluis begrenzen (`start_junction_id`/`end_junction_id`, al berekend in
+   `fis/lock/core.py::_resolve_fairway_data`) de graaf afgelopen
+   (`walk_to_streefpeil()`) tot een edge met een streefpeil gevonden is.
+3. De wandeling blijft daarbij **op de eigen `RouteId` van de sluis** — empirisch
+   is gebleken dat een onbeperkte wandeling binnen 1-2 stappen een nabijgelegen
+   haven of zijkanaal met een eigen, niet-gerelateerd streefpeil kan bereiken
+   vóórdat de juiste pandgrens op de eigen route gevonden wordt (geconstateerd bij
+   Sluis Belfeld/Sambeek). Zonder streefpeil binnen het gezochte aantal stappen op
+   de eigen route → onopgelost (géén silent fallback naar een andere route).
+4. Hogere gevonden streefpeil = boven, lagere = beneden. Dit resultaat wordt
+   gelabeld op de al bestaande `lock_split`/`lock_merge`-knopen (sluiscomplex-
+   niveau, gedeeld door alle kolken) en overgeërfd naar `chamber_start`/
+   `chamber_end` (per kolk) in `fis/lock/graph.py` — `output/lock-schematization/
+   nodes.geoparquet` krijgt de kolommen `side`, `streefpeil_nap`,
+   `streefpeil_source`.
+
+**Empirische validatie** (`scripts/lock_validation/cross_validate_boven_beneden.py`,
+output in `output/lock-schematization/boven_beneden_cross_validation.csv`) tegen
+de handmatige tabel (nu `fis.lock.levels.MANUAL_WATERWAY_LEVELS`):
+- **MATCH** (zijde én waarde correct): Sluis Born, Houtribsluizen, Oranjesluizen,
+  Prins Bernhardsluizen, Prinses Irenesluizen, Prinses Margrietsluis.
+- **PARTIAL** (kanaalzijde correct automatisch bepaald, rivier-/getijzijde heeft
+  bewust geen streefpeil — verwacht, geen fout): Sluis Belfeld, Sluis Sambeek.
+- **VALUE_MISMATCH** (automatisch vindt een streefpeil één pand te ver):
+  Sluis Maasbracht, Gaarkeukensluis — bekende beperking, zie §5.
+- **UNRESOLVED** (verwacht: getijsluizen/rivieren zonder streefpeil, of route-
+  ambiguïteit zoals Sluis Heel, Sluis Eefde): overige geteste sluizen.
+- Géén enkele SIDE_MISMATCH (automatisch de verkeerde kant boven/beneden noemen)
+  in de kruisvalidatie — dat was de belangrijkste faalmodus om uit te sluiten.
+
+**Beslisregel:** de automatische bepaling (`streefpeil_source == "resolved"`) is
+leidend waar beschikbaar; de handmatige tabel (`MANUAL_WATERWAY_LEVELS`) blijft
+de gezaghebbende bron voor alle overige gevallen (`single_side_aimedlevel`,
+`ambiguous`, `no_streefpeil_found`) en voor bekende afwijkingen (§5). Weurt/Heumen
+(samenvloeiing van twee rivieren) zijn structureel geen 2-zijdig geval en blijven
+volledig op de handmatige tabel steunen — zie §5.
 
 ### 3.5  Referentiehoogtes en streefpeilen
 
 ```
 Streefpeil Bo/Be:
-  hardcoded per complex in get_waterway_levels() → primaire bron voor rapport
+  1. automatisch bepaald via graaf-topologie (fis/lock/levels.py,
+     resolve_boven_beneden) — leidend waar streefpeil_source == "resolved"
+  2. handmatig, MANUAL_WATERWAY_LEVELS (voorheen get_waterway_levels()) →
+     fallback/override voor rivier-, getij- en overige niet-opgeloste gevallen
 
 FIS AimedLevel (sjoin <=500 m op kolkcentroïde):
   → target_water_level_nap: één waarde per kolk (nearest feature)
   → gebruik: converter drempeldiepte → NAP bij HeightReferenceLevel = KP of SP
+  (deze centroïde-join blijft te grof voor per-zijde onderscheid — zie §3.4 voor
+  de per-zijde bepaling via de graaf)
 
 FairwayDepth.ReferenceLevel (sjoin <=500 m):
   → per vaarwegtraject: KP, SP, of NAP
   → gebruik: bepaalt welke rekenmethode voor resolve_sill_nap() geldt
 ```
 
-**Verantwoording:** de aimedlevel (single-value per kolk) is te grof voor per-zijde onderscheid. De hardcoded waarden in `get_waterway_levels()` zijn correct en zijn gevalideerd tegen de bekende waterpeilen van het Nederlandse vaarwegennet.
+**Verantwoording:** de aimedlevel-centroïde-join (single-value per kolk) blijft te
+grof voor per-zijde onderscheid en wordt uitsluitend gebruikt voor de
+KP/SP→NAP-conversie van drempelhoogtes (§3.3), niet voor boven/beneden. De
+per-zijde streefpeilen komen uit de graaf-gebaseerde bepaling (§3.4) met de
+handmatige tabel als gevalideerde override.
 
 ---
 
@@ -172,7 +238,10 @@ De navigatie-as door de sluiskolk wordt bepaald via de **minimum rotated rectang
 
 | Punt | Status |
 |---|---|
-| Bo/Be automatisch bepalen | Open — geen datagedreven methode gevonden |
+| Bo/Be automatisch bepalen | Deels opgelost — zie §3.4. Graaf-topologische bepaling (`fis/lock/levels.py`), gevalideerd (geen SIDE_MISMATCH) tegen `MANUAL_WATERWAY_LEVELS` in `boven_beneden_cross_validation.csv`. |
+| Sluis Maasbracht, Gaarkeukensluis: automatische streefpeil één pand te ver | Open — de graafwandeling vindt op de eigen route een streefpeil dat bij het volgende pand hoort i.p.v. het aangrenzende. Waarschijnlijk ontbreekt een aimedlevel-match op de sectie(s) direct naast de sluis. Handmatige tabel blijft hier leidend (`VALUE_MISMATCH` in de kruisvalidatie). |
+| Weurt/Heumen: samenvloeiing van twee rivieren (Maas + Waal) | Open — geen 2-zijdige boven/beneden-structuur; niet geautomatiseerd in deze iteratie, blijft op de handmatige tabel steunen. |
+| `Bo`/`Be`-volgorde in `bathymetry.py::gate_centres()` (CCW-heuristiek) koppelen aan de nieuwe `side`-labels | Open — vervolgstap; de node-labeling (§3.4) is klaar, de consumptie in `validate_lock_dimensions.py`/`bathymetry.py` is nog niet aangepast. |
 | Prinses Beatrix: geen 1m-bathymetrie | Gedocumenteerd, NULL in measurements.gpkg |
 | Krammer Noordkolk Be: geen 1m-bathymetrie | Gedocumenteerd, NULL |
 | Belfeld Oostkolk Bo (eerder NoData) | Opgelost — 6.88 m NAP via ZN_zuid_oost laag |
