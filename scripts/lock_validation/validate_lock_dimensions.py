@@ -12,6 +12,7 @@ import numpy as np
 from shapely.geometry import Point, LineString
 import requests
 from fis import utils
+from fis.lock import levels as lock_levels
 
 # Ensure the lock_validation package directory is on the path so the sibling
 # bathymetry module can be imported regardless of how the script is invoked.
@@ -41,6 +42,7 @@ FIS_SECTIONS = "output/fis-export/section.geoparquet"
 EURIS_DIR = "output/euris-export"
 AIMED_LEVELS = "output/fis-export/aimedlevel.geoparquet"
 AIMED_WATERLEVELS = "output/fis-export/aimedwaterlevel.geoparquet"
+LOCK_NODES = "output/lock-schematization/nodes.geoparquet"
 
 
 def find_euris_chambers(euris_dir=EURIS_DIR, country="NL"):
@@ -472,70 +474,65 @@ def generate_concept_diagram():
 
 
 def get_waterway_levels(sluis_name):
-    """Return the waterway names and aimed water levels (streefpeil in NAP) for both sides of the lock."""
-    s = sluis_name.lower().strip()
-    if "belfeld" in s:
-        return "Maas (bovenstrooms)", 14.1, "Maas (benedenstrooms)", 10.8
-    elif "born" in s:
-        return (
-            "Julianakanaal (bovenstrooms)",
-            44.7,
-            "Julianakanaal (benedenstrooms)",
-            32.6,
-        )
-    elif "eefde" in s:
-        return "Twentekanaal", 10.0, "Gelderse IJssel", 3.0
-    elif "gaarkeuken" in s:
-        return (
-            "Van Starkenborghkanaal (oost)",
-            -0.93,
-            "Prinses Margrietkanaal (west)",
-            -0.52,
-        )
-    elif "hansweert" in s:
-        return "Kanaal door Zuid-Beveland", 0.0, "Westerschelde", 0.0
-    elif "heel" in s:
-        return (
-            "Julianakanaal / Kanaal Wessem-Nederweert",
-            28.65,
-            "Maasplassen Heel (stuwpeil Linne)",
-            20.8,
-        )
-    elif "houtrib" in s:
-        return "IJsselmeer", 0.0, "Markermeer", -0.2
-    elif "krammer" in s:
-        return "Volkerakpeil", 0.0, "Krammer / Oosterschelde", 0.0
-    elif "kreekrak" in s:
-        return "Antwerpen kanaalpeil", 1.8, "Schelde-Rijnverbinding (Volkerakpeil)", 0.0
-    elif "maasbracht" in s:
-        return (
-            "Julianakanaal (bovenstrooms)",
-            32.6,
-            "Julianakanaal (benedenstrooms)",
-            20.8,
-        )
-    elif "oranje" in s:
-        return "Markermeer", -0.2, "Binnen-IJ / Noordzeekanaal", -0.4
-    elif "bernhard" in s:
-        return "Waal (stuwpeil Hagestein/rivier)", 3.0, "Amsterdam-Rijnkanaal", -0.4
-    elif "beatrix" in s:
-        return "Lek (stuwpeil Hagestein)", 3.0, "Lekkanaal / Amsterdam-Rijnkanaal", -0.4
-    elif "irene" in s:
-        return "Lek (stuwpeil Hagestein)", 3.0, "Amsterdam-Rijnkanaal", -0.4
-    elif "margriet" in s:
-        return "IJsselmeer", -0.1, "Friese Boezem", -0.52
-    elif "sambeek" in s:
-        return "Maas (bovenstrooms)", 10.8, "Maas (benedenstrooms)", 8.6
-    elif "weurt" in s:
-        return "Maas-Waalkanaal", 7.95, "Waal (rivier)", 5.0
-    elif "stevin" in s:
-        return "IJsselmeer", -0.1, "Waddenzee (tij)", 0.0
-    elif "terneuzen" in s:
-        return "Kanaal Gent-Terneuzen", 2.1, "Westerschelde (tij)", 0.0
-    elif "volkerak" in s:
-        return "Hollandsch Diep", 0.0, "Volkerak (Volkerakpeil)", 0.0
-    else:
-        return "Onbekende waterweg", None, "Onbekende waterweg", None
+    """Return the waterway names and aimed water levels (streefpeil in NAP) for both sides of the lock.
+
+    Thin wrapper: the actual table lives in fis.lock.levels.MANUAL_WATERWAY_LEVELS
+    so there is one source of truth shared with the automatic (graph-based)
+    boven/beneden resolution and its cross-validation script — see
+    docs/werkwijze_sluiscontrole.md §3.4.
+    """
+    return lock_levels.get_waterway_levels(sluis_name)
+
+
+def load_chamber_side_lookup(nodes_path=LOCK_NODES):
+    """Load per-chamber boven/beneden gate points from the lock schematization.
+
+    Returns a dict: chamber_id (str) -> {"boven": Point in EPSG:28992 or None,
+    "beneden": Point in EPSG:28992 or None}, built from the chamber_start/
+    chamber_end nodes (see fis/lock/graph.py and fis/lock/levels.py). Chambers
+    with no resolved side (streefpeil_source != "resolved"/"single_side_aimedlevel")
+    are simply absent, and callers fall back to the existing geometry heuristic.
+    """
+    if not os.path.exists(nodes_path):
+        return {}
+    nodes = gpd.read_parquet(nodes_path)
+    chamber_nodes = nodes[
+        nodes["node_type"].isin(["chamber_start", "chamber_end"])
+        & nodes["side"].notna()
+    ]
+    if chamber_nodes.empty:
+        return {}
+    if chamber_nodes.crs is None:
+        chamber_nodes = chamber_nodes.set_crs(epsg=4326)
+    chamber_nodes_rd = chamber_nodes.to_crs(epsg=28992)
+
+    lookup = {}
+    for row in chamber_nodes_rd.itertuples():
+        cid = str(row.chamber_id)
+        lookup.setdefault(cid, {"boven": None, "beneden": None})
+        if row.side in ("boven", "beneden"):
+            lookup[cid][row.side] = row.geometry
+    return lookup
+
+
+def determine_gate_swap(geom_rd, chamber_id, chamber_side_points):
+    """Should gate_centres()'s point order be swapped so index 0 = Bo/boven gate?
+
+    Compares the chamber's own two gate centres (geometry artifact, arbitrary
+    order) against the known boven-side node position from the lock
+    schematization. Returns False (no swap / keep existing order) when the side
+    is unresolved for this chamber, so callers degrade gracefully to the
+    pre-existing CCW-order behaviour.
+    """
+    sides = chamber_side_points.get(str(chamber_id))
+    if not sides or sides.get("boven") is None:
+        return False
+    centres = bathy_mod.gate_centres(geom_rd)
+    if centres is None:
+        return False
+    p0, p1 = Point(centres[0]), Point(centres[1])
+    boven_pt = sides["boven"]
+    return p1.distance(boven_pt) < p0.distance(boven_pt)
 
 
 def download_aerial_photo(sluis_clean, chamber_clean, centroid):
@@ -1786,6 +1783,12 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
         except Exception as e:
             print(f"Warning: could not load manual measurements ({e})")
 
+    # Load boven/beneden gate positions from the lock schematization (per chamber),
+    # used to orient the bathymetry gate order (see determine_gate_swap()).
+    print("Loading boven/beneden node labels...")
+    chamber_side_points = load_chamber_side_lookup()
+    print(f"  {len(chamber_side_points)} chambers with a resolved boven/beneden side.")
+
     # 3. Load aimed water levels for vertical datum conversions
     print("Loading Aimed Levels...")
     aimed_levels = gpd.read_parquet(AIMED_LEVELS)
@@ -2223,9 +2226,19 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                 else:
                     action_desc = "Handmatige controle vereist: Controleer of BIVAS-afwijking door complex-gemiddelde komt"
 
-            # Sample bottom profile from bodemhoogte_1mtr (1m raster, NAP, EPSG:28992)
+            # Sample bottom profile from bodemhoogte_1mtr (1m raster, NAP, EPSG:28992).
+            # Orient gate1/gate2 (crest1/crest2) using the boven/beneden node labels
+            # from the lock schematization where resolved (fis/lock/levels.py),
+            # instead of the unverified CCW geometry order (see
+            # docs/werkwijze_sluiscontrole.md §3.4).
+            gate_swap = determine_gate_swap(
+                m_row["geometry_fis"], m_row["id_fis"], chamber_side_points
+            )
             bathy_result = bathy_mod.measure_sill_crests(
-                m_row["geometry_fis"], bathy_cache, sections_rd=sections_rd
+                m_row["geometry_fis"],
+                bathy_cache,
+                sections_rd=sections_rd,
+                swap=gate_swap,
             )
             bathy_mod.save_cache(bathy_cache)
 

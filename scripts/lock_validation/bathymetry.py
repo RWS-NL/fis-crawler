@@ -147,24 +147,29 @@ def _obb_axis_line(geom_rd, extend_m=15.0):
     return LineString([a, b])
 
 
-def axis_profile_line(geom_rd, sections_rd=None, extend_m=15.0):
+def axis_profile_line(geom_rd, sections_rd=None, extend_m=15.0, swap=False):
     """LineString along the chamber navigation axis, extended past both gates.
 
     Gate centres come from the two short-edge midpoints of the OBB, which is
     visually confirmed to align with the navigation direction for all RWS target
-    locks.  The order returned by gate_centres() follows shapely's CCW exterior
-    ordering, which consistently places the Bo/upstream gate first.
+    locks. The order returned by gate_centres() follows shapely's CCW exterior
+    ordering, which does NOT reliably place the Bo/upstream gate first (that
+    ordering is a geometry artifact, not physically grounded — see
+    docs/werkwijze_sluiscontrole.md §3.4). Pass ``swap=True`` (determined from the
+    boven/beneden node labels in output/lock-schematization/nodes.geoparquet,
+    see validate_lock_dimensions.py::determine_gate_swap) to place the actual
+    Bo/upstream gate first instead.
 
     ``sections_rd`` is accepted for API compatibility but no longer used for
     orientation: picking the closest section often fails for locks connecting two
     different waterways (e.g. a canal discharging into a river perpendicular to
-    it), where the nearest section may run in the wrong direction.  A proper
-    topological solution requires tracing the FIS route/junction network, which
-    is left as future work.
+    it), where the nearest section may run in the wrong direction.
     """
     centres = gate_centres(geom_rd)
     if centres is None:
         return None
+    if swap:
+        centres = (centres[1], centres[0])
 
     (x0, y0), (x1, y1) = centres
     dx, dy = x1 - x0, y1 - y0
@@ -226,14 +231,27 @@ def crest_near(profile, gate_distance, window_m=12.0):
 
 
 def measure_sill_crests(
-    geom_rd, cache, sections_rd=None, session=None, step_m=2.0, extend_m=15.0
+    geom_rd,
+    cache,
+    sections_rd=None,
+    session=None,
+    step_m=2.0,
+    extend_m=15.0,
+    swap=False,
 ):
     """Independent sill-crest heights (NAP) at both gates from the 1m bottom map.
+
+    ``crest1``/``gate1_distance`` are the Bo/upstream gate and ``crest2``/
+    ``gate2_distance`` the Be/downstream gate when ``swap`` is set correctly for
+    this chamber (see ``axis_profile_line``); otherwise the order is an
+    unverified geometry artifact.
 
     Returns dict with the sampled ``profile`` (for plotting), the two gate
     distances along the profile, and the crest height at each gate.
     """
-    line = axis_profile_line(geom_rd, sections_rd=sections_rd, extend_m=extend_m)
+    line = axis_profile_line(
+        geom_rd, sections_rd=sections_rd, extend_m=extend_m, swap=swap
+    )
     if line is None:
         return None
     gate1_d = extend_m
