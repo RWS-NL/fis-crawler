@@ -1826,16 +1826,11 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
         fis_centroids_fd = gpd.GeoDataFrame(
             fis_rd[["id"]], geometry=fis_rd.geometry.centroid, crs="EPSG:28992"
         )
-        fd_joined = gpd.sjoin_nearest(
-            fis_centroids_fd,
-            fd_rd[["ReferenceLevel", "geometry"]],
-            how="left",
-            max_distance=500,
-        ).drop_duplicates(subset=["id"])
+        fd_joined = lock_levels.sjoin_nearest_value(
+            fis_centroids_fd, fd_rd, ["ReferenceLevel"], max_distance=500
+        )
         fis_rd = fis_rd.merge(
-            fd_joined[["id", "ReferenceLevel"]].rename(
-                columns={"ReferenceLevel": "fairway_ref_level"}
-            ),
+            fd_joined.rename(columns={"ReferenceLevel": "fairway_ref_level"}),
             on="id",
             how="left",
         )
@@ -1847,17 +1842,17 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
         if aimed_waterlevels.crs is None:
             aimed_waterlevels.set_crs(epsg=4326, inplace=True)
         awl_rd = aimed_waterlevels.to_crs(epsg=28992)
-        awl_cols = ["MaximumNegativeDeviation", "MaximumPositiveDeviation", "geometry"]
         awl_centroids = gpd.GeoDataFrame(
             fis_rd[["id"]], geometry=fis_rd.geometry.centroid, crs="EPSG:28992"
         )
-        joined_range = gpd.sjoin_nearest(
-            awl_centroids, awl_rd[awl_cols], how="left", max_distance=1000
-        ).drop_duplicates(subset=["id"])
+        joined_range = lock_levels.sjoin_nearest_value(
+            awl_centroids,
+            awl_rd,
+            ["MaximumNegativeDeviation", "MaximumPositiveDeviation"],
+            max_distance=1000,
+        )
         fis_rd = fis_rd.merge(
-            joined_range[
-                ["id", "MaximumNegativeDeviation", "MaximumPositiveDeviation"]
-            ].rename(
+            joined_range.rename(
                 columns={
                     "MaximumNegativeDeviation": "level_dev_neg",
                     "MaximumPositiveDeviation": "level_dev_pos",
@@ -1876,14 +1871,12 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
         fis_rd[["id"]], geometry=fis_rd["centroid"], crs="EPSG:28992"
     )
     # Spatial join nearest aimed level
-    joined_levels = gpd.sjoin_nearest(
-        centroids_gdf, aimed_rd[["Value", "geometry"]], how="left", max_distance=500
+    joined_levels = lock_levels.sjoin_nearest_value(
+        centroids_gdf, aimed_rd, ["Value"], max_distance=500
     )
     # Map back to fis_rd
     fis_rd = fis_rd.merge(
-        joined_levels[["id", "Value"]].rename(
-            columns={"Value": "target_water_level_nap"}
-        ),
+        joined_levels.rename(columns={"Value": "target_water_level_nap"}),
         on="id",
         how="left",
     )

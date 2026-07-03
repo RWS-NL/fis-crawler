@@ -616,6 +616,24 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     berths_gdf = berths
     sections_gdf = sections
 
+    # Pre-pass: collect every lock's own fairway start/end junctions up front, so
+    # the boven/beneden graph walk (below) can treat every OTHER lock's junctions
+    # as a barrier and stop there, instead of crossing straight through a
+    # neighbouring lock's own pand — see fis.lock.levels.walk_to_streefpeil.
+    all_lock_junctions = set()
+    for _, lock_row in locks_gdf.iterrows():
+        if pd.isna(lock_row.get("fairway_id")):
+            continue
+        s_junc, e_junc = find_fairway_junctions(
+            sections_gdf, stringify_id(lock_row["fairway_id"])
+        )
+        for j in (s_junc, e_junc):
+            if j is not None:
+                try:
+                    all_lock_junctions.add(int(j))
+                except (TypeError, ValueError):
+                    pass
+
     # Ensure RIS Index is indexed for fast lookup
     if "isrs_code" in ris_df.columns:
         ris_df = ris_df.drop_duplicates(subset=["isrs_code"]).set_index("isrs_code")
@@ -681,7 +699,11 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
 
         try:
             boven_beneden = lock_levels.resolve_boven_beneden(
-                fairway_data, network_graph, route_id=lock.get("route_id")
+                fairway_data,
+                network_graph,
+                route_id=lock.get("route_id"),
+                other_lock_junctions=all_lock_junctions,
+                lock_name=lock.get("name"),
             )
         except Exception:
             logger.exception(

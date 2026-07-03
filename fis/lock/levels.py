@@ -70,12 +70,17 @@ def _match_sections_to_aimedlevel(sections_gdf, aimedlevel_gdf):
             continue
         s_begin = min(section.route_km_begin, section.route_km_end)
         s_end = max(section.route_km_begin, section.route_km_end)
+        best_overlap_km = -1.0
+        best_value = None
         for aimed_row in aimed_by_route.get_group(route_id).itertuples():
             a_begin = min(aimed_row.RouteKmBegin, aimed_row.RouteKmEnd)
             a_end = max(aimed_row.RouteKmBegin, aimed_row.RouteKmEnd)
-            if not (s_end < a_begin or a_end < s_begin):
-                value_by_section[section.id] = aimed_row.Value
-                break
+            overlap_km = min(s_end, a_end) - max(s_begin, a_begin)
+            if overlap_km >= 0 and overlap_km > best_overlap_km:
+                best_overlap_km = overlap_km
+                best_value = aimed_row.Value
+        if best_value is not None:
+            value_by_section[section.id] = best_value
 
     return value_by_section
 
@@ -140,7 +145,9 @@ def _edge_route_id(edge_data):
     return _normalize_id(edge_data.get("route_id", edge_data.get("RouteId")))
 
 
-def walk_to_streefpeil(graph, start_junction_id, max_hops=5, route_id=None):
+def walk_to_streefpeil(
+    graph, start_junction_id, max_hops=5, route_id=None, stop_nodes=None
+):
     """Breadth-first search from a junction node for the nearest streefpeil_nap.
 
     When ``route_id`` is given, the walk stays on edges belonging to the lock's
@@ -154,6 +161,15 @@ def walk_to_streefpeil(graph, start_junction_id, max_hops=5, route_id=None):
     found on the lock's own route within ``max_hops``, the result is genuinely
     unresolved.
 
+    ``stop_nodes`` (typically the start/end junctions of every OTHER lock
+    complex on the same route) are treated as barriers: an edge leading into a
+    stop node is still checked for streefpeil_nap, but the walk does not
+    continue past it. Verified necessary empirically: without this, the walk
+    can cross straight through a neighbouring lock's own pand and pick up ITS
+    streefpeil instead of stopping at the calling lock's own boundary (e.g.
+    Sluis Maasbracht silently resolving to Sluis Born's values, Sluis Sambeek
+    to Sluis Belfeld's, both ~13-16 route-km away — well past any real pand).
+
     Returns (value, hops) of the first edge carrying a ``streefpeil_nap``
     attribute, or (None, None) if none is found within ``max_hops``.
     """
@@ -164,6 +180,7 @@ def walk_to_streefpeil(graph, start_junction_id, max_hops=5, route_id=None):
     ):
         return None, None
 
+    stop_nodes = stop_nodes or set()
     visited = {start_junction_id}
     frontier = [start_junction_id]
     for hop in range(max_hops):
@@ -176,6 +193,10 @@ def walk_to_streefpeil(graph, start_junction_id, max_hops=5, route_id=None):
                 value = edge_data.get("streefpeil_nap")
                 if value is not None:
                     return value, hop + 1
+                if nbr in stop_nodes:
+                    # Edge into another lock's own junction checked above; do not
+                    # traverse past it into that lock's pand.
+                    continue
                 if nbr not in visited:
                     visited.add(nbr)
                     next_frontier.append(nbr)
@@ -185,7 +206,14 @@ def walk_to_streefpeil(graph, start_junction_id, max_hops=5, route_id=None):
     return None, None
 
 
-def resolve_boven_beneden(fairway_data, graph, route_id=None, max_hops=5):
+def resolve_boven_beneden(
+    fairway_data,
+    graph,
+    route_id=None,
+    max_hops=5,
+    other_lock_junctions=None,
+    lock_name=None,
+):
     """Determine boven/beneden for one lock complex using the fis-graph topology.
 
     ``fairway_data`` is the dict produced by ``fis.lock.core._resolve_fairway_data``,
@@ -200,6 +228,17 @@ def resolve_boven_beneden(fairway_data, graph, route_id=None, max_hops=5):
     to the lock's own route so it does not wander into a nearby harbour/side canal
     with an unrelated streefpeil (see ``walk_to_streefpeil``).
 
+    ``other_lock_junctions`` (start/end junctions of every OTHER lock complex,
+    normalized ints) bounds the walk so it stops at a neighbouring lock's own
+    boundary instead of crossing through its pand — see ``walk_to_streefpeil``.
+
+    ``lock_name``: if it matches MULTI_RIVER_JUNCTION_LOCKS (a confluence of two
+    rivers, e.g. Weurt/Heumen — not a simple 2-sided boven/beneden case), the
+    graph walk is skipped entirely and the result is marked
+    source="multi_river_junction", so the manual table is authoritative for
+    these locks in the actual schematization output, not just in the separate
+    cross-validation report.
+
     Returns a dict with split_side/merge_side ("boven"/"beneden"/None),
     split_streefpeil_nap/merge_streefpeil_nap (float m NAP or None), and a
     ``source`` explaining how the result was reached.
@@ -211,6 +250,10 @@ def resolve_boven_beneden(fairway_data, graph, route_id=None, max_hops=5):
         "merge_streefpeil_nap": None,
         "source": "no_graph",
     }
+    if lock_name and any(
+        key in lock_name.lower() for key in MULTI_RIVER_JUNCTION_LOCKS
+    ):
+        return {**empty, "source": "multi_river_junction"}
     if graph is None:
         return empty
 
@@ -221,9 +264,14 @@ def resolve_boven_beneden(fairway_data, graph, route_id=None, max_hops=5):
     start_j = int(start_j) if start_j is not None else None
     end_j = int(end_j) if end_j is not None else None
     route_id = _normalize_id(route_id)
+    stop_nodes = (other_lock_junctions or set()) - {start_j, end_j}
 
-    val_start, _ = walk_to_streefpeil(graph, start_j, max_hops, route_id=route_id)
-    val_end, _ = walk_to_streefpeil(graph, end_j, max_hops, route_id=route_id)
+    val_start, _ = walk_to_streefpeil(
+        graph, start_j, max_hops, route_id=route_id, stop_nodes=stop_nodes
+    )
+    val_end, _ = walk_to_streefpeil(
+        graph, end_j, max_hops, route_id=route_id, stop_nodes=stop_nodes
+    )
 
     if val_start is None and val_end is None:
         return {**empty, "source": "no_streefpeil_found"}
@@ -413,7 +461,25 @@ def cross_validate_manual_levels(nodes_gdf, lock_gdf, tolerance=0.1):
             elif source in (None, "no_streefpeil_found", "ambiguous"):
                 category = "UNRESOLVED"
             elif source == "single_side_aimedlevel":
-                category = "PARTIAL"
+                # Only one side was resolved automatically; still compare it
+                # against the manual table's corresponding value so a resolved-
+                # but-wrong single side (e.g. one lock borrowing a neighbour's
+                # value) is caught as VALUE_MISMATCH rather than silently
+                # trusted as PARTIAL.
+                if auto_boven_nap is not None and peil_hoog is not None:
+                    category = (
+                        "PARTIAL"
+                        if abs(auto_boven_nap - peil_hoog) <= tolerance
+                        else "VALUE_MISMATCH"
+                    )
+                elif auto_beneden_nap is not None and peil_laag is not None:
+                    category = (
+                        "PARTIAL"
+                        if abs(auto_beneden_nap - peil_laag) <= tolerance
+                        else "VALUE_MISMATCH"
+                    )
+                else:
+                    category = "PARTIAL"
             elif auto_boven_nap is None or auto_beneden_nap is None:
                 category = "PARTIAL"
             elif peil_hoog is None or peil_laag is None:
