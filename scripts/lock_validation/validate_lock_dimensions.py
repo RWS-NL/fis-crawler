@@ -179,6 +179,121 @@ def resolve_sill_nap(
     return None, "Onbepaald (waarde=0 of onbekend)", True
 
 
+DREMPEL_TOLERANCE_M = 0.15
+
+# Suspected root causes for a drempel mismatch — see classify_drempel_status().
+CAUSE_TEKEN_OMGEDRAAID = "teken_omgedraaid"
+CAUSE_VERKEERD_REFERENTIENIVEAU = "verkeerd_referentieniveau"
+CAUSE_BINNEN_BUITEN_OMGEDRAAID = "binnen_buiten_omgedraaid"
+
+CAUSE_LABELS = {
+    CAUSE_TEKEN_OMGEDRAAID: "Teken omgedraaid",
+    CAUSE_VERKEERD_REFERENTIENIVEAU: "Verkeerd verticaal referentieniveau",
+    CAUSE_BINNEN_BUITEN_OMGEDRAAID: "Binnen/buiten (Bo/Be) omgedraaid",
+}
+
+
+def classify_drempel_status(
+    sill_bobi_nap,
+    sill_bebu_nap,
+    bobi_measured,
+    bebu_measured,
+    survey_drempel_bobi,
+    survey_drempel_bebu,
+    sill_raw_bobi,
+    sill_raw_bebu,
+    peil_hoog,
+    peil_laag,
+    tolerance=DREMPEL_TOLERANCE_M,
+):
+    """Classify a chamber's drempel (sill) status by comparing the FIS-registered
+    NAP height against an independent reference value per side — preferring the
+    RWS 1m bathymetry measurement, falling back to the operator survey (enquête)
+    when no measurement is available for that side.
+
+    Returns (status, causes, refs) where:
+      status: "consistent" | "1_zijde_afwijkend" | "beide_zijden_afwijkend" | "geen_metingen"
+      causes: {"bobi": [...], "bebu": [...]} suspected root causes per side that
+        mismatches (see CAUSE_* constants); a side can have zero, one, or
+        multiple suspected causes.
+      refs: {"bobi": (value, "meting"|"enquête") or (None, None), "bebu": ...} —
+        which reference value and source was actually used, for reporting.
+    """
+
+    def to_f(v):
+        try:
+            f = float(v)
+            return f if f == f else None  # filter NaN
+        except (TypeError, ValueError):
+            return None
+
+    def reference_value(measured, survey):
+        m = to_f(measured)
+        if m is not None:
+            return m, "meting"
+        s = to_f(survey)
+        if s is not None:
+            return s, "enquête"
+        return None, None
+
+    ref_bobi_val, ref_bobi_kind = reference_value(bobi_measured, survey_drempel_bobi)
+    ref_bebu_val, ref_bebu_kind = reference_value(bebu_measured, survey_drempel_bebu)
+    refs = {
+        "bobi": (ref_bobi_val, ref_bobi_kind),
+        "bebu": (ref_bebu_val, ref_bebu_kind),
+    }
+
+    fis_bobi = to_f(sill_bobi_nap)
+    fis_bebu = to_f(sill_bebu_nap)
+
+    known_bobi = ref_bobi_val is not None and fis_bobi is not None
+    known_bebu = ref_bebu_val is not None and fis_bebu is not None
+    mismatch_bobi = known_bobi and abs(ref_bobi_val - fis_bobi) > tolerance
+    mismatch_bebu = known_bebu and abs(ref_bebu_val - fis_bebu) > tolerance
+
+    known_sides = [s for s, k in (("bobi", known_bobi), ("bebu", known_bebu)) if k]
+    if not known_sides:
+        return "geen_metingen", {"bobi": [], "bebu": []}, refs
+
+    n_mismatch = int(mismatch_bobi) + int(mismatch_bebu)
+    if n_mismatch == 0:
+        status = "consistent"
+    elif n_mismatch == len(known_sides) and len(known_sides) == 2:
+        status = "beide_zijden_afwijkend"
+    else:
+        status = "1_zijde_afwijkend"
+
+    causes = {"bobi": [], "bebu": []}
+    r_bobi, r_bebu = to_f(sill_raw_bobi), to_f(sill_raw_bebu)
+    p_hoog, p_laag = to_f(peil_hoog), to_f(peil_laag)
+
+    # Binnen/buiten omgedraaid: does swapping bobi<->bebu fit much better?
+    if known_bobi and known_bebu and (mismatch_bobi or mismatch_bebu):
+        if (
+            abs(ref_bobi_val - fis_bebu) <= tolerance
+            and abs(ref_bebu_val - fis_bobi) <= tolerance
+        ):
+            causes["bobi"].append(CAUSE_BINNEN_BUITEN_OMGEDRAAID)
+            causes["bebu"].append(CAUSE_BINNEN_BUITEN_OMGEDRAAID)
+
+    # Teken omgedraaid: peil + raw_depth fits better than the normal peil - raw_depth.
+    if mismatch_bobi and r_bobi is not None and p_hoog is not None:
+        if abs(ref_bobi_val - (p_hoog + r_bobi)) <= tolerance:
+            causes["bobi"].append(CAUSE_TEKEN_OMGEDRAAID)
+    if mismatch_bebu and r_bebu is not None and p_laag is not None:
+        if abs(ref_bebu_val - (p_laag + r_bebu)) <= tolerance:
+            causes["bebu"].append(CAUSE_TEKEN_OMGEDRAAID)
+
+    # Verkeerd verticaal referentieniveau: the raw FIS value interpreted directly
+    # as a NAP height (instead of peil-relative) fits better.
+    if mismatch_bobi and r_bobi is not None and abs(ref_bobi_val - r_bobi) <= tolerance:
+        causes["bobi"].append(CAUSE_VERKEERD_REFERENTIENIVEAU)
+    if mismatch_bebu and r_bebu is not None and abs(ref_bebu_val - r_bebu) <= tolerance:
+        causes["bebu"].append(CAUSE_VERKEERD_REFERENTIENIVEAU)
+
+    return status, causes, refs
+
+
 IMAGES_DIR = os.path.join(OUTPUT_DIR, "images")
 AERIALS_DIR = os.path.join(IMAGES_DIR, "aerials")
 CHARTS_DIR = os.path.join(IMAGES_DIR, "charts")
@@ -2309,6 +2424,19 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
             if man_bebu is not None:
                 bebu_measured = man_bebu
 
+            drempel_status, drempel_causes, drempel_refs = classify_drempel_status(
+                sill_bobi_nap,
+                sill_bebu_nap,
+                bobi_measured,
+                bebu_measured,
+                survey_drempel_bobi,
+                survey_drempel_bebu,
+                sill_raw_bobi,
+                sill_raw_bebu,
+                peil_hoog,
+                peil_laag,
+            )
+
             boven_point_rd, beneden_point_rd = gate_points_by_side(
                 m_row["geometry_fis"], gate_swap
             )
@@ -2393,6 +2521,10 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                     "threshold_height_bebu": threshold_height_bebu,
                     "survey_drempel_bobi": survey_drempel_bobi,
                     "survey_drempel_bebu": survey_drempel_bebu,
+                    "drempel_status": drempel_status,
+                    "drempel_causes": drempel_causes,
+                    "drempel_ref_bobi": drempel_refs["bobi"],
+                    "drempel_ref_bebu": drempel_refs["bebu"],
                     "wiki_drempel_bobi": row.get("sill_depth_bo_bi_15"),
                     "wiki_drempel_bebu": row.get("sill_depth_be_bu_14"),
                     "disk_drempel_bobi": row.get("sill_depth_bo_bi_24"),
@@ -2499,6 +2631,13 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
             f"{r.get('disk_len') or 'nan'} | {r.get('violations_str', 'n.v.t.')} |\n"
         )
 
+    DREMPEL_STATUS_LABELS = {
+        "consistent": "OK",
+        "1_zijde_afwijkend": "1 zijde afwijkend",
+        "beide_zijden_afwijkend": "Beide zijden afwijkend",
+        "geen_metingen": "Geen metingen",
+    }
+
     report_content += (
         "```{=latex}\n\\normalsize\n\\end{landscape}\n```\n\n"
         "### Drempelhoogtes & Referentiewaterstanden per Sluiszijde\n"
@@ -2506,12 +2645,14 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
         " Bron: **Note** = FIS Note-veld (meest betrouwbaar),"
         " **KP-peil** / **SP-peil** = berekend uit streefpeil minus FIS drempeldiepte,"
         " **NAP (FIS)** = FIS HeightReferenceLevel=NAP. [!] = onzeker."
-        " Meting 1m = drempelkruin lokaal maximum uit RWS bodemhoogte_1mtr.*\n\n"
+        " Meting 1m = drempelkruin lokaal maximum uit RWS bodemhoogte_1mtr."
+        f" Status = vergelijking Drempelkruin FIS met Meting 1m (of, bij ontbrekende"
+        f" meting, met de Enquête), tolerantie {DREMPEL_TOLERANCE_M * 100:.0f} cm.*\n\n"
         "```{=latex}\n\\begin{landscape}\n\\tiny\n```\n\n"
         "| Sluis | Kolknaam | Zijde | Waterweg | Streefpeil (NAP)"
         " | Drempelkruin FIS (m NAP) | Meting 1m-kaart (m NAP)"
-        " | Waterdiepte boven drempel (m) | Enquête |\n"
-        "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |\n"
+        " | Waterdiepte boven drempel (m) | Enquête | Status |\n"
+        "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n"
     )
     for r in results_list:
         peil_h = f"{r['peil_hoog']:.2f}" if pd.notna(r["peil_hoog"]) else "—"
@@ -2536,27 +2677,84 @@ Dit deel toont de geselecteerde canonieke afmetingen, referentieniveaus en dremp
         def _meting(v):
             return f"{v:.2f}" if v is not None else "—"
 
+        def _causes_suffix(side):
+            causes = r.get("drempel_causes", {}).get(side, [])
+            if not causes:
+                return ""
+            return " (" + ", ".join(CAUSE_LABELS.get(c, c) for c in causes) + ")"
+
         bobi_cell = _sill_cell(
             r["threshold_height_bobi"], r["ref_bobi"], r.get("sill_bobi_uncertain")
         )
         bebu_cell = _sill_cell(
             r["threshold_height_bebu"], r["ref_bebu"], r.get("sill_bebu_uncertain")
         )
+        status_label = DREMPEL_STATUS_LABELS.get(
+            r.get("drempel_status"), r.get("drempel_status") or "—"
+        )
 
         report_content += (
             f"| **{r['Sluis']}** | {r['name']} | Bo/Bi | "
             f"{r['waterway_hoog']} | {peil_h} | {bobi_cell} | {_meting(r.get('bobi_measured'))} | "
             f"{_water_depth(r.get('peil_hoog'), r.get('threshold_height_bobi'))} | "
-            f"{r['survey_drempel_bobi'] or '—'} |\n"
+            f"{r['survey_drempel_bobi'] or '—'} | {status_label}{_causes_suffix('bobi')} |\n"
         )
         report_content += (
             f"| | | Be/Bu | "
             f"{r['waterway_laag']} | {peil_l} | {bebu_cell} | {_meting(r.get('bebu_measured'))} | "
             f"{_water_depth(r.get('peil_laag'), r.get('threshold_height_bebu'))} | "
-            f"{r['survey_drempel_bebu'] or '—'} |\n"
+            f"{r['survey_drempel_bebu'] or '—'} | {_causes_suffix('bebu')} |\n"
         )
 
     report_content += "```{=latex}\n\\normalsize\n\\end{landscape}\n```\n\n"
+
+    # Structural-cause summary: how often each status/cause recurs across all
+    # target chambers, to help spot a systemic bug vs. per-lock noise.
+    status_counts = {}
+    cause_counts = {}
+    for r in results_list:
+        status_counts[r.get("drempel_status")] = (
+            status_counts.get(r.get("drempel_status"), 0) + 1
+        )
+        for side in ("bobi", "bebu"):
+            for cause in r.get("drempel_causes", {}).get(side, []):
+                cause_counts[cause] = cause_counts.get(cause, 0) + 1
+
+    report_content += (
+        "### Drempelstatus — overzicht en mogelijke structurele oorzaken\n\n"
+    )
+    report_content += "| Status | Aantal kolken |\n| :--- | :---: |\n"
+    for status_key in (
+        "consistent",
+        "1_zijde_afwijkend",
+        "beide_zijden_afwijkend",
+        "geen_metingen",
+    ):
+        report_content += f"| {DREMPEL_STATUS_LABELS[status_key]} | {status_counts.get(status_key, 0)} |\n"
+    report_content += "\n"
+
+    if cause_counts:
+        report_content += (
+            "**Vermoedelijke oorzaken bij afwijkende zijden** "
+            "(automatisch afgeleid door alternatieve berekeningen te toetsen aan de meting; "
+            f"tolerantie {DREMPEL_TOLERANCE_M * 100:.0f} cm — niet doorslaggevend, "
+            "handmatige controle blijft nodig):\n\n"
+        )
+        report_content += (
+            "| Vermoedelijke oorzaak | Aantal zijden |\n| :--- | :---: |\n"
+        )
+        for cause_key, count in sorted(
+            cause_counts.items(), key=lambda kv: kv[1], reverse=True
+        ):
+            report_content += (
+                f"| {CAUSE_LABELS.get(cause_key, cause_key)} | {count} |\n"
+            )
+        report_content += (
+            "\nAls één oorzaak bij meerdere sluizen tegelijk optreedt, wijst dat eerder op "
+            "een structurele fout (bv. in de FIS-dataconventie of het verwerkingsscript) dan "
+            "op onafhankelijke, losse fouten per sluis.\n\n"
+        )
+
     report_content += """## 2. Belangrijke Uitdagingen & Afwijkingen per Sluiscomplex
 
 Hieronder volgen de specifieke technische uitdagingen en afwijkingen per sluiscomplex:
