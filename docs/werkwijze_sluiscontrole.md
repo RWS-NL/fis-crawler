@@ -126,13 +126,29 @@ Voor elke kolk worden twee drempelpunten (Bo en Be) handmatig in QGIS geposition
 ### 3.4  Boven/Beneden zijde (Bo/Be, Bi/Bu)
 
 **Definitie.** Boven/beneden (en binnen/buiten bij zeesluizen) is een **vaste,
-per-sluiscomplex toegekende naam**, gebaseerd op streefpeil en positie in het
-watersysteem — **niet** een momentopname-vergelijking van actuele waterstanden:
-- "Beneden"/"buiten" = de zijde die dichter bij zee ligt / de natuurlijke
-  afvoerrichting volgt (rivier of getijgebied), ongeacht welke kant op een
-  gegeven moment toevallig hoger staat.
-- "Boven"/"binnen" = de zijde die verder van zee ligt: een hoger gereguleerd
-  pand, of de kanaalzijde bij een kanaal-naar-rivier/zee-overgang.
+per-sluiscomplex toegekende naam**, gebaseerd op streefpeil — **niet** een
+momentopname-vergelijking van actuele waterstanden. De regel is een simpele
+rangorde, toegepast in twee stappen:
+
+1. **Primair: hoogste (gereguleerde) streefpeil = boven.** Vaarwegtype
+   (rivier/kanaal) is hierbij irrelevant — het is uitsluitend een vergelijking
+   van streefpeil-waarden. Bevestigd bij Prinses Beatrixsluizen: de Lek is daar
+   een **gestuwde rivier** (stuwpeil Hagestein, +3,00 m NAP) met een hóger peil
+   dan het aangrenzende Lekkanaal (-0,40 m NAP) — en toch is de rivierzijde
+   "boven". Een eerdere formulering van deze regel ("kanaalzijde = boven,
+   rivierzijde = beneden") bleek dus een foutieve veralgemenisering; het type
+   vaarweg is nooit de onderliggende regel geweest.
+2. **Noodgeval — geen streefpeil op één kant:** bij een vrij afstromende rivier
+   zonder stuw (bv. de Waal bij Weurt, de Gelderse IJssel bij Eefde) is er geen
+   streefpeil om te vergelijken. In dat geval is de kant mét een gereguleerd
+   streefpeil "boven" (vaak, maar niet per se, een kanaal) — niet omdat het een
+   kanaal is, maar omdat "een gereguleerd peil hebben" zelf al de indicator is.
+3. **Laatste redmiddel — geen streefpeil op géén van beide kanten** (getij-
+   sluizen als Hansweert, Krammer, Terneuzen, Volkerak, Stevin): dan is er
+   niets te vergelijken, en valt de bepaling terug op positie in het
+   watersysteem — "beneden"/"buiten" = de zijde die dichter bij zee ligt / de
+   natuurlijke afvoerrichting volgt (rivier of getijgebied); "boven"/"binnen" =
+   de zijde die verder van zee ligt.
 
 Onderbouwing: het `Handboek voor het Ontwerpen van Schutsluizen` (RWS) hanteert
 het begrip **"negatief verval"** juist om aan te geven dat de zijden een vaste
@@ -171,15 +187,36 @@ StreefPeil-begrip.
    nodes.geoparquet` krijgt de kolommen `side`, `streefpeil_nap`,
    `streefpeil_source`.
 
+**Bekende, nog niet opgeloste bron van fouten:** wanneer meerdere sluiscomplexen
+op dezelfde (kilometerslange) FIS-vaarweg liggen — bv. Belfeld/Sambeek/Heel/
+Maasbracht/Born, allemaal op één "Maas"-vaarweg — retourneert
+`find_fairway_junctions()` (in `fis/lock/core.py`) voor al die sluizen **dezelfde**
+`start_junction_id`/`end_junction_id` (de uiteinden van de hele vaarweg, niet de
+knopen die echt naast de sluis liggen). Daardoor kan de graafwandeling dwars door
+het pand van een buursluis lopen en diens streefpeil overnemen (bv. Maasbracht
+kreeg Born's 44,7/32,6 i.p.v. eigen 32,6/20,8). Een `stop_nodes`-mechanisme in
+`walk_to_streefpeil()` moet dit tegenhouden door elke ANDERE sluis se eigen
+junctions als barrière te behandelen, maar werkt niet wanneer die junctions
+toevallig identiek zijn aan die van de sluis zelf — precies het geval hierboven.
+Een eerste poging om dit op te lossen door junctions te bepalen op basis van de
+sectie die de sluis' eigen route-kilometrering bevat, bleek averechts te werken
+(die sectie doorkruist vaak juist de sluiskolk zelf, wat tot veel meer
+`ambiguous`-resultaten leidde) en is teruggedraaid. Een echte oplossing vereist
+het vinden van de twee secties die de sluis omsluiten (net vóór en net ná),
+niet de bevattende sectie — openstaand, zie §5.
+
 **Empirische validatie** (`scripts/lock_validation/cross_validate_boven_beneden.py`,
 output in `output/lock-schematization/boven_beneden_cross_validation.csv`) tegen
 de handmatige tabel (nu `fis.lock.levels.MANUAL_WATERWAY_LEVELS`):
-- **MATCH** (zijde én waarde correct): Sluis Born, Houtribsluizen, Oranjesluizen,
-  Prins Bernhardsluizen, Prinses Irenesluizen, Prinses Margrietsluis.
+- **MATCH** (zijde én waarde correct): Sluis Born, Houtribsluizen, Kreekraksluis,
+  Oranjesluizen, Prins Bernhardsluizen, Prinses Irenesluizen, Prinses Margrietsluis.
 - **PARTIAL** (kanaalzijde correct automatisch bepaald, rivier-/getijzijde heeft
-  bewust geen streefpeil — verwacht, geen fout): Sluis Belfeld, Sluis Sambeek.
-- **VALUE_MISMATCH** (automatisch vindt een streefpeil één pand te ver):
-  Sluis Maasbracht, Gaarkeukensluis — bekende beperking, zie §5.
+  bewust geen streefpeil — verwacht, geen fout): Sluis Belfeld.
+- **VALUE_MISMATCH** (bovenstaande buursluis-lekkage of pand-overschieting):
+  Sluis Maasbracht, Sluis Sambeek, Sluis Eefde (2x), Gaarkeukensluis,
+  Beatrixsluis — bekende beperking, zie §5. Géén van deze wordt stilzwijgend
+  vertrouwd: de kruisvalidatie ving ze op, en `MANUAL_WATERWAY_LEVELS` blijft
+  voor deze sluizen leidend in het rapport.
 - **UNRESOLVED** (verwacht: getijsluizen/rivieren zonder streefpeil, of route-
   ambiguïteit zoals Sluis Heel, Sluis Eefde): overige geteste sluizen.
 - Géén enkele SIDE_MISMATCH (automatisch de verkeerde kant boven/beneden noemen)
@@ -239,7 +276,7 @@ De navigatie-as door de sluiskolk wordt bepaald via de **minimum rotated rectang
 | Punt | Status |
 |---|---|
 | Bo/Be automatisch bepalen | Deels opgelost — zie §3.4. Graaf-topologische bepaling (`fis/lock/levels.py`), gevalideerd (geen SIDE_MISMATCH) tegen `MANUAL_WATERWAY_LEVELS` in `boven_beneden_cross_validation.csv`. |
-| Sluis Maasbracht, Gaarkeukensluis: automatische streefpeil één pand te ver | Open — de graafwandeling vindt op de eigen route een streefpeil dat bij het volgende pand hoort i.p.v. het aangrenzende. Waarschijnlijk ontbreekt een aimedlevel-match op de sectie(s) direct naast de sluis. Handmatige tabel blijft hier leidend (`VALUE_MISMATCH` in de kruisvalidatie). |
+| Sluis Maasbracht, Sambeek, Eefde, Gaarkeukensluis, Beatrixsluis: automatische streefpeil van een buursluis of verkeerd pand | Open, hoofdoorzaak geïdentificeerd (zie §3.4): `find_fairway_junctions()` geeft alle sluizen op één lange gedeelde vaarweg dezelfde start/eind-junctions, waardoor de graafwandeling door een buursluis' pand heen kan lopen. Een `stop_nodes`-barrière (`walk_to_streefpeil()`) is aanwezig maar werkt niet wanneer junctions toevallig identiek zijn. Vereist een functie die de twee secties direct vóór/ná de sluis vindt (niet de bevattende sectie — dat gaf juist meer `ambiguous`-resultaten, geprobeerd en teruggedraaid). Handmatige tabel blijft hier leidend (`VALUE_MISMATCH`/`SIDE_MISMATCH` in de kruisvalidatie vangt dit op). |
 | Weurt/Heumen: samenvloeiing van twee rivieren (Maas + Waal) | Open — geen 2-zijdige boven/beneden-structuur; niet geautomatiseerd in deze iteratie, blijft op de handmatige tabel steunen. |
 | `Bo`/`Be`-volgorde in `bathymetry.py::gate_centres()` (CCW-heuristiek) koppelen aan de nieuwe `side`-labels | Opgelost — `determine_gate_swap()` in `validate_lock_dimensions.py` oriënteert `crest1`/`crest2` (en dus `bobi_measured`/`bebu_measured`) aan de hand van `output/lock-schematization/nodes.geoparquet`'s `side`-label per kolk (118/501 kolken hebben een opgeloste zijde). Kolken zonder opgeloste zijde vallen terug op de ongewijzigde CCW-volgorde. |
 | Prinses Beatrix: geen 1m-bathymetrie | Gedocumenteerd, NULL in measurements.gpkg |
