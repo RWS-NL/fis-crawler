@@ -179,7 +179,9 @@ def resolve_sill_nap(
     return None, "Onbepaald (waarde=0 of onbekend)", True
 
 
-DREMPEL_TOLERANCE_M = 0.15
+DREMPEL_TOLERANCE_M = 0.50  # 15 cm bleek te strak: zandgolven op de drempel kunnen
+# de 1m-bodemhoogtemeting met tientallen cm tot ~1 m laten afwijken van de
+# werkelijke (vaste) drempelconstructie, ook als FIS correct is.
 
 # Suspected root causes for a drempel mismatch — see classify_drempel_status().
 CAUSE_TEKEN_OMGEDRAAID = "teken_omgedraaid"
