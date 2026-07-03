@@ -28,6 +28,11 @@ import matplotlib.pyplot as plt
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Shared boven/beneden colors, used consistently across the sideview chart and
+# the aerial footprint map so the two figures visually agree.
+C_BOVEN = "#2b5c8f"
+C_BENEDEN = "#20b2aa"
+
 # Target output files
 OUTPUT_DIR = "output/lock-validation"
 REPORT_PATH = os.path.join(OUTPUT_DIR, "lock_dimensions_validation_report.md")
@@ -535,6 +540,18 @@ def determine_gate_swap(geom_rd, chamber_id, chamber_side_points):
     return p1.distance(boven_pt) < p0.distance(boven_pt)
 
 
+def gate_points_by_side(geom_rd, gate_swap):
+    """Return (boven_point, beneden_point) as (x, y) tuples in RD, using the
+    same swap convention as bathymetry.axis_profile_line(): swap=True means the
+    second gate_centres() point is boven.
+    """
+    centres = bathy_mod.gate_centres(geom_rd)
+    if centres is None:
+        return None, None
+    p0, p1 = centres
+    return (p1, p0) if gate_swap else (p0, p1)
+
+
 def download_aerial_photo(sluis_clean, chamber_clean, centroid):
     """Download aerial photo from PDOK WMS for the lock centroid (RD New EPSG:28992)."""
     filename = f"{sluis_clean}_{chamber_clean}.jpg"
@@ -585,6 +602,8 @@ def generate_footprint_map(
     obb_len=None,
     obb_wid=None,
     profile_line_rd=None,
+    boven_point_rd=None,
+    beneden_point_rd=None,
 ):
     """Plot FIS chamber polygon + minimum rotated rectangle on the PDOK aerial background."""
     filename = f"{sluis_clean}_{chamber_clean}_footprint.png"
@@ -672,6 +691,32 @@ def generate_footprint_map(
             )
         except Exception:
             pass
+
+    # Boven/beneden gate markers, same colors as the sideview chart.
+    if boven_point_rd is not None:
+        ax.scatter(
+            [boven_point_rd[0]],
+            [boven_point_rd[1]],
+            color=C_BOVEN,
+            s=90,
+            marker="o",
+            edgecolors="white",
+            linewidths=1.2,
+            zorder=6,
+            label="Boven",
+        )
+    if beneden_point_rd is not None:
+        ax.scatter(
+            [beneden_point_rd[0]],
+            [beneden_point_rd[1]],
+            color=C_BENEDEN,
+            s=90,
+            marker="o",
+            edgecolors="white",
+            linewidths=1.2,
+            zorder=6,
+            label="Beneden",
+        )
 
     ann = []
     if fis_struct_len is not None:
@@ -875,8 +920,8 @@ def generate_sideview_chart(
         ax_prof = None
 
     wall_color = "#6b7280"
-    c_bobi = "#2b5c8f"
-    c_bebu = "#20b2aa"
+    c_bobi = C_BOVEN
+    c_bebu = C_BENEDEN
     c_sill_bobi = "#c0392b"
     c_sill_bebu = "#e67e22"
 
@@ -1226,6 +1271,14 @@ def generate_sideview_chart(
         ax_prof.legend(fontsize=6, loc="upper right", ncol=2)
         ax_prof.grid(True, linestyle="--", alpha=0.2)
         ax_prof.tick_params(labelsize=7)
+
+    # Present beneden always on the left, boven always on the right: everything
+    # above is drawn with Bo/hoog on the left (XL_*) and Be/laag on the right
+    # (XR_*), so flipping both axes here reverses the visual layout without
+    # touching any of the drawing/labelling logic above.
+    ax.invert_xaxis()
+    if ax_prof is not None:
+        ax_prof.invert_xaxis()
 
     if ax_prof is None:
         fig.tight_layout()
@@ -2256,6 +2309,9 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
             if man_bebu is not None:
                 bebu_measured = man_bebu
 
+            boven_point_rd, beneden_point_rd = gate_points_by_side(
+                m_row["geometry_fis"], gate_swap
+            )
             footprint_path = generate_footprint_map(
                 sluis_clean,
                 chamber_clean,
@@ -2266,6 +2322,8 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                 obb_len=obb_len,
                 obb_wid=obb_wid,
                 profile_line_rd=profile_line_rd,
+                boven_point_rd=boven_point_rd,
+                beneden_point_rd=beneden_point_rd,
             )
 
             # Generate side-view (with embedded profile panel when bathymetry available)
