@@ -97,3 +97,19 @@ When adding new FIS data sources:
 2. Define their canonical snake_case equivalents.
 3. Ensure the ingestion logic calls `normalize_attributes`.
 
+
+## 7. Dutch Domain Concepts (Locks)
+For lock-specific vertical reference levels and gate orientations, the project strictly uses the Dutch domain terms instead of English translations to prevent ambiguity and align with Rijkswaterstaat (RWS) datasets and operator surveys (Enquêtes):
+
+- **Bo / Bi (Bovenhoofd / Binnenhoofd)**: Upper head / gate side, corresponding to the higher target water level side (streefpeil).
+- **Be / Bu (Benedenhoofd / Buitenhoofd)**: Lower head / gate side, corresponding to the lower target water level side (streefpeil).
+- **streefpeil_nap**: Target water level relative to NAP (Normaal Amsterdams Peil).
+- **meting_1m_nap**: 1m-resolution bottom measurement level relative to NAP.
+- **aimedwaterlevel_ref**: Water level reference system code:
+  - **`SP`**: Streefpeil (Target Level)
+  - **`KP`**: Kanaalpeil (Canal Level)
+  - **`MP`**: Meerpeil (Lake Level)
+  - **`PP`**: Polderpeil (Polder Level)
+  - **`BP`**: Boezempeil (Boezem Level)
+
+For a comprehensive dictionary of these terms and how they map to physical structure dimensions, refer to the [Terminology Section in the Sluiscontrole Docs](file:///Users/baart_f/src/fis/docs/werkwijze_sluiscontrole.md#L118).

@@ -11,7 +11,8 @@ from shapely.ops import unary_union
 from fis.utils import to_python, sanitize_attrs, stringify_id
 from fis import settings, utils
 from fis.ris_index import load_ris_index
-from fis.lock import levels as lock_levels
+from fis.graph import levels as graph_levels
+from fis.lock import orientation
 
 logger = logging.getLogger(__name__)
 
@@ -584,15 +585,7 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     # per-complex boven/beneden resolution below can walk the graph and find it.
     # Defensive: a missing aimedlevel export or graph should not break schematize().
     if network_graph is not None and aimedlevel is not None:
-        try:
-            lock_levels.enrich_edges_with_streefpeil(
-                network_graph, sections, aimedlevel
-            )
-        except Exception:
-            logger.exception(
-                "Failed to enrich fis-graph with streefpeil; boven/beneden will be "
-                "unresolved for all locks this run."
-            )
+        graph_levels.enrich_edges_with_streefpeil(network_graph, sections, aimedlevel)
 
     # Filter out ignored/historical DISK locks based on configuration mappings
     mappings = utils.load_lock_bridge_mappings()
@@ -629,10 +622,7 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
         )
         for j in (s_junc, e_junc):
             if j is not None:
-                try:
-                    all_lock_junctions.add(int(j))
-                except (TypeError, ValueError):
-                    pass
+                all_lock_junctions.add(int(j))
 
     # Ensure RIS Index is indexed for fast lookup
     if "isrs_code" in ris_df.columns:
@@ -697,27 +687,13 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
             lock, lock_chambers, fairways, sections_gdf, openings_data=openings_data
         )
 
-        try:
-            boven_beneden = lock_levels.resolve_boven_beneden(
-                fairway_data,
-                network_graph,
-                route_id=lock.get("route_id"),
-                other_lock_junctions=all_lock_junctions,
-                lock_name=lock.get("name"),
-            )
-        except Exception:
-            logger.exception(
-                "Failed to resolve boven/beneden for Lock %s (%s).",
-                lock["id"],
-                lock["name"],
-            )
-            boven_beneden = {
-                "split_side": None,
-                "merge_side": None,
-                "split_streefpeil_nap": None,
-                "merge_streefpeil_nap": None,
-                "source": "error",
-            }
+        boven_beneden = orientation.resolve_boven_beneden(
+            fairway_data,
+            network_graph,
+            route_id=lock.get("route_id"),
+            other_lock_junctions=all_lock_junctions,
+            lock_name=lock.get("name"),
+        )
 
         logger.debug("  Checking connected fairways and sections...")
         sections_data, internal_sections, connected_fairways = (

@@ -11,7 +11,7 @@ Usage: uv run python scripts/lock_validation/cross_validate_boven_beneden.py
 
 import geopandas as gpd
 
-from fis.lock.levels import cross_validate_manual_levels
+from fis.lock.orientation import cross_validate_manual_levels
 
 NODES_PATH = "output/lock-schematization/nodes.geoparquet"
 LOCK_PATH = "output/lock-schematization/lock.geoparquet"

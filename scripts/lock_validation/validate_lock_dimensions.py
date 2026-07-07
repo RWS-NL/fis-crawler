@@ -1,5 +1,4 @@
 import os
-import glob
 import json
 import math
 import subprocess
@@ -12,13 +11,14 @@ import numpy as np
 from shapely.geometry import Point, LineString
 import requests
 from fis import utils
-from fis.lock import levels as lock_levels
+from fis.lock import orientation as lock_orientation
+from pathlib import Path
 
 # Ensure the lock_validation package directory is on the path so the sibling
 # bathymetry module can be imported regardless of how the script is invoked.
 import sys as _sys
 
-_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bathymetry as bathy_mod
 
 import matplotlib
@@ -26,7 +26,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Shared boven/beneden colors, used consistently across the sideview chart and
 # the aerial footprint map so the two figures visually agree.
@@ -34,29 +34,30 @@ C_BOVEN = "#2b5c8f"
 C_BENEDEN = "#20b2aa"
 
 # Target output files
-OUTPUT_DIR = "output/lock-validation"
-REPORT_PATH = os.path.join(OUTPUT_DIR, "lock_dimensions_validation_report.md")
-HTML_REPORT_PATH = os.path.join(OUTPUT_DIR, "lock_dimensions_validation_report.html")
+OUTPUT_DIR = Path("output/lock-validation")
+REPORT_PATH = OUTPUT_DIR / "lock_dimensions_validation_report.md"
+HTML_REPORT_PATH = OUTPUT_DIR / "lock_dimensions_validation_report.html"
 # Target lock list. Defaults to the copy committed alongside this script; override
 # with --excel or the LOCK_VALIDATION_EXCEL environment variable.
-DEFAULT_EXCEL = os.path.join(SCRIPT_DIR, "data", "Chamber_comparison.xlsx")
-LOCAL_EXCEL = os.environ.get("LOCK_VALIDATION_EXCEL", DEFAULT_EXCEL)
-BIVAS_DB = "reference/Bivas.5.10.1.sqlite"
-FIS_CHAMBERS = "output/fis-export/chamber.geoparquet"
-FIS_SECTIONS = "output/fis-export/section.geoparquet"
-EURIS_DIR = "output/euris-export"
-AIMED_LEVELS = "output/fis-export/aimedlevel.geoparquet"
-AIMED_WATERLEVELS = "output/fis-export/aimedwaterlevel.geoparquet"
-LOCK_NODES = "output/lock-schematization/nodes.geoparquet"
+DEFAULT_EXCEL = SCRIPT_DIR / "data" / "Chamber_comparison.xlsx"
+LOCAL_EXCEL = Path(os.environ.get("LOCK_VALIDATION_EXCEL", str(DEFAULT_EXCEL)))
+BIVAS_DB = Path("reference/Bivas.5.10.1.sqlite")
+FIS_CHAMBERS = Path("output/fis-export/chamber.geoparquet")
+FIS_SECTIONS = Path("output/fis-export/section.geoparquet")
+EURIS_DIR = Path("output/euris-export")
+AIMED_LEVELS = Path("output/fis-export/aimedlevel.geoparquet")
+AIMED_WATERLEVELS = Path("output/fis-export/aimedwaterlevel.geoparquet")
+LOCK_NODES = Path("output/lock-schematization/nodes.geoparquet")
 
 
 def find_euris_chambers(euris_dir=EURIS_DIR, country="NL"):
     """Return the newest EURIS LockChamber export for a country code."""
-    pattern = os.path.join(euris_dir, f"LockChamber_{country}_*.geojson")
-    files = glob.glob(pattern)
+    files = list(Path(euris_dir).glob(f"LockChamber_{country}_*.geojson"))
     if not files:
-        raise FileNotFoundError(f"No EURIS lock chamber files match: {pattern}")
-    return max(files, key=os.path.getmtime)
+        raise FileNotFoundError(
+            f"No EURIS lock chamber files match in {euris_dir} for country {country}"
+        )
+    return max(files, key=lambda f: f.stat().st_mtime)
 
 
 def oriented_bbox_dims(geom):
@@ -296,18 +297,18 @@ def classify_drempel_status(
     return status, causes, refs
 
 
-IMAGES_DIR = os.path.join(OUTPUT_DIR, "images")
-AERIALS_DIR = os.path.join(IMAGES_DIR, "aerials")
-CHARTS_DIR = os.path.join(IMAGES_DIR, "charts")
-MANUAL_CHECKS_DIR = "output/manual_checks"
+IMAGES_DIR = OUTPUT_DIR / "images"
+AERIALS_DIR = IMAGES_DIR / "aerials"
+CHARTS_DIR = IMAGES_DIR / "charts"
+MANUAL_CHECKS_DIR = Path("output/manual_checks")
 
 # Create output dirs
-os.makedirs(AERIALS_DIR, exist_ok=True)
-os.makedirs(CHARTS_DIR, exist_ok=True)
-os.makedirs(MANUAL_CHECKS_DIR, exist_ok=True)
+AERIALS_DIR.mkdir(parents=True, exist_ok=True)
+CHARTS_DIR.mkdir(parents=True, exist_ok=True)
+MANUAL_CHECKS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-CONCEPT_DIAGRAM_PATH = os.path.join(IMAGES_DIR, "concept_diagram.png")
+CONCEPT_DIAGRAM_PATH = IMAGES_DIR / "concept_diagram.png"
 
 
 def generate_concept_diagram():
@@ -316,7 +317,7 @@ def generate_concept_diagram():
     Uses illustrative (not real) values so every label can be shown clearly.
     Generated once; cached by file existence.
     """
-    if os.path.exists(CONCEPT_DIAGRAM_PATH):
+    if CONCEPT_DIAGRAM_PATH.exists():
         return "images/concept_diagram.png"
 
     # ── illustrative geometry ───────────────────────────────────────────────
@@ -603,7 +604,7 @@ def get_waterway_levels(sluis_name):
     boven/beneden resolution and its cross-validation script — see
     docs/werkwijze_sluiscontrole.md §3.4.
     """
-    return lock_levels.get_waterway_levels(sluis_name)
+    return lock_orientation.get_waterway_levels(sluis_name)
 
 
 def load_chamber_side_lookup(nodes_path=LOCK_NODES):
@@ -615,9 +616,8 @@ def load_chamber_side_lookup(nodes_path=LOCK_NODES):
     with no resolved side (streefpeil_source != "resolved"/"single_side_aimedlevel")
     are simply absent, and callers fall back to the existing geometry heuristic.
     """
-    if not os.path.exists(nodes_path):
-        return {}
-    nodes = gpd.read_parquet(nodes_path)
+    nodes = gpd.read_parquet(Path(nodes_path))
+
     chamber_nodes = nodes[
         nodes["node_type"].isin(["chamber_start", "chamber_end"])
         & nodes["side"].notna()
@@ -672,8 +672,8 @@ def gate_points_by_side(geom_rd, gate_swap):
 def download_aerial_photo(sluis_clean, chamber_clean, centroid):
     """Download aerial photo from PDOK WMS for the lock centroid (RD New EPSG:28992)."""
     filename = f"{sluis_clean}_{chamber_clean}.jpg"
-    path = os.path.join(AERIALS_DIR, filename)
-    if os.path.exists(path) and os.path.getsize(path) > 1000:
+    path = AERIALS_DIR / filename
+    if path.exists() and path.stat().st_size > 1000:
         return f"images/aerials/{filename}"
 
     # Calculate BBOX (700m box centered on lock to cover entire chamber)
@@ -690,23 +690,19 @@ def download_aerial_photo(sluis_clean, chamber_clean, centroid):
         "LAYERS=Actueel_ortho25&CRS=EPSG:28992&"
         f"BBOX={bbox_str}&WIDTH=400&HEIGHT=400&FORMAT=image/jpeg"
     )
-    try:
-        r = requests.get(url, timeout=30)
-        if r.status_code == 200 and len(r.content) > 1000:
-            with open(path, "wb") as f:
-                f.write(r.content)
-            return f"images/aerials/{filename}"
-        else:
-            print(
-                f"Failed to fetch aerial photo for {sluis_clean} {chamber_clean}: HTTP {r.status_code} or small size"
-            )
-    except Exception as e:
-        print(f"WMS request failed for {sluis_clean} {chamber_clean}: {e}")
-    return None
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    if len(r.content) > 1000:
+        path.write_bytes(r.content)
+        return f"images/aerials/{filename}"
+    else:
+        raise ValueError(
+            f"Failed to fetch aerial photo for {sluis_clean} {chamber_clean}: content too small ({len(r.content)} bytes)"
+        )
 
 
-FOOTPRINTS_DIR = os.path.join(IMAGES_DIR, "footprints")
-os.makedirs(FOOTPRINTS_DIR, exist_ok=True)
+FOOTPRINTS_DIR = IMAGES_DIR / "footprints"
+FOOTPRINTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def generate_footprint_map(
@@ -724,90 +720,69 @@ def generate_footprint_map(
 ):
     """Plot FIS chamber polygon + minimum rotated rectangle on the PDOK aerial background."""
     filename = f"{sluis_clean}_{chamber_clean}_footprint.png"
-    path = os.path.join(FOOTPRINTS_DIR, filename)
-    if os.path.exists(path):
+    path = FOOTPRINTS_DIR / filename
+    if path.exists():
         return f"images/footprints/{filename}"
 
     aerial_rel = download_aerial_photo(sluis_clean, chamber_clean, centroid_rd)
-    aerial_abs = os.path.join(OUTPUT_DIR, aerial_rel) if aerial_rel else None
-    if not aerial_abs or not os.path.exists(aerial_abs):
-        return None
-
+    aerial_abs = OUTPUT_DIR / aerial_rel
     half_size = 350
     xmin = centroid_rd.x - half_size
     xmax = centroid_rd.x + half_size
     ymin = centroid_rd.y - half_size
     ymax = centroid_rd.y + half_size
 
-    try:
-        img_arr = plt.imread(aerial_abs)
-    except Exception:
-        return None
+    img_arr = plt.imread(aerial_abs)
 
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.imshow(img_arr, extent=[xmin, xmax, ymin, ymax], origin="upper")
 
     if geom_rd is not None and not geom_rd.is_empty:
-        try:
-            xs, ys = geom_rd.exterior.coords.xy
-            ax.plot(
-                list(xs), list(ys), color="#00aaff", linewidth=2.5, label="FIS kolk"
-            )
-            ax.fill(list(xs), list(ys), color="#00aaff", alpha=0.25)
-        except Exception:
-            pass
+        xs, ys = geom_rd.exterior.coords.xy
+        ax.plot(list(xs), list(ys), color="#00aaff", linewidth=2.5, label="FIS kolk")
+        ax.fill(list(xs), list(ys), color="#00aaff", alpha=0.25)
 
         # Draw minimum rotated rectangle (OBB) as dashed orange line.
         # Skip if geometry is near-circular (aspect ratio < 3): the FIS polygon
         # is then not a chamber shape and the OBB would be misleading.
-        try:
-            obb_geom = geom_rd.minimum_rotated_rectangle
-            if hasattr(obb_geom, "exterior") and obb_geom.exterior is not None:
-                ox, oy = obb_geom.exterior.coords.xy
-                edges = [
-                    math.hypot(ox[i + 1] - ox[i], oy[i + 1] - oy[i]) for i in range(4)
-                ]
-                L_obb, W_obb = max(edges), min(edges)
-                if W_obb > 0 and L_obb / W_obb >= 3:
-                    ax.plot(
-                        list(ox),
-                        list(oy),
-                        color="#ff8800",
-                        linewidth=1.5,
-                        linestyle="--",
-                        label="Min. rechthoek",
-                    )
-                else:
-                    ax.text(
-                        xmin + 8,
-                        ymin + 8,
-                        "⚠ Geometrie niet-rechthoekig\n(polygoon ≠ sluiskolk)",
-                        fontsize=7,
-                        va="bottom",
-                        color="#ff8800",
-                        bbox=dict(
-                            boxstyle="round,pad=0.2", facecolor="#0f172a", alpha=0.8
-                        ),
-                    )
-        except Exception:
-            pass
+        obb_geom = geom_rd.minimum_rotated_rectangle
+        if hasattr(obb_geom, "exterior") and obb_geom.exterior is not None:
+            ox, oy = obb_geom.exterior.coords.xy
+            edges = [math.hypot(ox[i + 1] - ox[i], oy[i + 1] - oy[i]) for i in range(4)]
+            L_obb, W_obb = max(edges), min(edges)
+            if W_obb > 0 and L_obb / W_obb >= 3:
+                ax.plot(
+                    list(ox),
+                    list(oy),
+                    color="#ff8800",
+                    linewidth=1.5,
+                    linestyle="--",
+                    label="Min. rechthoek",
+                )
+            else:
+                ax.text(
+                    xmin + 8,
+                    ymin + 8,
+                    "⚠ Geometrie niet-rechthoekig\n(polygoon ≠ sluiskolk)",
+                    fontsize=7,
+                    va="bottom",
+                    color="#ff8800",
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor="#0f172a", alpha=0.8),
+                )
 
     # Draw bathymetry profile centreline as thin white line
     if profile_line_rd is not None:
-        try:
-            px, py = profile_line_rd.coords.xy
-            ax.plot(
-                list(px),
-                list(py),
-                color="white",
-                linewidth=1.2,
-                linestyle="-",
-                alpha=0.75,
-                label="Profiel-as",
-                zorder=5,
-            )
-        except Exception:
-            pass
+        px, py = profile_line_rd.coords.xy
+        ax.plot(
+            list(px),
+            list(py),
+            color="white",
+            linewidth=1.2,
+            linestyle="-",
+            alpha=0.75,
+            label="Profiel-as",
+            zorder=5,
+        )
 
     # Boven/beneden gate markers, same colors as the sideview chart.
     if boven_point_rd is not None:
@@ -889,12 +864,12 @@ def generate_comparison_chart(
 ):
     """Generate professional bar chart of lock dimensions and save as PNG."""
     filename = f"{sluis_clean}_{chamber_clean}.png"
-    path = os.path.join(CHARTS_DIR, filename)
+    path = CHARTS_DIR / filename
 
     def clean_val(val):
         try:
             return float(val) if pd.notna(val) else 0.0
-        except Exception:
+        except (ValueError, TypeError):
             return 0.0
 
     sources = ["FIS", "EURIS", "BIVAS", "Survey", "Selected"]
@@ -948,10 +923,10 @@ def generate_comparison_chart(
     return f"images/charts/{filename}"
 
 
-SIDEVIEWS_DIR = os.path.join(IMAGES_DIR, "sideviews")
-DECISIONS_DIR = os.path.join(IMAGES_DIR, "decisions")
-os.makedirs(SIDEVIEWS_DIR, exist_ok=True)
-os.makedirs(DECISIONS_DIR, exist_ok=True)
+SIDEVIEWS_DIR = IMAGES_DIR / "sideviews"
+DECISIONS_DIR = IMAGES_DIR / "decisions"
+SIDEVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+DECISIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def generate_sideview_chart(
@@ -973,8 +948,8 @@ def generate_sideview_chart(
 ):
     """Engineering cross-section with optional bottom-profile panel below."""
     filename = f"{sluis_clean}_{chamber_clean}_sideview.png"
-    path = os.path.join(SIDEVIEWS_DIR, filename)
-    if os.path.exists(path):
+    path = SIDEVIEWS_DIR / filename
+    if path.exists():
         return f"images/sideviews/{filename}"
 
     levels = [
@@ -1996,7 +1971,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
         fis_centroids_fd = gpd.GeoDataFrame(
             fis_rd[["id"]], geometry=fis_rd.geometry.centroid, crs="EPSG:28992"
         )
-        fd_joined = lock_levels.sjoin_nearest_value(
+        fd_joined = lock_orientation.sjoin_nearest_value(
             fis_centroids_fd, fd_rd, ["ReferenceLevel"], max_distance=500
         )
         fis_rd = fis_rd.merge(
@@ -2015,7 +1990,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
         awl_centroids = gpd.GeoDataFrame(
             fis_rd[["id"]], geometry=fis_rd.geometry.centroid, crs="EPSG:28992"
         )
-        joined_range = lock_levels.sjoin_nearest_value(
+        joined_range = lock_orientation.sjoin_nearest_value(
             awl_centroids,
             awl_rd,
             ["MaximumNegativeDeviation", "MaximumPositiveDeviation"],
@@ -2041,7 +2016,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
         fis_rd[["id"]], geometry=fis_rd["centroid"], crs="EPSG:28992"
     )
     # Spatial join nearest aimed level
-    joined_levels = lock_levels.sjoin_nearest_value(
+    joined_levels = lock_orientation.sjoin_nearest_value(
         centroids_gdf, aimed_rd, ["Value"], max_distance=500
     )
     # Map back to fis_rd

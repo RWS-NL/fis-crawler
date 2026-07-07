@@ -85,6 +85,16 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 # Tidal
 "WaterName" = "water_name"
 
+# Aimed level and waterlevel attributes
+"aimed_Value" = "aimedlevel"
+"aimed_OfficialLevelName" = "aimedlevel_name"
+"aimedwater_MaximumNegativeDeviation" = "aimedwaterlevel_neg"
+"aimedwater_MaximumPositiveDeviation" = "aimedwaterlevel_pos"
+"aimedwater_AverageLevel" = "aimedwaterlevel_ref"
+
+
+
+
 # Routing attributes
 "Id" = "fis_id"
 "GeoType" = "geo_type"
