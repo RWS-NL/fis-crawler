@@ -16,36 +16,28 @@ repeated runs never re-hit the service.
 
 import json
 import math
-import os
+from pathlib import Path
 
 import requests
-from shapely import minimum_rotated_rectangle
 from shapely.geometry import LineString
 
 SERVICE = (
     "https://geo.rijkswaterstaat.nl/arcgis/rest/services/GDR/bodemhoogte_1mtr/MapServer"
 )
-CACHE_PATH = "output/lock-validation/bathymetry_cache.json"
+CACHE_PATH = Path("output/lock-validation/bathymetry_cache.json")
 
 _NODATA_TOKENS = {"NoData", "nodata", "", None}
 
 
 def load_cache():
-    if os.path.exists(CACHE_PATH):
-        try:
-            with open(CACHE_PATH, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+    if not CACHE_PATH.exists():
+        return {}
+    return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
 
 
 def save_cache(cache):
-    try:
-        with open(CACHE_PATH, "w") as f:
-            json.dump(cache, f, indent=2)
-    except Exception as e:
-        print(f"Failed to save bathymetry cache: {e}")
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_PATH.write_text(json.dumps(cache, indent=2), encoding="utf-8")
 
 
 def _cache_key(x, y):
@@ -54,7 +46,7 @@ def _cache_key(x, y):
 
 
 def _query_identify(x, y, tolerance, session):
-    """Raw MapServer identify call; returns float value or None (NoData/error)."""
+    """Raw MapServer identify call; returns float value or None (NoData) or raises on error."""
     params = {
         "geometry": json.dumps({"x": x, "y": y, "spatialReference": {"wkid": 28992}}),
         "geometryType": "esriGeometryPoint",
@@ -67,20 +59,17 @@ def _query_identify(x, y, tolerance, session):
         "f": "json",
     }
     getter = session.get if session is not None else requests.get
-    try:
-        r = getter(f"{SERVICE}/identify", params=params, timeout=30)
-        r.raise_for_status()
-        for res in r.json().get("results", []):
-            attrs = res.get("attributes") or {}
-            raw = attrs.get("Pixel Value")
-            if raw in _NODATA_TOKENS:
-                continue
-            try:
-                return float(raw)
-            except (ValueError, TypeError):
-                continue
-    except Exception:
-        pass
+    r = getter(f"{SERVICE}/identify", params=params, timeout=30)
+    r.raise_for_status()
+    for res in r.json().get("results", []):
+        attrs = res.get("attributes") or {}
+        raw = attrs.get("Pixel Value")
+        if raw in _NODATA_TOKENS:
+            continue
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            continue
     return None
 
 
@@ -111,7 +100,7 @@ def identify_bottom(x, y, cache, session=None):
 
 def gate_centres(geom_rd):
     """The two gate centres = midpoints of the chamber OBB's short edges."""
-    rect = minimum_rotated_rectangle(geom_rd)
+    rect = geom_rd.minimum_rotated_rectangle
     if not hasattr(rect, "exterior") or rect.exterior is None:
         return None
     xs, ys = rect.exterior.coords.xy

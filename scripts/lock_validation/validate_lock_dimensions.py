@@ -13,6 +13,7 @@ import requests
 from fis import utils
 from fis.lock import orientation as lock_orientation
 from pathlib import Path
+import html
 
 # Ensure the lock_validation package directory is on the path so the sibling
 # bathymetry module can be imported regardless of how the script is invoked.
@@ -3294,7 +3295,7 @@ def write_html_report(results_list):
             if r.get("footprint_path")
             else aerial_html
         )
-        (
+        chart_html = (
             f'<img src="{r["chart_path"]}" alt="Afmetingen vergelijking">'
             if r.get("chart_path")
             else _no_img
@@ -3323,18 +3324,7 @@ def write_html_report(results_list):
             card_badge = '<span class="badge badge-info">BIVAS Afwijking</span>'
             card_class = "lock-card-discrepancy"
 
-        r["selection_method_len"]
-
-        (
-            "style Calc1 fill:#dcfce7,stroke:#15803d,stroke-width:2px"
-            if pd.notna(r["streefpeil"])
-            else ""
-        )
-        (
-            "style Calc2 fill:#dcfce7,stroke:#15803d,stroke-width:2px"
-            if pd.isna(r["streefpeil"])
-            else ""
-        )
+        escaped_note = html.escape(str(r["note"])) if pd.notna(r["note"]) else ""
 
         html_content += f"""
                 <div class="lock-card {card_class}" id="{r["Sluis"]}_{r["name"]}">
@@ -3359,12 +3349,17 @@ def write_html_report(results_list):
                                     <tr><td>Benedenhoofd/Buitenhoofd (Be/Bu) — {r["waterway_laag"]}</td><td>Streefpeil: {peil_l} | Drempelkruin FIS: <strong>{calc_bebu} m NAP</strong> [{r.get("sill_bebu_source") or ""}] | Meting 1m-kaart: {f"{r['bebu_measured']:.2f} m" if r.get("bebu_measured") is not None else "—"} | Enquête: {r["survey_drempel_bebu"] or "—"}</td></tr>
                                 </table>
                             </div>
-                            {f'<div class="note-text"><strong>Opmerking:</strong> {r["note"]}</div>' if pd.notna(r["note"]) else ""}
+                            {f'<div class="note-text"><strong>Opmerking:</strong> {escaped_note}</div>' if escaped_note else ""}
                         </div>
                         <div class="visuals-panel">
                             <h4>Voetafdruk (FIS kolk)</h4>
                             {footprint_html}
                             <h5>Bron: PDOK Actueel_ortho25 + FIS geometrie</h5>
+                        </div>
+                        <div class="visuals-panel">
+                            <h4>Afmetingen Vergelijking</h4>
+                            {chart_html}
+                            <h5>Bron: FIS / EURIS / BIVAS / Enquête</h5>
                         </div>
                         <div class="visuals-panel">
                             <h4>Zijaanzicht & Bodemprofiel</h4>
@@ -3383,11 +3378,6 @@ def write_html_report(results_list):
             </div>
         </div>
     </div>
-    
-    <script type="module">
-        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'loose' });
-    </script>
 </body>
 </html>
 """
