@@ -597,15 +597,15 @@ def generate_concept_diagram():
     return "images/concept_diagram.png"
 
 
-def get_waterway_levels(sluis_name):
-    """Return the waterway names and aimed water levels (streefpeil in NAP) for both sides of the lock.
+def get_waterway_levels(isrs_code):
+    """Return the waterway names and aimed water levels (streefpeil in NAP) for both sides of the lock by its ISRS code.
 
     Thin wrapper: the actual table lives in fis.lock.levels.MANUAL_WATERWAY_LEVELS
     so there is one source of truth shared with the automatic (graph-based)
     boven/beneden resolution and its cross-validation script — see
     docs/werkwijze_sluiscontrole.md §3.4.
     """
-    return lock_orientation.get_waterway_levels(sluis_name)
+    return lock_orientation.get_waterway_levels(isrs_code)
 
 
 def load_chamber_side_lookup(nodes_path=LOCK_NODES):
@@ -2171,8 +2171,9 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
             note_text = get_val(m_row, "Note") or get_val(m_row, "note")
 
             # Retrieve waterway levels for high/low sides
+            isrs_code = m_row.get("code") or m_row.get("isrs_clean")
             waterway_hoog, peil_hoog, waterway_laag, peil_laag = get_waterway_levels(
-                sluis_name
+                isrs_code
             )
 
             # Resolve sill heights to NAP with explicit source tracking

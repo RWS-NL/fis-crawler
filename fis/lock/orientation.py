@@ -11,6 +11,7 @@ streefpeil at all, which is expected and handled explicitly (not treated as a bu
 import logging
 import geopandas as gpd
 import pandas as pd
+from fis.utils import load_lock_bridge_mappings
 
 logger = logging.getLogger(__name__)
 
@@ -222,96 +223,138 @@ def resolve_boven_beneden(
     }
 
 
-# Manually curated waterway names + streefpeil (m NAP) per side, for locks where
-# the automatic method is structurally unable to resolve one or both sides (tidal
-# reaches, free-flowing rivers, or multi-river junctions like Weurt/Heumen).
+# Load manual waterway levels from the config TOML file
+_mappings = load_lock_bridge_mappings()
 MANUAL_WATERWAY_LEVELS = {
-    "belfeld": ("Maas (bovenstrooms)", 14.1, "Maas (benedenstrooms)", 10.8),
-    "born": (
-        "Julianakanaal (bovenstrooms)",
-        44.7,
-        "Julianakanaal (benedenstrooms)",
-        32.6,
-    ),
-    "eefde": ("Twentekanaal", 10.0, "Gelderse IJssel", 3.0),
-    "gaarkeuken": (
-        "Van Starkenborghkanaal (oost)",
-        -0.93,
-        "Prinses Margrietkanaal (west)",
-        -0.52,
-    ),
-    "hansweert": ("Kanaal door Zuid-Beveland", 0.0, "Westerschelde", 0.0),
-    "heel": (
-        "Julianakanaal / Kanaal Wessem-Nederweert",
-        28.65,
-        "Maasplassen Heel (stuwpeil Linne)",
-        20.8,
-    ),
-    "wood": (
-        "IJsselmeer",
-        0.0,
-        "Markermeer",
-        -0.2,
-    ),  # Note: matches houtrib via 'wood' sub-key in get_waterway_levels? Or houtrib? Let's check original.
-    "houtrib": ("IJsselmeer", 0.0, "Markermeer", -0.2),
-    "krammer": ("Volkerakpeil", 0.0, "Krammer / Oosterschelde", 0.0),
-    "kreekrak": (
-        "Antwerpen kanaalpeil",
-        1.8,
-        "Schelde-Rijnverbinding (Volkerakpeil)",
-        0.0,
-    ),
-    "maasbracht": (
-        "Julianakanaal (bovenstrooms)",
-        32.6,
-        "Julianakanaal (benedenstrooms)",
-        20.8,
-    ),
-    "oranje": ("Markermeer", -0.2, "Binnen-IJ / Noordzeekanaal", -0.4),
-    "bernhard": ("Waal (stuwpeil Hagestein/rivier)", 3.0, "Amsterdam-Rijnkanaal", -0.4),
-    "beatrix": (
-        "Lek (stuwpeil Hagestein)",
-        3.0,
-        "Lekkanaal / Amsterdam-Rijnkanaal",
-        -0.4,
-    ),
-    "irene": ("Lek (stuwpeil Hagestein)", 3.0, "Amsterdam-Rijnkanaal", -0.4),
-    "margriet": ("IJsselmeer", -0.1, "Friese Boezem", -0.52),
-    "sambeek": ("Maas (bovenstrooms)", 10.8, "Maas (benedenstrooms)", 8.6),
-    "weurt": ("Maas-Waalkanaal", 7.95, "Waal (rivier)", 5.0),
-    "stevin": ("IJsselmeer", -0.1, "Waddenzee (tij)", 0.0),
-    "terneuzen": ("Kanaal Gent-Terneuzen", 2.1, "Westerschelde (tij)", 0.0),
-    "volkerak": ("Hollandsch Diep", 0.0, "Volkerak (Volkerakpeil)", 0.0),
+    k: {
+        "levels": (
+            v["waterway_hoog"],
+            v["peil_hoog"],
+            v["waterway_laag"],
+            v["peil_laag"],
+        ),
+        "isrs_codes": v.get("isrs_codes", []),
+    }
+    for k, v in _mappings["manual_waterway_levels"].items()
 }
+
+# Build a lookup to map chamber ISRS codes to their parent lock complex ISRS codes
+_chambers = gpd.read_parquet("output/fis-export/chamber.geoparquet")
+_locks = gpd.read_parquet("output/fis-export/lock.geoparquet")
+_lock_isrs_map = _locks.set_index("Id")["Code"].to_dict()
+CHAMBER_TO_COMPLEX_ISRS = {}
+for _, _row in _chambers.iterrows():
+    _c_code = _row.get("Code")
+    _p_id = _row.get("ParentId") or _row.get("ParentLockId")
+    if _c_code and _p_id:
+        _p_isrs = _lock_isrs_map.get(_p_id)
+        if _p_isrs:
+            CHAMBER_TO_COMPLEX_ISRS[str(_c_code).strip()] = str(_p_isrs).strip()
 
 # Locks that are structurally not a simple 2-sided boven/beneden case.
 MULTI_RIVER_JUNCTION_LOCKS = {"weurt", "heumen"}
 
 
-def get_waterway_levels(sluis_name):
-    """Return (waterway_hoog, peil_hoog, waterway_laag, peil_laag) for a lock name.
+def get_waterway_levels(isrs_code):
+    """Return (waterway_hoog, peil_hoog, waterway_laag, peil_laag) for a lock by its ISRS code.
 
-    Substring match against MANUAL_WATERWAY_LEVELS, case-insensitive.
+    Strictly matches against MANUAL_WATERWAY_LEVELS using exact ISRS complex code matching.
+    If a chamber ISRS code is passed, it is automatically resolved to its parent complex code.
     """
-    s = sluis_name.lower().strip()
-    for key, value in MANUAL_WATERWAY_LEVELS.items():
-        if key in s:
-            return value
-    return "Onbekende waterweg", None, "Onbekende waterweg", None
+    target = str(isrs_code).strip()
+    complex_isrs = CHAMBER_TO_COMPLEX_ISRS.get(target, target)
+
+    for key, cfg in MANUAL_WATERWAY_LEVELS.items():
+        if complex_isrs in cfg["isrs_codes"]:
+            return cfg["levels"]
+
+    raise KeyError(
+        f"ISRS code '{target}' (resolved complex: '{complex_isrs}') not found in manual waterway levels configuration."
+    )
+
+
+def _determine_validation_category(
+    key: str,
+    source: str | None,
+    auto_boven: float | None,
+    auto_beneden: float | None,
+    peil_hoog: float | None,
+    peil_laag: float | None,
+    tolerance: float,
+) -> str:
+    """Determine the validation category for a given automatic and manual level match.
+
+    Categorizes comparison as MATCH, SIDE_MISMATCH, VALUE_MISMATCH, PARTIAL, or UNRESOLVED.
+    """
+    if key in MULTI_RIVER_JUNCTION_LOCKS or source in (
+        None,
+        "no_graph",
+        "no_streefpeil_found",
+        "ambiguous",
+    ):
+        return "UNRESOLVED"
+
+    if source == "single_side_aimedlevel":
+        if auto_boven is not None and peil_hoog is not None:
+            return (
+                "PARTIAL"
+                if abs(auto_boven - peil_hoog) <= tolerance
+                else "VALUE_MISMATCH"
+            )
+        if auto_beneden is not None and peil_laag is not None:
+            return (
+                "PARTIAL"
+                if abs(auto_beneden - peil_laag) <= tolerance
+                else "VALUE_MISMATCH"
+            )
+        return "PARTIAL"
+
+    if auto_boven is None or auto_beneden is None:
+        return "PARTIAL"
+
+    if peil_hoog is None or peil_laag is None:
+        return "UNRESOLVED"
+
+    boven_ok = abs(auto_boven - peil_hoog) <= tolerance
+    beneden_ok = abs(auto_beneden - peil_laag) <= tolerance
+    if boven_ok and beneden_ok:
+        return "MATCH"
+
+    swapped_ok = (
+        abs(auto_boven - peil_laag) <= tolerance
+        and abs(auto_beneden - peil_hoog) <= tolerance
+    )
+    if swapped_ok:
+        return "SIDE_MISMATCH"
+
+    return "VALUE_MISMATCH"
 
 
 def cross_validate_manual_levels(nodes_gdf, lock_gdf, tolerance=0.1):
-    """Compare automatically resolved boven/beneden streefpeil against the manual table."""
-    rows = []
-    lock_names = lock_gdf[["id", "name"]].dropna(subset=["name"])
+    """Compare automatically resolved boven/beneden streefpeil against the manual table.
 
-    for key, (
-        wway_hoog,
-        peil_hoog,
-        wway_laag,
-        peil_laag,
-    ) in MANUAL_WATERWAY_LEVELS.items():
-        matches = lock_names[lock_names["name"].str.lower().str.contains(key)]
+    This function helps validate whether the graph-based water level resolution matches
+    our manually curated list of waterway streefpeilen.
+    """
+    rows = []
+    lock_names = lock_gdf[["id", "name", "isrs_code"]].dropna(subset=["name"])
+
+    # Map each lock to its matched key in MANUAL_WATERWAY_LEVELS using exact ISRS code matching
+    lock_to_key = {}
+    for _, lock_row in lock_names.iterrows():
+        lock_isrs = lock_row.get("isrs_code")
+        if lock_isrs:
+            lock_isrs_str = str(lock_isrs).strip()
+            for key, cfg in MANUAL_WATERWAY_LEVELS.items():
+                if lock_isrs_str in cfg["isrs_codes"]:
+                    lock_to_key[str(lock_row["id"])] = key
+                    break
+
+    for key, cfg in MANUAL_WATERWAY_LEVELS.items():
+        wway_hoog, peil_hoog, wway_laag, peil_laag = cfg["levels"]
+        matched_ids = [lk for lk, k in lock_to_key.items() if k == key]
+        matches = lock_names[lock_names["id"].astype(str).isin(matched_ids)]
+
         if matches.empty:
             rows.append(
                 {
@@ -334,59 +377,29 @@ def cross_validate_manual_levels(nodes_gdf, lock_gdf, tolerance=0.1):
                 (nodes_gdf["lock_id"].astype(str) == lock_id)
                 & (nodes_gdf["node_type"].isin(["lock_split", "lock_merge"]))
             ]
-            split = complex_nodes[complex_nodes["node_type"] == "lock_split"]
-            merge = complex_nodes[complex_nodes["node_type"] == "lock_merge"]
 
             auto_boven_nap = None
             auto_beneden_nap = None
             source = None
-            for side_df in (split, merge):
-                if side_df.empty:
-                    continue
-                side = side_df.iloc[0].get("side")
-                nap = side_df.iloc[0].get("streefpeil_nap")
-                source = side_df.iloc[0].get("streefpeil_source") or source
+
+            for _, node_row in complex_nodes.iterrows():
+                side = node_row.get("side")
+                nap = node_row.get("streefpeil_nap")
+                source = node_row.get("streefpeil_source") or source
                 if side == "boven":
                     auto_boven_nap = nap
                 elif side == "beneden":
                     auto_beneden_nap = nap
 
-            if key in MULTI_RIVER_JUNCTION_LOCKS or source == "no_graph":
-                category = "UNRESOLVED"
-            elif source in (None, "no_streefpeil_found", "ambiguous"):
-                category = "UNRESOLVED"
-            elif source == "single_side_aimedlevel":
-                if auto_boven_nap is not None and peil_hoog is not None:
-                    category = (
-                        "PARTIAL"
-                        if abs(auto_boven_nap - peil_hoog) <= tolerance
-                        else "VALUE_MISMATCH"
-                    )
-                elif auto_beneden_nap is not None and peil_laag is not None:
-                    category = (
-                        "PARTIAL"
-                        if abs(auto_beneden_nap - peil_laag) <= tolerance
-                        else "VALUE_MISMATCH"
-                    )
-                else:
-                    category = "PARTIAL"
-            elif auto_boven_nap is None or auto_beneden_nap is None:
-                category = "PARTIAL"
-            elif peil_hoog is None or peil_laag is None:
-                category = "UNRESOLVED"
-            else:
-                boven_ok = abs(auto_boven_nap - peil_hoog) <= tolerance
-                beneden_ok = abs(auto_beneden_nap - peil_laag) <= tolerance
-                swapped_ok = (
-                    abs(auto_boven_nap - peil_laag) <= tolerance
-                    and abs(auto_beneden_nap - peil_hoog) <= tolerance
-                )
-                if boven_ok and beneden_ok:
-                    category = "MATCH"
-                elif swapped_ok:
-                    category = "SIDE_MISMATCH"
-                else:
-                    category = "VALUE_MISMATCH"
+            category = _determine_validation_category(
+                key,
+                source,
+                auto_boven_nap,
+                auto_beneden_nap,
+                peil_hoog,
+                peil_laag,
+                tolerance,
+            )
 
             rows.append(
                 {
