@@ -722,8 +722,6 @@ def generate_footprint_map(
     """Plot FIS chamber polygon + minimum rotated rectangle on the PDOK aerial background."""
     filename = f"{sluis_clean}_{chamber_clean}_footprint.png"
     path = FOOTPRINTS_DIR / filename
-    if path.exists():
-        return f"images/footprints/{filename}"
 
     aerial_rel = download_aerial_photo(sluis_clean, chamber_clean, centroid_rd)
     aerial_abs = OUTPUT_DIR / aerial_rel
@@ -950,8 +948,6 @@ def generate_sideview_chart(
     """Engineering cross-section with optional bottom-profile panel below."""
     filename = f"{sluis_clean}_{chamber_clean}_sideview.png"
     path = SIDEVIEWS_DIR / filename
-    if path.exists():
-        return f"images/sideviews/{filename}"
 
     levels = [
         v
