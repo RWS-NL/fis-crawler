@@ -1,6 +1,7 @@
 import pandas as pd
 import geopandas as gpd
 import os
+import re
 import argparse
 import logging
 import sqlite3
@@ -98,9 +99,16 @@ def main():
     print("Loading EURIS chambers...")
     import glob
 
-    euris_search_path = os.path.join(
-        os.path.dirname(args.euris_chambers), "LockChamber_*.geojson"
+    # Derive the country code from the supplied filename (e.g. LockChamber_NL_*.geojson)
+    # so auto-discovery also works for non-NL exports; fall back to any country.
+    euris_basename = os.path.basename(args.euris_chambers)
+    country_match = re.match(r"LockChamber_([A-Z]{2})_", euris_basename)
+    country_glob = (
+        f"LockChamber_{country_match.group(1)}_*.geojson"
+        if country_match
+        else "LockChamber_*_*.geojson"
     )
+    euris_search_path = os.path.join(os.path.dirname(args.euris_chambers), country_glob)
     euris_files = glob.glob(euris_search_path)
     if not euris_files:
         if os.path.exists(args.euris_chambers):

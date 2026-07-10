@@ -669,6 +669,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "python-calamine" },
     { name = "requests" },
+    { name = "rws-ddlpy" },
     { name = "scipy" },
     { name = "scrapy" },
     { name = "tabulate" },
@@ -704,6 +705,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=21.0.0" },
     { name = "python-calamine", specifier = ">=0.6.2" },
     { name = "requests", specifier = ">=2.32.3" },
+    { name = "rws-ddlpy", specifier = ">=0.10.0" },
     { name = "scipy", specifier = ">=1.15.2" },
     { name = "scrapy", specifier = ">=2.13.2" },
     { name = "tabulate", specifier = ">=0.9.0" },
@@ -2509,6 +2511,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pytz"
+version = "2026.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/46/dd499ec9038423421951e4fad73051febaa13d2df82b4064f87af8b8c0c3/pytz-2026.2.tar.gz", hash = "sha256:0e60b47b29f21574376f218fe21abc009894a2321ea16c6754f3cad6eb7cdd6a", size = 320861, upload-time = "2026-05-04T01:35:29.667Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/dd/96da98f892250475bdf2328112d7468abdd4acc7b902b6af23f4ed958ea0/pytz-2026.2-py2.py3-none-any.whl", hash = "sha256:04156e608bee23d3792fd45c94ae47fae1036688e75032eea2e3bf0323d1f126", size = 510141, upload-time = "2026-05-04T01:35:27.408Z" },
+]
+
+[[package]]
 name = "pyviz-comms"
 version = "3.0.6"
 source = { registry = "https://pypi.org/simple" }
@@ -2849,6 +2860,25 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/77/65/38ab2f90df44c2febfb63cc10ced40763d9b4bc94d173e734528663fe7f5/rpds_py-2026.5.1-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:b1be5c35683684d5331b93600c210e8367c254683d8a6df6bd21bd2da3a334fb", size = 581839, upload-time = "2026-05-28T12:01:48.109Z" },
     { url = "https://files.pythonhosted.org/packages/15/2d/ce1f605fe036aadd460e5822e578c6c7ec3a860936cca37d6e0f299daa77/rpds_py-2026.5.1-cp315-cp315t-win32.whl", hash = "sha256:75808f6c38ce7749bb68cc2770161aae5045e6c6f6781a9782e74b93304399df", size = 207866, upload-time = "2026-05-28T12:01:49.648Z" },
     { url = "https://files.pythonhosted.org/packages/79/cb/966040123eb102371559746908ef2c9471f4d43e17ec9a645a2258dab64b/rpds_py-2026.5.1-cp315-cp315t-win_amd64.whl", hash = "sha256:90bd6630002a1c7f09e7843dd79f0d24f3d2897cc25a753480917865d14f15b3", size = 225441, upload-time = "2026-05-28T12:01:51.408Z" },
+]
+
+[[package]]
+name = "rws-ddlpy"
+version = "0.10.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "platformdirs" },
+    { name = "python-dateutil" },
+    { name = "pytz" },
+    { name = "requests" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0c/bb/d35659ae4fba499c12920c1f324f40ba3927da21cadde3d57a975dbd0c0a/rws_ddlpy-0.10.0.tar.gz", hash = "sha256:4b01ba6af6175c3f143ce5d10145792d6462684ce8988fd1f950c1b9fabd5d84", size = 47493, upload-time = "2025-12-23T13:59:33.787Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/02/c8/68e610763fa019f07a70e39f71bf7f394b24f7f3327b6a437cc7272ffdbf/rws_ddlpy-0.10.0-py3-none-any.whl", hash = "sha256:a4e8ddcc3c3ff6c665902c089687d76b682bface705bafb5a220f929c021aaf1", size = 28836, upload-time = "2025-12-23T13:59:32.651Z" },
 ]
 
 [[package]]

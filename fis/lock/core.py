@@ -11,6 +11,8 @@ from shapely.ops import unary_union
 from fis.utils import to_python, sanitize_attrs, stringify_id
 from fis import settings, utils
 from fis.ris_index import load_ris_index
+from fis.graph import levels as graph_levels
+from fis.lock import orientation
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,21 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     berths = read_geo_or_parquet(export_dir, "berth")
     sections = read_geo_or_parquet(export_dir, "section")
 
+    # Streefpeil (target level, m NAP) per fairway segment — used for boven/beneden
+    # determination (fis.lock.levels). Kept raw (CamelCase columns), not run through
+    # normalize_attributes, since it has no schema.toml entry of its own and the
+    # matching code (fis.lock.levels) expects the original FIS field names.
+    aimedlevel_path = export_dir / "aimedlevel.geoparquet"
+    aimedlevel = gpd.read_parquet(aimedlevel_path) if aimedlevel_path.exists() else None
+    if (
+        aimedlevel is not None
+        and "Geometry" in aimedlevel.columns
+        and "geometry" not in aimedlevel.columns
+    ):
+        aimedlevel = aimedlevel.rename(columns={"Geometry": "geometry"}).set_geometry(
+            "geometry"
+        )
+
     # Load and normalize structures
     schema = utils.load_schema()
     locks = utils.normalize_attributes(locks, "locks", schema)
@@ -139,6 +156,7 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
         "fairways": fairways,
         "berths": berths,
         "sections": sections,
+        "aimedlevel": aimedlevel,
         "disk_locks": disk_locks,
         "disk_bridges": disk_bridges,
         "operatingtimes": operatingtimes,
@@ -561,6 +579,13 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     berths = data["berths"]
     sections = data["sections"]
     disk_locks = data["disk_locks"]
+    aimedlevel = data.get("aimedlevel")
+
+    # Project streefpeil (m NAP) onto the fis-graph edges once, up front, so the
+    # per-complex boven/beneden resolution below can walk the graph and find it.
+    # Defensive: a missing aimedlevel export or graph should not break schematize().
+    if network_graph is not None and aimedlevel is not None:
+        graph_levels.enrich_edges_with_streefpeil(network_graph, sections, aimedlevel)
 
     # Filter out ignored/historical DISK locks based on configuration mappings
     mappings = utils.load_lock_bridge_mappings()
@@ -583,6 +608,21 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     locks_gdf = locks
     berths_gdf = berths
     sections_gdf = sections
+
+    # Pre-pass: collect every lock's own fairway start/end junctions up front, so
+    # the boven/beneden graph walk (below) can treat every OTHER lock's junctions
+    # as a barrier and stop there, instead of crossing straight through a
+    # neighbouring lock's own pand — see fis.lock.levels.walk_to_streefpeil.
+    all_lock_junctions = set()
+    for _, lock_row in locks_gdf.iterrows():
+        if pd.isna(lock_row.get("fairway_id")):
+            continue
+        s_junc, e_junc = find_fairway_junctions(
+            sections_gdf, stringify_id(lock_row["fairway_id"])
+        )
+        for j in (s_junc, e_junc):
+            if j is not None:
+                all_lock_junctions.add(int(j))
 
     # Ensure RIS Index is indexed for fast lookup
     if "isrs_code" in ris_df.columns:
@@ -647,6 +687,14 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
             lock, lock_chambers, fairways, sections_gdf, openings_data=openings_data
         )
 
+        boven_beneden = orientation.resolve_boven_beneden(
+            fairway_data,
+            network_graph,
+            route_id=lock.get("route_id"),
+            other_lock_junctions=all_lock_junctions,
+            lock_name=lock.get("name"),
+        )
+
         logger.debug("  Checking connected fairways and sections...")
         sections_data, internal_sections, connected_fairways = (
             _find_connected_sections_optimized(
@@ -702,6 +750,7 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
             "isrs_code": lock_isrs_code,
             **ris_info,
             **fairway_data,
+            "boven_beneden": boven_beneden,
             "berths": berths_data,
             "sections": sections_data,
             "disk_locks": matched_disk_locks,

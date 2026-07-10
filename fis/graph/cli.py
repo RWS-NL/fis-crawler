@@ -156,6 +156,23 @@ def enrich_fis(
         edges_gdf.to_parquet(output_dir / "edges.geoparquet")
         logger.info("Exported %d enriched edges", len(edges_gdf))
 
+    # Export nodes with enrichment as GeoJSON/GeoParquet
+    node_data = []
+    for node, attrs in graph.nodes(data=True):
+        row = {"id": node, **attrs}
+        if "geometry" in row and hasattr(row["geometry"], "wkt"):
+            pass  # Keep geometry
+        elif "geometry_wkt" in row:
+            row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
+        node_data.append(row)
+
+    if node_data:
+        nodes_gdf = gpd.GeoDataFrame(node_data, crs="EPSG:4326")
+        nodes_gdf["id"] = nodes_gdf["id"].astype(str)
+        nodes_gdf.to_file(output_dir / "nodes.geojson", driver="GeoJSON")
+        nodes_gdf.to_parquet(output_dir / "nodes.geoparquet")
+        logger.info("Exported %d enriched nodes", len(nodes_gdf))
+
     # Summary with enrichment stats
     enriched_edges = sum(1 for _, _, d in graph.edges(data=True) if "cemt_class" in d)
     summary = {

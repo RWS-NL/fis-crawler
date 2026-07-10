@@ -290,6 +290,7 @@ def _process_fairway_connections(
     "split" is where the fairway enters the complex and "merge" is where it exits.
     """
     features = []
+    boven_beneden = c.get("boven_beneden") or {}
 
     if c.get("geometry_before_wkt"):
         wkt.loads(c["geometry_before_wkt"])
@@ -306,6 +307,9 @@ def _process_fairway_connections(
                         "node_type": "lock_split",
                         "node_id": split_node_id,
                         "lock_id": c["id"],
+                        "side": boven_beneden.get("split_side"),
+                        "streefpeil_nap": boven_beneden.get("split_streefpeil_nap"),
+                        "streefpeil_source": boven_beneden.get("source"),
                     },
                 }
             )
@@ -323,6 +327,9 @@ def _process_fairway_connections(
                         "node_type": "lock_merge",
                         "node_id": merge_node_id,
                         "lock_id": c["id"],
+                        "side": boven_beneden.get("merge_side"),
+                        "streefpeil_nap": boven_beneden.get("merge_streefpeil_nap"),
+                        "streefpeil_source": boven_beneden.get("source"),
                     },
                 }
             )
@@ -566,7 +573,9 @@ def _build_chamber_route_features(
 
     features = []
 
-    # Start Node
+    boven_beneden = c.get("boven_beneden") or {}
+
+    # Start Node — inherits the split side (chamber_approach runs split -> start).
     features.append(
         {
             "type": "Feature",
@@ -578,10 +587,13 @@ def _build_chamber_route_features(
                 "node_id": chamber_node_start_id,
                 "lock_id": lock_id,
                 "chamber_id": chamber_id,
+                "side": boven_beneden.get("split_side"),
+                "streefpeil_nap": boven_beneden.get("split_streefpeil_nap"),
+                "streefpeil_source": boven_beneden.get("source"),
             },
         }
     )
-    # End Node
+    # End Node — inherits the merge side (chamber_exit runs end -> merge).
     features.append(
         {
             "type": "Feature",
@@ -593,6 +605,9 @@ def _build_chamber_route_features(
                 "node_id": chamber_node_end_id,
                 "lock_id": lock_id,
                 "chamber_id": chamber_id,
+                "side": boven_beneden.get("merge_side"),
+                "streefpeil_nap": boven_beneden.get("merge_streefpeil_nap"),
+                "streefpeil_source": boven_beneden.get("source"),
             },
         }
     )
