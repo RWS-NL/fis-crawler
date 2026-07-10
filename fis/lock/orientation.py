@@ -8,6 +8,7 @@ comparison. The side connected (via the fairway graph) to the higher streefpeil 
 streefpeil at all, which is expected and handled explicitly (not treated as a bug).
 """
 
+from functools import lru_cache
 import logging
 import geopandas as gpd
 import pandas as pd
@@ -238,18 +239,23 @@ MANUAL_WATERWAY_LEVELS = {
     for k, v in _mappings["manual_waterway_levels"].items()
 }
 
+
 # Build a lookup to map chamber ISRS codes to their parent lock complex ISRS codes
-_chambers = gpd.read_parquet("output/fis-export/chamber.geoparquet")
-_locks = gpd.read_parquet("output/fis-export/lock.geoparquet")
-_lock_isrs_map = _locks.set_index("Id")["Code"].to_dict()
-CHAMBER_TO_COMPLEX_ISRS = {}
-for _, _row in _chambers.iterrows():
-    _c_code = _row.get("Code")
-    _p_id = _row.get("ParentId") or _row.get("ParentLockId")
-    if _c_code and _p_id:
-        _p_isrs = _lock_isrs_map.get(_p_id)
-        if _p_isrs:
-            CHAMBER_TO_COMPLEX_ISRS[str(_c_code).strip()] = str(_p_isrs).strip()
+@lru_cache(maxsize=1)
+def _get_chamber_to_complex_isrs():
+    _chambers = gpd.read_parquet("output/fis-export/chamber.geoparquet")
+    _locks = gpd.read_parquet("output/fis-export/lock.geoparquet")
+    _lock_isrs_map = _locks.set_index("Id")["Code"].to_dict()
+    mapping = {}
+    for _, _row in _chambers.iterrows():
+        _c_code = _row.get("Code")
+        _p_id = _row.get("ParentId") or _row.get("ParentLockId")
+        if _c_code and _p_id:
+            _p_isrs = _lock_isrs_map.get(_p_id)
+            if _p_isrs:
+                mapping[str(_c_code).strip()] = str(_p_isrs).strip()
+    return mapping
+
 
 # Locks that are structurally not a simple 2-sided boven/beneden case.
 MULTI_RIVER_JUNCTION_LOCKS = {"weurt", "heumen"}
@@ -262,7 +268,7 @@ def get_waterway_levels(isrs_code):
     If a chamber ISRS code is passed, it is automatically resolved to its parent complex code.
     """
     target = str(isrs_code).strip()
-    complex_isrs = CHAMBER_TO_COMPLEX_ISRS.get(target, target)
+    complex_isrs = _get_chamber_to_complex_isrs().get(target, target)
 
     for key, cfg in MANUAL_WATERWAY_LEVELS.items():
         if complex_isrs in cfg["isrs_codes"]:
