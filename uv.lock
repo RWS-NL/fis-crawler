@@ -2062,7 +2062,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "ptyprocess" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -2168,11 +2168,11 @@ wheels = [
 
 [[package]]
 name = "protego"
-version = "0.6.1"
+version = "0.6.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f3/5d/b06b682f6a0a722fd5b90577cc8762894758478e1b92a1439ec9f23ebc9e/protego-0.6.1.tar.gz", hash = "sha256:b2b740edd5c691d882a198a66b1d463bf0d574ec915c29f44d2da2bac8efe139", size = 3137534, upload-time = "2026-06-11T10:21:08.294Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/1b/6b0ee60bb1561843bfc62f5c7c3cb1ef6147b47e829a5fd6b7fcd2752471/protego-0.6.2.tar.gz", hash = "sha256:88ff004544ce44e61269cc6f8735f7837d12e09bb77619fc94fbb26b72e5d137", size = 3137854, upload-time = "2026-06-25T09:33:16.361Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/9c/a94c0617a71bcf0b8f2c9d0c8f281482dbfebb165929e7712f27d4a0a229/protego-0.6.1-py3-none-any.whl", hash = "sha256:cc8e328c7698b352e8967e5feae770aa597e4965c60bbf7e8200ba8c5017d77b", size = 10345, upload-time = "2026-06-11T10:21:07.212Z" },
+    { url = "https://files.pythonhosted.org/packages/61/10/cbd3c06603bb8b3e0e871df24ee793a6e3b53d8c4cc8763f1b8b936649aa/protego-0.6.2-py3-none-any.whl", hash = "sha256:714de21d82527c9be900066c3211b266985dd6a19b6e70c57e033fc1a589f3ff", size = 10296, upload-time = "2026-06-25T09:33:14.771Z" },
 ]
 
 [[package]]
