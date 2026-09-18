@@ -43,6 +43,9 @@ def load_fis_node_enrichments(export_dir: pathlib.Path) -> dict[str, gpd.GeoData
         "fairway",
         "route",
         "vinharbour",
+        "aimedlevel",
+        "aimedwaterlevel",
+        "officiallevel",
     ]
 
     # Load required datasets
@@ -59,11 +62,18 @@ def load_fis_node_enrichments(export_dir: pathlib.Path) -> dict[str, gpd.GeoData
     # Load optional datasets
     for name in optional:
         path = export_dir / f"{name}.geoparquet"
+        is_geo = True
         if not path.exists():
-            logger.warning("Optional FIS dataset missing: %s.geoparquet", name)
+            path = export_dir / f"{name}.parquet"
+            is_geo = False
+        if not path.exists():
+            logger.warning("Optional FIS dataset missing: %s", name)
             continue
 
-        datasets[name] = gpd.read_parquet(path)
+        if is_geo:
+            datasets[name] = gpd.read_parquet(path)
+        else:
+            datasets[name] = pd.read_parquet(path)
         logger.info("Loaded optional dataset %s: %d records", name, len(datasets[name]))
 
     return datasets
@@ -344,6 +354,41 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
     else:
         route_df = pd.DataFrame(index=sections["Id"], columns=["Code", "WaterName"])
 
+    # Aimed Level (streefpeil)
+    aimedlevel = datasets.get("aimedlevel")
+    officiallevel = datasets.get("officiallevel")
+    if aimedlevel is not None and not aimedlevel.empty:
+        if officiallevel is not None and not officiallevel.empty:
+            ol_rename = officiallevel[["Id", "Name"]].rename(
+                columns={"Id": "OfficialLevelId", "Name": "OfficialLevelName"}
+            )
+            from fis.utils import stringify_id
+
+            aimedlevel = aimedlevel.copy()
+            aimedlevel["OfficialLevelId"] = aimedlevel["OfficialLevelId"].apply(
+                stringify_id
+            )
+            ol_rename["OfficialLevelId"] = ol_rename["OfficialLevelId"].apply(
+                stringify_id
+            )
+            aimedlevel = aimedlevel.merge(ol_rename, on="OfficialLevelId", how="left")
+            datasets["aimedlevel"] = aimedlevel
+
+    aimed_cols = ["Value", "OfficialLevelName"]
+    aimed_df = match_by_route_km(
+        sections, datasets.get("aimedlevel"), aimed_cols, "aimed_"
+    )
+
+    # Aimed Water Level deviations and average level
+    aimedwater_cols = [
+        "MaximumNegativeDeviation",
+        "MaximumPositiveDeviation",
+        "AverageLevel",
+    ]
+    aimedwater_df = match_by_route_km(
+        sections, datasets.get("aimedwaterlevel"), aimedwater_cols, "aimedwater_"
+    )
+
     # Combine all enrichment
     enrichment = pd.concat(
         [
@@ -358,6 +403,8 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
             mgd_df,
             fairway_df,
             route_df,
+            aimed_df,
+            aimedwater_df,
         ],
         axis=1,
     )
@@ -394,6 +441,7 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
         ("fairway_number", "fairway_number"),
         ("route_code", "route_code"),
         ("water_name", "water_name"),
+        ("aimed", "aimed levels"),
     ]:
         cols = [c for c in enrichment.columns if c.startswith(prefix)]
         if cols:

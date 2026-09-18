@@ -1,5 +1,6 @@
 .PHONY: all crawl crawl-fis crawl-euris crawl-disk crawl-ivs process-ivs build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas \
-	schematize-dropins-fis-detailed schematize-dropins-fis-simplified schematize-dropins-euris download-reference
+	schematize-dropins-fis-detailed schematize-dropins-fis-simplified schematize-dropins-euris download-reference \
+	lock-validation-report lock-validation-pdf
 
 # Default target
 all: crawl build-graphs merge-graphs schematize validate
@@ -134,6 +135,28 @@ validate-bivas: reference/Bivas.5.10.1.sqlite crawl-fis crawl-euris logs-dir
 	uv run python scripts/lock_chamber_consistency.py \
 		--output-dir output/bivas-validation 2>&1 | tee -a output/logs/validate-bivas.log
 
+
+# --- Lock validation report ---
+# Deel B: regenereer data-rapport (markdown + HTML)
+lock-validation-report:
+	uv run scripts/lock_validation/validate_lock_dimensions.py
+
+# Deel A + Deel B → één PDF (vereist pandoc)
+# Deel A = docs/werkwijze_sluiscontrole.md (methodiek, statisch)
+# Deel B = output/lock-validation/lock_dimensions_validation_report.md (data-gegenereerd)
+lock-validation-pdf: output/lock-validation/lock_dimensions_validation_report.md
+	pandoc \
+		docs/werkwijze_sluiscontrole.md \
+		output/lock-validation/lock_dimensions_validation_report.md \
+		--pdf-engine=xelatex \
+		-H docs/pdf_header.tex \
+		--toc \
+		--toc-depth=2 \
+		-V lang=nl \
+		-V geometry:margin=2cm \
+		-V fontsize=10pt \
+		-o output/lock-validation/lock_validation_eindrapport.pdf
+	@echo "PDF geschreven naar output/lock-validation/lock_validation_eindrapport.pdf"
 
 # --- Utilities ---
 clean:
