@@ -90,8 +90,8 @@ def normalize_code(val):
 
 def has_km_overlap(
     row,
-    fis_begin_col="RouteKmBegin",
-    fis_end_col="RouteKmEnd",
+    fis_begin_col="route_km_begin",
+    fis_end_col="route_km_end",
     bivas_begin_col="StartKilometer",
     bivas_end_col="EndKilometer",
     route_max_km=None,

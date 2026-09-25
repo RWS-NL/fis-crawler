@@ -100,7 +100,7 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "GeoType" = "geo_type"
 "GeoGeneration" = "geo_generation"
 "Name" = "name"
-"VinCode" = "vincode"
+"VinCode" = "vin_code"
 "Direction" = "direction"
 "RouteKmEnd" = "route_km_end"
 "RouteKmBegin" = "route_km_begin"
@@ -187,6 +187,24 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "locode" = "id"
 "sectionref" = "section_id"
 
+[attributes.harbours]
+# FIS → Canonical mappings
+"Id" = "id"
+"Name" = "name"
+"FairwaySectionId" = "section_id"
+"FairwayId" = "fairway_id"
+"RouteId" = "route_id"
+"RouteKmBegin" = "route_km_begin"
+"RouteKmEnd" = "route_km_end"
+"UnLocationCode" = "locode"
+"VinCode" = "vin_code"
+"Code" = "code"
+"City" = "city"
+"AdministrationId" = "administration_id"
+# EURIS → Canonical mappings
+"sectionref" = "section_id"
+"objectname" = "name"
+
 [attributes.bridges]
 "Id" = "id"
 "Name" = "name"
@@ -226,10 +244,10 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 # Node attributes are mostly preserved as-is
 # FIS uses uppercase style, EURIS uses lowercase
 "Name" = "name"
-"VinCode" = "vincode"
+"VinCode" = "vin_code"
 "VoyagePlanningPoint" = "vplnpoint"
 "BorderPoint" = "borderpoint"
-"ForeignCode" = "foreigncode"
+"ForeignCode" = "foreign_code"
 "Id" = "fis_id"
 "GeoType" = "geo_type"
 "GeoGeneration" = "geo_generation"
@@ -303,7 +321,8 @@ columns = [
     "bridge_id",
     "chamber_id",
     "opening_id",
-    "constituent_ids"
+    "constituent_ids",
+    "vin_code"
 ]
 target_type = "string"
 

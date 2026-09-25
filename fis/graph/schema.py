@@ -7,6 +7,8 @@ from typing import Dict, Any
 
 import networkx as nx
 
+from fis.utils import stringify_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,6 +40,7 @@ def apply_schema_mapping(graph: nx.Graph, schema: Dict[str, Any]) -> nx.Graph:
     mappings = schema.get("attributes", {})
     node_map = mappings.get("nodes", {})
     edge_map = mappings.get("edges", {})
+    identifiers = set(schema.get("identifiers", {}).get("columns", []))
 
     # 1. Harmonize Nodes
     logger.info("Harmonizing node attributes")
@@ -47,9 +50,10 @@ def apply_schema_mapping(graph: nx.Graph, schema: Dict[str, Any]) -> nx.Graph:
             if k in node_map:
                 new_key = node_map[k]
                 val = attrs.pop(k)
-                # Ensure we don't accidentally convert objects to strings
-                # if the value is already a geometry object and we are just renaming
-                attrs[new_key] = val
+                if new_key in identifiers:
+                    val = stringify_id(val)
+                if new_key not in attrs or not attrs[new_key]:
+                    attrs[new_key] = val
 
     # 2. Harmonize Edges
     logger.info("Harmonizing edge attributes")
@@ -58,7 +62,11 @@ def apply_schema_mapping(graph: nx.Graph, schema: Dict[str, Any]) -> nx.Graph:
         for k in keys:
             if k in edge_map:
                 new_key = edge_map[k]
-                attrs[new_key] = attrs.pop(k)
+                val = attrs.pop(k)
+                if new_key in identifiers:
+                    val = stringify_id(val)
+                if new_key not in attrs or not attrs[new_key]:
+                    attrs[new_key] = val
         # Drop redundant/vague length columns to enforce length_m consistency
         for key_to_drop in ["Length", "length", "length_km"]:
             if key_to_drop in attrs:
