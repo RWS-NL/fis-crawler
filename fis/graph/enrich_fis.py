@@ -16,6 +16,8 @@ from scipy.spatial import KDTree
 from shapely.geometry import LineString
 from pyproj import Geod
 
+from fis import utils
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,7 +61,11 @@ def load_fis_node_enrichments(export_dir: pathlib.Path) -> dict[str, gpd.GeoData
         datasets[name] = gpd.read_parquet(path)
         logger.info("Loaded required dataset %s: %d records", name, len(datasets[name]))
 
-    # Load optional datasets
+    # Load optional datasets. Following the dataset file naming conventions (see
+    # NAMING_CONVENTIONS.md §3.2), spatial datasets are exported as '.geoparquet'
+    # and non-spatial/tabular datasets as '.parquet'. We probe for '.geoparquet'
+    # first and fall back to '.parquet'. If neither representation exists on disk,
+    # the optional dataset is absent from the crawl and we log a warning and skip.
     for name in optional:
         path = export_dir / f"{name}.geoparquet"
         is_geo = True
@@ -362,14 +368,12 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
             ol_rename = officiallevel[["Id", "Name"]].rename(
                 columns={"Id": "OfficialLevelId", "Name": "OfficialLevelName"}
             )
-            from fis.utils import stringify_id
-
             aimedlevel = aimedlevel.copy()
             aimedlevel["OfficialLevelId"] = aimedlevel["OfficialLevelId"].apply(
-                stringify_id
+                utils.stringify_id
             )
             ol_rename["OfficialLevelId"] = ol_rename["OfficialLevelId"].apply(
-                stringify_id
+                utils.stringify_id
             )
             aimedlevel = aimedlevel.merge(ol_rename, on="OfficialLevelId", how="left")
             datasets["aimedlevel"] = aimedlevel
@@ -410,8 +414,6 @@ def build_fis_edge_enrichments(datasets: dict[str, gpd.GeoDataFrame]) -> pd.Data
     )
 
     # Map enrichment columns to canonical names early
-    from fis import utils
-
     schema = utils.load_schema()
     mappings = schema.get("attributes", {}).get("edges", {})
 
