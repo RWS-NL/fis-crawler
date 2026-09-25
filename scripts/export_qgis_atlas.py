@@ -1,4 +1,5 @@
-import os
+import logging
+import pathlib
 import sys
 from qgis.core import (
     QgsProject,
@@ -12,13 +13,15 @@ from qgis.core import (
     QgsLayoutExporter,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def main():
-    project_path = os.path.abspath("qgis/diagnostics.qgz")
-    print(f"Reading project from: {project_path}")
+    project_path = pathlib.Path("qgis/diagnostics.qgz").resolve()
+    logger.info("Reading project from: %s", project_path)
     project = QgsProject.instance()
-    if not project.read(project_path):
-        print(f"Error: Could not read project {project_path}")
+    if not project.read(str(project_path)):
+        logger.error("Could not read project %s", project_path)
         sys.exit(1)
 
     # Check for boundaries layer
@@ -29,10 +32,10 @@ def main():
             break
 
     if not boundaries_layer:
-        print("Error: Could not find a layer containing 'boundaries' in the project.")
+        logger.error("Could not find a layer containing 'boundaries' in the project.")
         sys.exit(1)
 
-    print(f"Found boundaries layer: {boundaries_layer.name()}")
+    logger.info("Found boundaries layer: %s", boundaries_layer.name())
 
     layout_manager = project.layoutManager()
     layouts = layout_manager.printLayouts()
@@ -47,9 +50,9 @@ def main():
     if not layout:
         if layouts:
             layout = layouts[0]
-            print(f"Using existing layout: {layout.name()}")
+            logger.info("Using existing layout: %s", layout.name())
         else:
-            print(
+            logger.info(
                 "No layouts found. Creating a temporary print layout programmatically..."
             )
             layout = QgsPrintLayout(project)
@@ -79,7 +82,7 @@ def main():
             break
 
     if map_item:
-        print(
+        logger.info(
             "Configuring layout map item: Atlas driven, 0% margin, and clipping enabled."
         )
         map_item.setAtlasDriven(True)
@@ -93,12 +96,12 @@ def main():
     atlas.setCoverageLayer(boundaries_layer)
     atlas.setEnabled(True)
 
-    output_dir = os.path.abspath("output/lock-diagnostics/qgis_atlas")
-    os.makedirs(output_dir, exist_ok=True)
-    print(f"Exporting atlas layouts to: {output_dir}")
+    output_dir = pathlib.Path("output/lock-diagnostics/qgis_atlas").resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Exporting atlas layouts to: %s", output_dir)
 
     if not atlas.beginRender():
-        print("Error: Could not begin Atlas render.")
+        logger.error("Could not begin Atlas render.")
         sys.exit(1)
 
     for i in range(atlas.count()):
@@ -115,21 +118,27 @@ def main():
             name = f"complex_{i}"
 
         filename = f"{str(name).lower().replace(' ', '_')}.png"
-        filepath = os.path.join(output_dir, filename)
+        filepath = output_dir / filename
 
         exporter = QgsLayoutExporter(layout)
         settings = QgsLayoutExporter.ImageExportSettings()
         settings.dpi = 150
 
-        print(f"Rendering atlas feature {i + 1}/{atlas.count()}: {name} -> {filename}")
-        result = exporter.exportToImage(filepath, settings)
+        logger.info(
+            "Rendering atlas feature %d/%d: %s -> %s",
+            i + 1,
+            atlas.count(),
+            name,
+            filename,
+        )
+        result = exporter.exportToImage(str(filepath), settings)
         if result == QgsLayoutExporter.Success:
-            print(f"  Successfully exported {filepath}")
+            logger.info("  Successfully exported %s", filepath)
         else:
-            print(f"  Failed to export {name} (Error code: {result})")
+            logger.error("  Failed to export %s (Error code: %s)", name, result)
 
     atlas.endRender()
-    print("QGIS Atlas export completed successfully!")
+    logger.info("QGIS Atlas export completed successfully!")
     try:
         QgsApplication.exitQgis()
     except RuntimeError:
@@ -138,4 +147,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
     main()

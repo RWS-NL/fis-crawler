@@ -2,16 +2,17 @@ import sqlite3
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point, LineString
-import os
+import pathlib
 import logging
 import re
 
 logger = logging.getLogger(__name__)
 
 
-def load_bivas_network(db_path, branch_set_id=337):
+def load_bivas_network(db_path: pathlib.Path, branch_set_id: int = 337):
     """Load BIVAS network from SQLite database."""
-    if not os.path.exists(db_path):
+    db_path = pathlib.Path(db_path)
+    if not db_path.exists():
         raise FileNotFoundError(f"BIVAS database not found: {db_path}")
 
     conn = sqlite3.connect(db_path)

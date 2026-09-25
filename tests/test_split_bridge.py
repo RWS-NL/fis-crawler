@@ -1,5 +1,5 @@
 import pytest
-from pathlib import Path
+import pathlib
 import geopandas as gpd
 import pandas as pd
 import networkx as nx
@@ -13,8 +13,8 @@ def split_test_graph(tmp_path_factory):
     """
     Generate a simplified graph from the test data subset to test splitting behavior.
     """
-    export_dir = Path("tests/data/fis-export")
-    disk_dir = Path("tests/data/disk-export")
+    export_dir = pathlib.Path("tests/data/fis-export")
+    disk_dir = pathlib.Path("tests/data/disk-export")
     output_dir = tmp_path_factory.mktemp("split_test_simplified")
 
     if not export_dir.exists():

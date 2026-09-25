@@ -1,15 +1,15 @@
+import pathlib
 import geopandas as gpd
-import os
 import pytest
 from fis.graph.bivas import load_bivas_network, normalize_code, has_km_overlap
 
 
 def test_case_6668():
-    bivas_db = "reference/Bivas.5.10.1.sqlite"
-    fis_edges_path = "output/fis-enriched/edges.geoparquet"
+    bivas_db = pathlib.Path("reference/Bivas.5.10.1.sqlite")
+    fis_edges_path = pathlib.Path("output/fis-enriched/edges.geoparquet")
 
     # Skip if local artifacts are missing (e.g. in CI)
-    if not os.path.exists(bivas_db) or not os.path.exists(fis_edges_path):
+    if not bivas_db.exists() or not fis_edges_path.exists():
         pytest.skip("Local BIVAS/FIS artifacts missing, skipping diagnostic test.")
 
     # 1. Load BIVAS data for 6668

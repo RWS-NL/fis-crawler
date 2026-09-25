@@ -1,10 +1,10 @@
-from pathlib import Path
+import pathlib
 import geopandas as gpd
 import networkx as nx
 import pytest
 
 pytestmark = pytest.mark.skipif(
-    not Path("output/dropins-schematization/edges.geoparquet").exists(),
+    not pathlib.Path("output/dropins-schematization/edges.geoparquet").exists(),
     reason="Required test data not generated in output/dropins-schematization/",
 )
 

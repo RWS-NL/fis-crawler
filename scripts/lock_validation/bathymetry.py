@@ -16,7 +16,7 @@ repeated runs never re-hit the service.
 
 import json
 import math
-from pathlib import Path
+import pathlib
 
 import requests
 from shapely.geometry import LineString
@@ -24,7 +24,7 @@ from shapely.geometry import LineString
 SERVICE = (
     "https://geo.rijkswaterstaat.nl/arcgis/rest/services/GDR/bodemhoogte_1mtr/MapServer"
 )
-CACHE_PATH = Path("output/lock-validation/bathymetry_cache.json")
+CACHE_PATH = pathlib.Path("output/lock-validation/bathymetry_cache.json")
 
 _NODATA_TOKENS = {"NoData", "nodata", "", None}
 

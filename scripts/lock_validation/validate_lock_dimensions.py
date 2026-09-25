@@ -4,11 +4,10 @@ import json
 import logging
 import math
 import os
-from pathlib import Path
+import pathlib
 import re
 import sqlite3
 import subprocess
-import sys as _sys
 
 import geopandas as gpd
 import matplotlib
@@ -20,17 +19,13 @@ import pandas as pd
 import requests
 from shapely.geometry import LineString, Point
 
+import bathymetry as bathy_mod
 from fis import utils
 from fis.lock import orientation as lock_orientation
 
-# Ensure the lock_validation package directory is on the path so the sibling
-# bathymetry module can be imported regardless of how the script is invoked.
-_sys.path.insert(0, str(Path(__file__).resolve().parent))
-import bathymetry as bathy_mod  # noqa: E402
-
 logger = logging.getLogger(__name__)
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 
 # Shared boven/beneden colors, used consistently across the sideview chart and
 # the aerial footprint map so the two figures visually agree.
@@ -38,25 +33,25 @@ C_BOVEN = "#2b5c8f"
 C_BENEDEN = "#20b2aa"
 
 # Target output files
-OUTPUT_DIR = Path("output/lock-validation")
+OUTPUT_DIR = pathlib.Path("output/lock-validation")
 REPORT_PATH = OUTPUT_DIR / "lock_dimensions_validation_report.md"
 HTML_REPORT_PATH = OUTPUT_DIR / "lock_dimensions_validation_report.html"
 # Target lock list. Defaults to the copy committed alongside this script; override
 # with --excel or the LOCK_VALIDATION_EXCEL environment variable.
 DEFAULT_EXCEL = SCRIPT_DIR / "data" / "Chamber_comparison.xlsx"
-LOCAL_EXCEL = Path(os.environ.get("LOCK_VALIDATION_EXCEL", str(DEFAULT_EXCEL)))
-BIVAS_DB = Path("reference/Bivas.5.10.1.sqlite")
-FIS_CHAMBERS = Path("output/fis-export/chamber.geoparquet")
-FIS_SECTIONS = Path("output/fis-export/section.geoparquet")
-EURIS_DIR = Path("output/euris-export")
-AIMED_LEVELS = Path("output/fis-export/aimedlevel.geoparquet")
-AIMED_WATERLEVELS = Path("output/fis-export/aimedwaterlevel.geoparquet")
-LOCK_NODES = Path("output/lock-schematization/nodes.geoparquet")
+LOCAL_EXCEL = pathlib.Path(os.environ.get("LOCK_VALIDATION_EXCEL", str(DEFAULT_EXCEL)))
+BIVAS_DB = pathlib.Path("reference/Bivas.5.10.1.sqlite")
+FIS_CHAMBERS = pathlib.Path("output/fis-export/chamber.geoparquet")
+FIS_SECTIONS = pathlib.Path("output/fis-export/section.geoparquet")
+EURIS_DIR = pathlib.Path("output/euris-export")
+AIMED_LEVELS = pathlib.Path("output/fis-export/aimedlevel.geoparquet")
+AIMED_WATERLEVELS = pathlib.Path("output/fis-export/aimedwaterlevel.geoparquet")
+LOCK_NODES = pathlib.Path("output/lock-schematization/nodes.geoparquet")
 
 
 def find_euris_chambers(euris_dir=EURIS_DIR, country="NL"):
     """Return the newest EURIS LockChamber export for a country code."""
-    files = list(Path(euris_dir).glob(f"LockChamber_{country}_*.geojson"))
+    files = list(pathlib.Path(euris_dir).glob(f"LockChamber_{country}_*.geojson"))
     if not files:
         raise FileNotFoundError(
             f"No EURIS lock chamber files match in {euris_dir} for country {country}"
@@ -302,7 +297,7 @@ def classify_drempel_status(
 IMAGES_DIR = OUTPUT_DIR / "images"
 AERIALS_DIR = IMAGES_DIR / "aerials"
 CHARTS_DIR = IMAGES_DIR / "charts"
-MANUAL_CHECKS_DIR = Path("output/manual_checks")
+MANUAL_CHECKS_DIR = pathlib.Path("output/manual_checks")
 
 # Create output dirs
 AERIALS_DIR.mkdir(parents=True, exist_ok=True)
@@ -618,7 +613,7 @@ def load_chamber_side_lookup(nodes_path=LOCK_NODES):
     with no resolved side (streefpeil_source != "resolved"/"single_side_aimedlevel")
     are simply absent, and callers fall back to the existing geometry heuristic.
     """
-    nodes = gpd.read_parquet(Path(nodes_path))
+    nodes = gpd.read_parquet(pathlib.Path(nodes_path))
 
     chamber_nodes = nodes[
         nodes["node_type"].isin(["chamber_start", "chamber_end"])
@@ -1391,8 +1386,8 @@ def generate_decision_figure(
 ):
     """Per-lock evidence panel: available sources and their agreement with FIS."""
     filename = f"{sluis_clean}_{chamber_clean}_decision.png"
-    path = os.path.join(DECISIONS_DIR, filename)
-    if os.path.exists(path):
+    path = DECISIONS_DIR / filename
+    if path.exists():
         return f"images/decisions/{filename}"
 
     def _f(v):
@@ -1617,7 +1612,8 @@ def parse_local_excel(excel_path=LOCAL_EXCEL):
     addressed positionally below (e.g. ``length_18``), matching that layout.
     """
     logger.info("Reading %s...", excel_path)
-    if not os.path.exists(excel_path):
+    excel_path = pathlib.Path(excel_path)
+    if not excel_path.exists():
         logger.error("Excel file %s not found.", excel_path)
         return pd.DataFrame()
 
@@ -1643,10 +1639,11 @@ def parse_local_excel(excel_path=LOCAL_EXCEL):
     return data_df
 
 
-def load_bivas_locks(db_path=BIVAS_DB, branch_set_id=337):
+def load_bivas_locks(db_path: pathlib.Path = BIVAS_DB, branch_set_id: int = 337):
     """Load BIVAS locks from SQLite."""
     logger.info("Loading BIVAS locks...")
-    if not os.path.exists(db_path):
+    db_path = pathlib.Path(db_path)
+    if not db_path.exists():
         logger.warning("BIVAS database not found at %s", db_path)
         return gpd.GeoDataFrame(
             columns=["id", "name", "bivas_length", "bivas_width"],
@@ -1703,13 +1700,13 @@ def load_bivas_locks(db_path=BIVAS_DB, branch_set_id=337):
         conn.close()
 
 
-OSM_CACHE_PATH = "output/osm_cache.json"
+OSM_CACHE_PATH = pathlib.Path("output/osm_cache.json")
 
 
 def load_osm_cache():
-    if os.path.exists(OSM_CACHE_PATH):
+    if OSM_CACHE_PATH.exists():
         try:
-            with open(OSM_CACHE_PATH, "r") as f:
+            with OSM_CACHE_PATH.open("r") as f:
                 return json.load(f)
         except Exception:
             pass
@@ -1718,7 +1715,7 @@ def load_osm_cache():
 
 def save_osm_cache(cache):
     try:
-        with open(OSM_CACHE_PATH, "w") as f:
+        with OSM_CACHE_PATH.open("w") as f:
             json.dump(cache, f, indent=2)
     except Exception as e:
         logger.warning("Failed to save OSM cache: %s", e)
@@ -1915,9 +1912,9 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     # Load manually placed drempelkruin measurements from reference/measurements.gpkg.
     # Keyed on (sluis, kolk, zijde) → meting_1m_nap; used to override automatic
     # OBB-axis crest estimates in the sideview chart.
-    MEASUREMENTS_GPKG = "reference/measurements.gpkg"
+    MEASUREMENTS_GPKG = pathlib.Path("reference/measurements.gpkg")
     manual_measurements = {}
-    if os.path.exists(MEASUREMENTS_GPKG):
+    if MEASUREMENTS_GPKG.exists():
         try:
             mdf = gpd.read_file(MEASUREMENTS_GPKG, layer="drempelkruin")
             for _, mrow in mdf.iterrows():
@@ -1946,7 +1943,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     # aimedwaterlevel carries the operating range (max +/- deviation) per fairway,
     # used for the water-level cross-section figure.
     aimed_waterlevels = None
-    if os.path.exists(AIMED_WATERLEVELS):
+    if AIMED_WATERLEVELS.exists():
         aimed_waterlevels = gpd.read_parquet(AIMED_WATERLEVELS)
 
     # Standardize crs to RD (EPSG:28992) for spatial processing
@@ -1968,8 +1965,8 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
 
     # Spatially join nearest fairwaydepth ReferenceLevel to each chamber.
     # This tells us whether the sill depth is relative to KP, SP, or NAP.
-    FAIRWAY_DEPTH = "output/fis-export/fairwaydepth.geoparquet"
-    if os.path.exists(FAIRWAY_DEPTH):
+    FAIRWAY_DEPTH = pathlib.Path("output/fis-export/fairwaydepth.geoparquet")
+    if FAIRWAY_DEPTH.exists():
         fd = gpd.read_parquet(FAIRWAY_DEPTH)
         if fd.crs is None:
             fd = fd.set_crs(epsg=4326)
@@ -2756,7 +2753,7 @@ Hieronder volgen de specifieke technische uitdagingen en afwijkingen per sluisco
 - **Reconciliatie**: Door drempelhoogtes te berekenen op basis van de bijbehorende streefpeilen van de vaarweg (+0,62m of het streefpeil), worden de relatieve drempeldieptes herleid naar een eenduidig NAP-referentieniveau.
 
 ### Sluis Weurt
-- **Afwijking**: De standaard `lock_chamber_consistency.py` kon de sluizen niet matchen omdat Weurt twee parallelle kolken (Oostkolk en Westkolk) bevat die verkeerde landencodes hadden.
+- **Afwijking**: De standaard `scripts/lock_validation/lock_chamber_consistency.py` kon de sluizen niet matchen omdat Weurt twee parallelle kolken (Oostkolk en Westkolk) bevat die verkeerde landencodes hadden.
 - **Resultaat**: Gestandaardiseerd door een schone koppeling op basis van ISRS-code en correctie van de filters. Beide kolken worden nu correct gematcht.
 
 ## 3. Aanbevolen Validatie-werkwijze

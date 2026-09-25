@@ -1,11 +1,11 @@
+import pathlib
 import geopandas as gpd
-from pathlib import Path
 
 
 def main():
     print("Loading FIS lock schematization exported data...")
-    fis_locks_path = Path("output/lock-schematization/lock.geoparquet")
-    fis_chambers_path = Path("output/lock-schematization/chamber.geoparquet")
+    fis_locks_path = pathlib.Path("output/lock-schematization/lock.geoparquet")
+    fis_chambers_path = pathlib.Path("output/lock-schematization/chamber.geoparquet")
     if not fis_locks_path.exists() or not fis_chambers_path.exists():
         print(
             "Error: Could not find lock.geoparquet or chamber.geoparquet. Run `uv run lock-schematize` first."
@@ -81,7 +81,7 @@ def main():
 
     # Filter FIS locks to only those with at least one DISK schutsluis
     fis_locks_filtered = fis_locks[fis_locks["id"].isin(all_matched_complexes)].copy()
-    out_dir = Path("output")
+    out_dir = pathlib.Path("output")
     out_dir.mkdir(exist_ok=True)
 
     filtered_locks_out = out_dir / "fis_locks_with_disk.geojson"

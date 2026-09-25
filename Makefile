@@ -132,7 +132,7 @@ validate-bivas: reference/Bivas.5.10.1.sqlite crawl-fis crawl-euris logs-dir
 		--fis-version $$(date +%Y%m%d) \
 		--output-dir output/bivas-validation 2>&1 | tee output/logs/validate-bivas.log
 	@echo "Running lock chamber consistency check..."
-	uv run python scripts/lock_chamber_consistency.py \
+	uv run python scripts/lock_validation/lock_chamber_consistency.py \
 		--output-dir output/bivas-validation 2>&1 | tee -a output/logs/validate-bivas.log
 
 

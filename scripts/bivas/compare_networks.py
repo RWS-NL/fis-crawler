@@ -1,6 +1,6 @@
+import pathlib
 import pandas as pd
 import geopandas as gpd
-import os
 import argparse
 import logging
 from fis.graph.bivas import (
@@ -42,18 +42,20 @@ def main():
     )
 
     args = parser.parse_args()
-    os.makedirs(args.output_dir, exist_ok=True)
+    output_dir = pathlib.Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     def get_out_path(name, ext="geoparquet"):
-        return os.path.join(
-            args.output_dir,
-            f"{name}_bivas_{args.bivas_version}_fis_{args.fis_version}.{ext}",
+        return (
+            output_dir
+            / f"{name}_bivas_{args.bivas_version}_fis_{args.fis_version}.{ext}"
         )
 
-    print(f"Loading BIVAS network (v{args.bivas_version}) from {args.bivas_db}...")
-    bivas_nodes, bivas_arcs = load_bivas_network(args.bivas_db, args.branch_set_id)
+    bivas_db = pathlib.Path(args.bivas_db)
+    logger.info("Loading BIVAS network (v%s) from %s...", args.bivas_version, bivas_db)
+    bivas_nodes, bivas_arcs = load_bivas_network(bivas_db, args.branch_set_id)
 
-    print(f"Loading ENRICHED FIS network from {args.fis_edges}...")
+    logger.info("Loading ENRICHED FIS network from %s...", args.fis_edges)
     fis_edges = gpd.read_parquet(args.fis_edges)
 
     # Reproject FIS edges
@@ -332,9 +334,9 @@ Identified **{len(inverted_routes)}** routes where BIVAS and FIS use opposite ki
 - **Metric Consistency**: BIVAS length metrics consistently use `Length__m` with geometric fallback.
 - **Resource Management**: SQLite connections are now properly closed.
 """
-    with open(os.path.join(args.output_dir, "comparison_report.md"), "w") as f:
-        f.write(report)
-    print(f"Report written to {os.path.join(args.output_dir, 'comparison_report.md')}")
+    report_path = output_dir / "comparison_report.md"
+    report_path.write_text(report)
+    logger.info("Report written to %s", report_path)
 
 
 if __name__ == "__main__":
