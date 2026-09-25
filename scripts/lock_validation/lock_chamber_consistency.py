@@ -1,6 +1,7 @@
+import pathlib
 import pandas as pd
 import geopandas as gpd
-import os
+import re
 import argparse
 import logging
 import sqlite3
@@ -11,8 +12,9 @@ from fis import utils
 logger = logging.getLogger("lock_consistency")
 
 
-def load_bivas_locks(db_path, branch_set_id=337):
+def load_bivas_locks(db_path: pathlib.Path, branch_set_id: int = 337):
     """Load locks from BIVAS SQLite, joined with arc geometries."""
+    db_path = pathlib.Path(db_path)
     conn = sqlite3.connect(db_path)
     try:
         # 1. Load nodes for geometry building
@@ -86,41 +88,48 @@ def main():
     parser.add_argument("--output-dir", default="output/bivas-validation")
 
     args = parser.parse_args()
-    os.makedirs(args.output_dir, exist_ok=True)
+    output_dir = pathlib.Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Load Datasets
-    print("Loading FIS chambers...")
+    logger.info("Loading FIS chambers...")
     fis = gpd.read_parquet(args.fis_chambers)
     # Normalize attributes using schema to get dim_* names
     schema = utils.load_schema()
     fis_norm = utils.normalize_attributes(fis, "chambers", schema)
 
-    print("Loading EURIS chambers...")
-    import glob
-
-    euris_search_path = os.path.join(
-        os.path.dirname(args.euris_chambers), "LockChamber_*.geojson"
+    logger.info("Loading EURIS chambers...")
+    # Derive the country code from the supplied filename (e.g. LockChamber_NL_*.geojson)
+    # so auto-discovery also works for non-NL exports; fall back to any country.
+    euris_arg = pathlib.Path(args.euris_chambers)
+    euris_basename = euris_arg.name
+    country_match = re.match(r"LockChamber_([A-Z]{2})_", euris_basename)
+    country_glob = (
+        f"LockChamber_{country_match.group(1)}_*.geojson"
+        if country_match
+        else "LockChamber_*_*.geojson"
     )
-    euris_files = glob.glob(euris_search_path)
+    euris_dir = euris_arg.parent
+    euris_files = list(euris_dir.glob(country_glob))
     if not euris_files:
-        if os.path.exists(args.euris_chambers):
-            euris_files = [args.euris_chambers]
+        if euris_arg.exists():
+            euris_files = [euris_arg]
         else:
             raise FileNotFoundError(
-                f"No EURIS lock chamber files found matching: {euris_search_path}"
+                f"No EURIS lock chamber files found matching: {euris_dir / country_glob}"
             )
 
     # Pick the newest file
-    euris_file = max(euris_files, key=os.path.getmtime)
+    euris_file = max(euris_files, key=lambda p: p.stat().st_mtime)
     euris = gpd.read_file(euris_file)
     # EURIS fields mapping in schema
     euris_norm = utils.normalize_attributes(euris, "chambers", schema)
 
-    print("Loading BIVAS locks...")
+    logger.info("Loading BIVAS locks...")
     bivas_rd = load_bivas_locks(args.bivas_db, args.branch_set_id)
 
     # 2. Re-project everything to RD (BIVAS is already RD)
-    print("Reprojecting...")
+    logger.info("Reprojecting...")
     # Standardize FIS
     if fis_norm.crs is None:
         fis_norm.set_crs(epsg=4326, inplace=True)
@@ -135,12 +144,12 @@ def main():
     euris_buffered = euris_rd.copy()
     euris_buffered.geometry = euris_rd.buffer(20)  # 20m buffer for matching
 
-    print("Spatial join FIS -> EURIS...")
+    logger.info("Spatial join FIS -> EURIS...")
     fis_euris = gpd.sjoin(fis_rd, euris_buffered, how="left", rsuffix="euris")
-    print(f"Col count after FIS-EURIS: {len(fis_euris.columns)}")
+    logger.info("Col count after FIS-EURIS: %d", len(fis_euris.columns))
 
     # 4. Spatial Match: (FIS+EURIS) to BIVAS
-    print("Spatial join (FIS+EURIS) -> BIVAS...")
+    logger.info("Spatial join (FIS+EURIS) -> BIVAS...")
     fis_euris_buffered = fis_euris.copy()
     fis_euris_buffered.geometry = fis_euris_buffered.buffer(100)
 
@@ -193,7 +202,7 @@ def main():
         matches["flag_width"] |= matches["diff_width_fis_bivas"].abs() > 0.5
 
     # 7. Output Result
-    out_path = os.path.join(args.output_dir, "lock_chamber_consistency.geoparquet")
+    out_path = output_dir / "lock_chamber_consistency.geoparquet"
     # Clean up before export
     id_col = get_fis_col("id")
     name_col = get_fis_col("name")
@@ -245,7 +254,7 @@ def main():
     # Convert to 4326 for portability
     results = results.to_crs(epsg=4326)
     results.to_parquet(out_path)
-    print(f"Results saved to {out_path}")
+    logger.info("Results saved to %s", out_path)
 
     # 8. Summary Report
     flagged = results[results["flag_length"] | results["flag_width"]]
@@ -268,11 +277,13 @@ def main():
 ### Top 10 Width Discrepancies
 {flagged[flagged["flag_width"]].sort_values("diff_width_fis_euris", key=lambda x: x.abs() if hasattr(x, "abs") else x, ascending=False).head(10)[["id", "name", "dim_gate_width", "dim_gate_width_euris", "bivas_width"]].to_markdown(index=False) if not flagged.empty else "No significant discrepancies found."}
 """
-    report_path = os.path.join(args.output_dir, "lock_chamber_consistency_report.md")
-    with open(report_path, "w") as f:
-        f.write(report)
-    print(f"Report saved to {report_path}")
+    report_path = output_dir / "lock_chamber_consistency_report.md"
+    report_path.write_text(report)
+    logger.info("Report saved to %s", report_path)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
     main()

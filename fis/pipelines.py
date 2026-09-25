@@ -5,7 +5,6 @@
 
 
 import logging
-import os
 import pathlib
 
 import geopandas as gpd
@@ -86,7 +85,7 @@ class EurisFilesPipeline(FilesPipeline):
             if ok:
                 path = result.get("path")
                 if path and path.endswith(".zip"):
-                    abs_path = os.path.join(self.store.basedir, path)
+                    abs_path = pathlib.Path(self.store.basedir) / path
                     extract_dir = self.store.basedir  # or customize
 
                     with zipfile.ZipFile(abs_path, "r") as zip_ref:

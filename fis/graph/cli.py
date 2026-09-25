@@ -17,6 +17,7 @@ from click.testing import CliRunner
 from .integrate import find_geometric_border_connections, merge_graphs
 from .validation import GraphValidator
 from .schema import load_schema, apply_schema_mapping
+from fis.utils import stringify_id
 from .enrich import (
     load_fis_node_enrichments,
     build_fis_edge_enrichments,
@@ -148,13 +149,32 @@ def enrich_fis(
             row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
         edge_data.append(row)
 
-    if edge_data:
-        edges_gdf = gpd.GeoDataFrame(edge_data, crs="EPSG:4326")
-        edges_gdf["source"] = edges_gdf["source"].astype(str)
-        edges_gdf["target"] = edges_gdf["target"].astype(str)
-        edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
-        edges_gdf.to_parquet(output_dir / "edges.geoparquet")
-        logger.info("Exported %d enriched edges", len(edges_gdf))
+    if not edge_data:
+        raise ValueError("No edges found in graph to export.")
+    edges_gdf = gpd.GeoDataFrame(edge_data, crs="EPSG:4326")
+    edges_gdf["source"] = edges_gdf["source"].astype(str)
+    edges_gdf["target"] = edges_gdf["target"].astype(str)
+    edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
+    edges_gdf.to_parquet(output_dir / "edges.geoparquet")
+    logger.info("Exported %d enriched edges", len(edges_gdf))
+
+    # Export nodes with enrichment as GeoJSON/GeoParquet
+    node_data = []
+    for node, attrs in graph.nodes(data=True):
+        row = {"id": node, **attrs}
+        if "geometry" in row and hasattr(row["geometry"], "wkt"):
+            pass  # Keep geometry
+        elif "geometry_wkt" in row:
+            row["geometry"] = wkt.loads(row.pop("geometry_wkt"))
+        node_data.append(row)
+
+    if not node_data:
+        raise ValueError("No nodes found in graph to export.")
+    nodes_gdf = gpd.GeoDataFrame(node_data, crs="EPSG:4326")
+    nodes_gdf["id"] = nodes_gdf["id"].astype(str)
+    nodes_gdf.to_file(output_dir / "nodes.geojson", driver="GeoJSON")
+    nodes_gdf.to_parquet(output_dir / "nodes.geoparquet")
+    logger.info("Exported %d enriched nodes", len(nodes_gdf))
 
     # Summary with enrichment stats
     enriched_edges = sum(1 for _, _, d in graph.edges(data=True) if "cemt_class" in d)
@@ -336,8 +356,6 @@ def merge(
         # Standardize IDs
         for col in id_cols:
             if col in row:
-                from fis.utils import stringify_id
-
                 row[col] = stringify_id(row[col])
 
         # Type cleanup for known columns
@@ -350,12 +368,13 @@ def merge(
 
         node_data.append(row)
 
-    if node_data:
-        # Explicitly specify geometry column
-        nodes_gdf = gpd.GeoDataFrame(node_data, geometry="geometry", crs="EPSG:4326")
-        nodes_gdf.to_parquet(output_dir / "nodes.geoparquet")
-        nodes_gdf.to_file(output_dir / "nodes.geojson", driver="GeoJSON")
-        logger.info("Exported %d harmonized nodes", len(nodes_gdf))
+    if not node_data:
+        raise ValueError("No nodes found in merged graph to export.")
+    # Explicitly specify geometry column
+    nodes_gdf = gpd.GeoDataFrame(node_data, geometry="geometry", crs="EPSG:4326")
+    nodes_gdf.to_parquet(output_dir / "nodes.geoparquet")
+    nodes_gdf.to_file(output_dir / "nodes.geojson", driver="GeoJSON")
+    logger.info("Exported %d harmonized nodes", len(nodes_gdf))
 
     # Export edges as geoparquet and geojson
     edge_data = []
@@ -380,17 +399,16 @@ def merge(
         # Standardize IDs
         for col in id_cols:
             if col in row:
-                from fis.utils import stringify_id
-
                 row[col] = stringify_id(row[col])
 
         edge_data.append(row)
 
-    if edge_data:
-        edges_gdf = gpd.GeoDataFrame(edge_data, geometry="geometry", crs="EPSG:4326")
-        edges_gdf.to_parquet(output_dir / "edges.geoparquet")
-        edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
-        logger.info("Exported %d harmonized edges", len(edges_gdf))
+    if not edge_data:
+        raise ValueError("No edges found in merged graph to export.")
+    edges_gdf = gpd.GeoDataFrame(edge_data, geometry="geometry", crs="EPSG:4326")
+    edges_gdf.to_parquet(output_dir / "edges.geoparquet")
+    edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
+    logger.info("Exported %d harmonized edges", len(edges_gdf))
 
     summary = {
         "num_nodes": merged.number_of_nodes(),

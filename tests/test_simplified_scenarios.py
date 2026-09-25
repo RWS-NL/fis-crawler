@@ -1,4 +1,4 @@
-from pathlib import Path
+import pathlib
 import geopandas as gpd
 import pandas as pd
 import networkx as nx
@@ -12,8 +12,8 @@ def simplified_graph(tmp_path):
     """
     Generate a simplified graph from the test data subset.
     """
-    export_dir = Path("tests/data/fis-export")
-    disk_dir = Path("tests/data/disk-export")
+    export_dir = pathlib.Path("tests/data/fis-export")
+    disk_dir = pathlib.Path("tests/data/disk-export")
     output_dir = tmp_path / "simplified"
     output_dir.mkdir()
 

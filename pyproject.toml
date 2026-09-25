@@ -23,6 +23,7 @@ dependencies = [
     "pyarrow>=21.0.0",
     "python-calamine>=0.6.2",
     "requests>=2.32.3",
+    "rws-ddlpy>=0.10.0",
     "scipy>=1.15.2",
     "scrapy>=2.13.2",
     "tabulate>=0.9.0",
@@ -39,6 +40,7 @@ dev = [
     "radon>=6.0.1",
     "websockets>=16.0",
     "python-dotenv>=1.2.2",
+    "ruff>=0.9.0",
 ]
 
 [build-system]
@@ -55,6 +57,20 @@ packages = ["fis"]
 exclude = [
     "fis/_version.py",
 ]
+
+[tool.ruff.lint]
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "T20",  # flake8-print: disallow print and pprint in production code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["T201", "T203"]
+"scripts/*" = ["T201", "T203"]
+"notebooks/*" = ["T201", "T203"]
 
 [tool.ruff.format]
 line-ending = "lf"
