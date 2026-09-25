@@ -6,17 +6,20 @@ fairwaydepth, fairwaytype, and tidalarea to FIS graph edges.
 
 import logging
 import pathlib
+from collections import defaultdict
 from typing import Optional
 
 import geopandas as gpd
 import networkx as nx
 import pandas as pd
-import numpy as np
-from scipy.spatial import KDTree
-from shapely.geometry import LineString
+import pyproj
 from pyproj import Geod
+from shapely.geometry import LineString, Point
+from shapely.ops import transform
 
-from fis import utils
+from fis import settings, utils
+from fis.splicer import FairwaySplicer, StructureCut
+from fis.utils import normalize_attributes, stringify_id
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,8 @@ def load_fis_node_enrichments(export_dir: pathlib.Path) -> dict[str, gpd.GeoData
             datasets[name] = gpd.read_parquet(path)
         else:
             datasets[name] = pd.read_parquet(path)
+        if name == "vinharbour":
+            datasets[name] = normalize_attributes(datasets[name], "harbours")
         logger.info("Loaded optional dataset %s: %d records", name, len(datasets[name]))
 
     return datasets
@@ -548,108 +553,22 @@ def enrich_fis_graph(
     )
 
     # 3. Integrate Harbours as Nodes & Edges
-    graph = integrate_harbours(graph, node_enrichments)
+    graph = integrate_harbours(graph, node_enrichments, sections=sections)
 
     return graph
 
 
-def _is_valid(val) -> bool:
-    """Helper to check if a database value is non-null and not nan."""
-    if val is None:
-        return False
-    if isinstance(val, float) and np.isnan(val):
-        return False
-    if str(val) == "nan":
-        return False
-    return True
-
-
-def _integrate_single_harbour(
-    row: pd.Series,
+def integrate_harbours(
     graph: nx.Graph,
-    rj_code_map: dict[str, int],
-    tree: Optional[KDTree],
-    junction_nodes: list[int],
-    geod: Geod,
-) -> tuple[bool, bool]:
-    """Helper to integrate a single harbour row into the graph."""
-    raw_id = row.get("Id")
-    if not _is_valid(raw_id):
-        return False, False
+    datasets: dict,
+    sections: Optional[gpd.GeoDataFrame] = None,
+) -> nx.Graph:
+    """Integrates harbours from vinharbour as spliced nodes and access edges in the graph.
 
-    h_id = f"harbour_{raw_id}"
-    h_name = row.get("Name", "Unnamed Harbour")
-    h_geom = row.get("geometry")
-
-    if not h_geom:
-        return False, False
-
-    # Ensure it's a Point
-    if h_geom.geom_type != "Point":
-        h_geom = h_geom.centroid
-
-    h_code = row.get("Code")
-    h_code_str = str(h_code).strip().upper() if _is_valid(h_code) else ""
-
-    # Extract locode: prefer UnLocationCode if present and valid, otherwise first 5 chars of Code
-    h_locode = row.get("UnLocationCode")
-    if not _is_valid(h_locode) or len(str(h_locode).strip()) < 5:
-        if len(h_code_str) >= 5:
-            h_locode = h_code_str[:5]
-        else:
-            h_locode = ""
-    else:
-        h_locode = str(h_locode).strip().upper()
-
-    # Add node
-    graph.add_node(
-        h_id,
-        node_id=h_id,
-        node_type="harbour",
-        name=h_name,
-        locode=h_locode,
-        isrs_id=h_code_str,
-        vin_code=str(row.get("VinCode", "")),
-        city=str(row.get("City", "")),
-        geometry=h_geom,
-    )
-    node_added = True
-    edge_added = False
-
-    # Link to target junction node
-    target_node_id = None
-    if h_code_str and h_code_str in rj_code_map:
-        candidate = rj_code_map[h_code_str]
-        if graph.has_node(candidate):
-            target_node_id = candidate
-
-    # Fallback to geometric snapping
-    if target_node_id is None and tree is not None:
-        dist, idx = tree.query((h_geom.x, h_geom.y))
-        candidate = junction_nodes[idx]
-        if graph.has_node(candidate):
-            target_node_id = candidate
-
-    if target_node_id is not None:
-        target_geom = graph.nodes[target_node_id].get("geometry")
-        if target_geom and hasattr(target_geom, "x"):
-            access_line = LineString([h_geom, target_geom])
-            graph.add_edge(
-                h_id,
-                target_node_id,
-                geometry=access_line,
-                length_m=geod.geometry_length(access_line),
-                segment_type="harbour_access",
-                data_source="vinharbour",
-                name=f"Access to {h_name}",
-            )
-            edge_added = True
-
-    return node_added, edge_added
-
-
-def integrate_harbours(graph: nx.Graph, datasets: dict) -> nx.Graph:
-    """Integrates harbours from the vinharbour dataset as nodes and access edges in the graph."""
+    Uses ID-based matching via FairwaySectionId / section_id and FairwaySplicer to project
+    harbours onto the corresponding fairway section in RD New (EPSG:28992). Inserts connection
+    nodes on the fairway, splices fairway edges cleanly, and adds short harbour_access edges.
+    """
     harbours = datasets.get("vinharbour")
     if harbours is None or harbours.empty:
         logger.warning(
@@ -657,42 +576,213 @@ def integrate_harbours(graph: nx.Graph, datasets: dict) -> nx.Graph:
         )
         return graph
 
+    if "section_id" not in harbours.columns:
+        harbours = normalize_attributes(harbours, "harbours")
+
+    if sections is None:
+        sections = datasets.get("section")
+
+    project_to_rd = pyproj.Transformer.from_crs(
+        "EPSG:4326", settings.PROJECTED_CRS, always_xy=True
+    ).transform
+    project_to_4326 = pyproj.Transformer.from_crs(
+        settings.PROJECTED_CRS, "EPSG:4326", always_xy=True
+    ).transform
     geod = Geod(ellps="WGS84")
 
-    # Step 1: Map routejunction Code -> SectionJunctionId
-    route_junc = datasets.get("routejunction")
-    rj_code_map = {}
-    if route_junc is not None:
-        for _, row in route_junc.iterrows():
-            code = row.get("Code")
-            section_junction_id = row.get("SectionJunctionId")
-            if _is_valid(code) and _is_valid(section_junction_id):
-                rj_code_map[str(code).strip().upper()] = int(section_junction_id)
+    # Map section_id -> edge in graph
+    edge_by_sec_id: dict[str, tuple] = {}
+    for u, v, d in graph.edges(data=True):
+        sid = d.get("id", d.get("Id"))
+        if sid is not None:
+            edge_by_sec_id[stringify_id(sid)] = tuple(sorted([u, v]))
 
-    # Step 2: Prepare KDTree of all junction nodes in the graph for fallback snapping
-    junction_nodes = []
-    junction_coords = []
-    for n_id, n_data in graph.nodes(data=True):
-        if isinstance(n_id, (int, float)) or (isinstance(n_id, str) and n_id.isdigit()):
-            geom = n_data.get("geometry")
-            if geom and hasattr(geom, "x") and hasattr(geom, "y"):
-                junction_nodes.append(int(n_id))
-                junction_coords.append((geom.x, geom.y))
+    sec_by_id = {}
+    if sections is not None:
+        for _, r in sections.iterrows():
+            sid = r.get("id", r.get("Id"))
+            if sid is not None:
+                sec_by_id[stringify_id(sid)] = r
 
-    tree = KDTree(np.array(junction_coords)) if junction_coords else None
+    # Group harbours by graph edge
+    harbours_by_edge = defaultdict(list)
+    for _, h in harbours.iterrows():
+        raw_id = h.get("id", h.get("Id"))
+        if raw_id is None:
+            continue
+        sec_id = stringify_id(h.get("section_id", h.get("FairwaySectionId")))
+        if not sec_id:
+            logger.warning("Harbour %s has no section_id; skipping.", raw_id)
+            continue
 
-    # Step 3: Add each harbour and link to the graph
+        edge_key = edge_by_sec_id.get(sec_id)
+        if edge_key is None and sec_by_id:
+            sec = sec_by_id.get(sec_id)
+            if sec is not None:
+                sj = sec.get("start_junction_id", sec.get("StartJunctionId"))
+                ej = sec.get("end_junction_id", sec.get("EndJunctionId"))
+                if sj is not None and ej is not None:
+                    cand_u, cand_v = None, None
+                    for cand in (
+                        sj,
+                        stringify_id(sj),
+                        int(sj) if str(sj).isdigit() else None,
+                    ):
+                        if cand is not None and graph.has_node(cand):
+                            cand_u = cand
+                            break
+                    for cand in (
+                        ej,
+                        stringify_id(ej),
+                        int(ej) if str(ej).isdigit() else None,
+                    ):
+                        if cand is not None and graph.has_node(cand):
+                            cand_v = cand
+                            break
+                    if (
+                        cand_u is not None
+                        and cand_v is not None
+                        and graph.has_edge(cand_u, cand_v)
+                    ):
+                        edge_key = tuple(sorted([cand_u, cand_v]))
+
+        if edge_key is None:
+            logger.warning(
+                "Harbour %s references section_id '%s' which was not found in the graph; skipping.",
+                raw_id,
+                sec_id,
+            )
+            continue
+
+        harbours_by_edge[edge_key].append(h)
+
     harbour_nodes_added = 0
     harbour_edges_added = 0
 
-    for _, row in harbours.iterrows():
-        node_added, edge_added = _integrate_single_harbour(
-            row, graph, rj_code_map, tree, junction_nodes, geod
-        )
-        if node_added:
-            harbour_nodes_added += 1
-        if edge_added:
-            harbour_edges_added += 1
+    for (u, v), h_list in harbours_by_edge.items():
+        edge_attrs = dict(graph[u][v])
+        line_4326 = edge_attrs.get("geometry")
+        if line_4326 is None or line_4326.geom_type != "LineString":
+            continue
+
+        # Orient line_4326 from u to v
+        u_geom = graph.nodes[u].get("geometry")
+        if u_geom and hasattr(u_geom, "x"):
+            p_u = Point(u_geom.x, u_geom.y)
+            if p_u.distance(Point(line_4326.coords[0])) > p_u.distance(
+                Point(line_4326.coords[-1])
+            ):
+                u, v = v, u
+
+        line_rd = transform(project_to_rd, line_4326)
+
+        h_projs = []
+        for h in h_list:
+            h_geom = h.get("geometry")
+            if not h_geom:
+                continue
+            if h_geom.geom_type != "Point":
+                h_geom = h_geom.centroid
+            h_rd = transform(project_to_rd, h_geom)
+            p_dist = max(0.0, min(line_rd.length, line_rd.project(h_rd)))
+            h_projs.append((h, h_geom, p_dist))
+
+        if not h_projs:
+            continue
+
+        # Cluster harbours within 1m along the fairway line
+        h_projs.sort(key=lambda x: x[2])
+        clusters = []
+        for h, h_geom, p_dist in h_projs:
+            if clusters and abs(p_dist - clusters[-1]["dist"]) < 1.0:
+                clusters[-1]["harbours"].append((h, h_geom))
+                continue
+            h_id_str = stringify_id(h.get("id", h.get("Id")))
+            clusters.append(
+                {
+                    "dist": p_dist,
+                    "harbours": [(h, h_geom)],
+                    "conn_id": f"harbour_{h_id_str}_connection",
+                }
+            )
+
+        cuts = [
+            StructureCut(
+                id=cl["conn_id"],
+                geometry=line_rd.interpolate(cl["dist"]),
+                projected_distance=cl["dist"],
+                buffer_distance=0.0,
+            )
+            for cl in clusters
+        ]
+
+        splicer = FairwaySplicer(line_rd)
+        segments = splicer.splice(cuts)
+
+        graph.remove_edge(u, v)
+
+        for seg in segments:
+            seg_geom_4326 = transform(project_to_4326, seg.geometry)
+            su = u if seg.source_structure_id is None else seg.source_structure_id
+            sv = v if seg.target_structure_id is None else seg.target_structure_id
+            attrs = edge_attrs.copy()
+            attrs["geometry"] = seg_geom_4326
+            attrs["length_m"] = geod.geometry_length(seg_geom_4326)
+            graph.add_edge(su, sv, **attrs)
+
+        for cl in clusters:
+            conn_id = cl["conn_id"]
+            conn_pt_rd = line_rd.interpolate(cl["dist"])
+            conn_pt_4326 = transform(project_to_4326, conn_pt_rd)
+            graph.add_node(
+                conn_id,
+                node_id=conn_id,
+                node_type="junction",
+                feature_type="node",
+                geometry=conn_pt_4326,
+            )
+
+            for h, h_geom in cl["harbours"]:
+                raw_id = stringify_id(h.get("id"))
+                hid = f"harbour_{raw_id}"
+                h_name = str(h.get("name") or "Unnamed Harbour").strip()
+                locode = str(
+                    h.get("locode")
+                    or h.get("un_location_code")
+                    or h.get("UnLocationCode")
+                    or ""
+                )
+                isrs_id = str(h.get("isrs_id") or h.get("code") or h.get("Code") or "")
+                vin_code = str(h.get("vin_code") or h.get("VinCode") or "")
+                city = str(h.get("city") or h.get("City") or "")
+
+                if len(locode) < 5 and len(isrs_id) >= 5:
+                    locode = isrs_id[:5]
+
+                graph.add_node(
+                    hid,
+                    node_id=hid,
+                    node_type="harbour",
+                    name=h_name,
+                    locode=locode,
+                    isrs_id=isrs_id,
+                    vin_code=vin_code,
+                    city=city,
+                    geometry=h_geom,
+                )
+                harbour_nodes_added += 1
+
+                access_line = LineString([h_geom, conn_pt_4326])
+                graph.add_edge(
+                    hid,
+                    conn_id,
+                    geometry=access_line,
+                    length_m=geod.geometry_length(access_line),
+                    segment_type="harbour_access",
+                    data_source="vinharbour",
+                    name=f"Access to {h_name}",
+                )
+                harbour_edges_added += 1
 
     logger.info(
         "Integrated %d harbour nodes and %d harbour access edges into the graph.",

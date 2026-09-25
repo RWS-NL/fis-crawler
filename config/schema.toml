@@ -187,6 +187,24 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "locode" = "id"
 "sectionref" = "section_id"
 
+[attributes.harbours]
+# FIS → Canonical mappings
+"Id" = "id"
+"Name" = "name"
+"FairwaySectionId" = "section_id"
+"FairwayId" = "fairway_id"
+"RouteId" = "route_id"
+"RouteKmBegin" = "route_km_begin"
+"RouteKmEnd" = "route_km_end"
+"UnLocationCode" = "locode"
+"VinCode" = "vin_code"
+"Code" = "isrs_id"
+"City" = "city"
+"AdministrationId" = "administration_id"
+# EURIS → Canonical mappings
+"sectionref" = "section_id"
+"objectname" = "name"
+
 [attributes.bridges]
 "Id" = "id"
 "Name" = "name"
