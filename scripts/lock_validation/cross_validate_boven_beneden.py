@@ -9,9 +9,12 @@ the manual table.
 Usage: uv run python scripts/lock_validation/cross_validate_boven_beneden.py
 """
 
+import logging
 import geopandas as gpd
 
 from fis.lock.orientation import cross_validate_manual_levels
+
+logger = logging.getLogger(__name__)
 
 NODES_PATH = "output/lock-schematization/nodes.geoparquet"
 LOCK_PATH = "output/lock-schematization/lock.geoparquet"
@@ -25,10 +28,8 @@ def main():
     result = cross_validate_manual_levels(nodes, locks)
     result.to_csv(OUTPUT_CSV, index=False)
 
-    print(f"Wrote {len(result)} rows to {OUTPUT_CSV}")
-    print()
-    print(result["category"].value_counts())
-    print()
+    logger.info("Wrote %d rows to %s", len(result), OUTPUT_CSV)
+    logger.info("\n%s", result["category"].value_counts().to_string())
     for category in [
         "MATCH",
         "SIDE_MISMATCH",
@@ -40,22 +41,22 @@ def main():
         subset = result[result["category"] == category]
         if subset.empty:
             continue
-        print(f"--- {category} ---")
-        print(
-            subset[
-                [
-                    "sluis_key",
-                    "lock_name",
-                    "manual_peil_hoog",
-                    "manual_peil_laag",
-                    "auto_boven_nap",
-                    "auto_beneden_nap",
-                    "source",
-                ]
-            ].to_string(index=False)
-        )
-        print()
+        table_str = subset[
+            [
+                "sluis_key",
+                "lock_name",
+                "manual_peil_hoog",
+                "manual_peil_laag",
+                "auto_boven_nap",
+                "auto_beneden_nap",
+                "source",
+            ]
+        ].to_string(index=False)
+        logger.info("--- %s ---\n%s", category, table_str)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
     main()

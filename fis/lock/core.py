@@ -84,9 +84,9 @@ def load_data(export_dir: pathlib.Path, disk_dir: pathlib.Path):
     sections = read_geo_or_parquet(export_dir, "section")
 
     # Streefpeil (target level, m NAP) per fairway segment — used for boven/beneden
-    # determination (fis.lock.levels). Kept raw (CamelCase columns), not run through
+    # determination (fis.lock.orientation). Kept raw (CamelCase columns), not run through
     # normalize_attributes, since it has no schema.toml entry of its own and the
-    # matching code (fis.lock.levels) expects the original FIS field names.
+    # matching code (fis.lock.orientation) expects the original FIS field names.
     aimedlevel_path = export_dir / "aimedlevel.geoparquet"
     aimedlevel = gpd.read_parquet(aimedlevel_path) if aimedlevel_path.exists() else None
     if (
@@ -612,7 +612,7 @@ def group_complexes(data: Dict[str, Any], network_graph=None) -> List[Dict]:
     # Pre-pass: collect every lock's own fairway start/end junctions up front, so
     # the boven/beneden graph walk (below) can treat every OTHER lock's junctions
     # as a barrier and stop there, instead of crossing straight through a
-    # neighbouring lock's own pand — see fis.lock.levels.walk_to_streefpeil.
+    # neighbouring lock's own pand — see fis.lock.orientation.walk_to_streefpeil.
     all_lock_junctions = set()
     for _, lock_row in locks_gdf.iterrows():
         if pd.isna(lock_row.get("fairway_id")):

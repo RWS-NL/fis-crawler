@@ -164,10 +164,8 @@ def resolve_boven_beneden(
     if graph is None:
         return empty
 
-    start_j = fairway_data.get("start_junction_id")
-    end_j = fairway_data.get("end_junction_id")
-    start_j = int(start_j) if start_j is not None else None
-    end_j = int(end_j) if end_j is not None else None
+    start_j = _normalize_id(fairway_data.get("start_junction_id"))
+    end_j = _normalize_id(fairway_data.get("end_junction_id"))
     route_id = _normalize_id(route_id)
     stop_nodes = (other_lock_junctions or set()) - {start_j, end_j}
 

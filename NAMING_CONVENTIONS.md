@@ -112,4 +112,4 @@ For lock-specific vertical reference levels and gate orientations, the project s
   - **`PP`**: Polderpeil (Polder Level)
   - **`BP`**: Boezempeil (Boezem Level)
 
-For a comprehensive dictionary of these terms and how they map to physical structure dimensions, refer to the [Terminology Section in the Sluiscontrole Docs](file:///Users/baart_f/src/fis/docs/werkwijze_sluiscontrole.md#L118).
+For a comprehensive dictionary of these terms and how they map to physical structure dimensions, refer to the [Terminology Section in the Sluiscontrole Docs](docs/werkwijze_sluiscontrole.md#1--terminologie-en-zijde-aanduiding).

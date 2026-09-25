@@ -30,7 +30,7 @@ lang: nl
 | **Streefpeil** | Beoogd waterpeil op de aansluitende waterweg (m NAP) |
 
 **Bepaling Bo/Be:**  
-De boven/beneden-zijde wordt per sluiscomplex vastgesteld op basis van domeinkennis (waterhuishoudkundige situatie). Dit is **niet** automatisch afleidbaar uit de FIS/aimedlevel-geometrie zonder het volledige vaarwegroutenetwerk te traceren. De toewijzing is opgeslagen in `get_waterway_levels()` in `validate_lock_dimensions.py` (regels 474-539) en geldt als leidende bron.
+De boven/beneden-zijde wordt per sluiscomplex vastgesteld op basis van domeinkennis (waterhuishoudkundige situatie). Dit is **niet** automatisch afleidbaar uit de FIS/aimedlevel-geometrie zonder het volledige vaarwegroutenetwerk te traceren. De toewijzing is opgeslagen in `MANUAL_WATERWAY_LEVELS` in `fis/lock/orientation.py` (ontsloten via `get_waterway_levels()`) en geldt als leidende bron.
 
 ---
 
@@ -165,7 +165,7 @@ gewenste peil dat wordt nagestreefd in een kanaal onder normale omstandigheden
 [...] ten opzichte van NAP."* `aimedlevel.Value` in FIS komt overeen met dit
 StreefPeil-begrip.
 
-**Automatische bepaling (geïmplementeerd, `fis/lock/levels.py`):**
+**Automatische bepaling (geïmplementeerd, `fis/lock/orientation.py`):**
 
 1. `aimedlevel` (streefpeil, m NAP) wordt op de fis-graaf-edges geprojecteerd
    (`enrich_edges_with_streefpeil()`, ruimtelijke overlap-join op RouteId/RouteKm,
@@ -275,7 +275,7 @@ De navigatie-as door de sluiskolk wordt bepaald via de **minimum rotated rectang
 
 | Punt | Status |
 |---|---|
-| Bo/Be automatisch bepalen | Deels opgelost — zie §3.4. Graaf-topologische bepaling (`fis/lock/levels.py`), gevalideerd (geen SIDE_MISMATCH) tegen `MANUAL_WATERWAY_LEVELS` in `boven_beneden_cross_validation.csv`. |
+| Bo/Be automatisch bepalen | Deels opgelost — zie §3.4. Graaf-topologische bepaling (`fis/lock/orientation.py`), gevalideerd (geen SIDE_MISMATCH) tegen `MANUAL_WATERWAY_LEVELS` in `boven_beneden_cross_validation.csv`. |
 | Sluis Maasbracht, Sambeek, Eefde, Gaarkeukensluis, Beatrixsluis: automatische streefpeil van een buursluis of verkeerd pand | Open, hoofdoorzaak geïdentificeerd (zie §3.4): `find_fairway_junctions()` geeft alle sluizen op één lange gedeelde vaarweg dezelfde start/eind-junctions, waardoor de graafwandeling door een buursluis' pand heen kan lopen. Een `stop_nodes`-barrière (`walk_to_streefpeil()`) is aanwezig maar werkt niet wanneer junctions toevallig identiek zijn. Vereist een functie die de twee secties direct vóór/ná de sluis vindt (niet de bevattende sectie — dat gaf juist meer `ambiguous`-resultaten, geprobeerd en teruggedraaid). Handmatige tabel blijft hier leidend (`VALUE_MISMATCH`/`SIDE_MISMATCH` in de kruisvalidatie vangt dit op). |
 | Weurt/Heumen: samenvloeiing van twee rivieren (Maas + Waal) | Open — geen 2-zijdige boven/beneden-structuur; niet geautomatiseerd in deze iteratie, blijft op de handmatige tabel steunen. |
 | `Bo`/`Be`-volgorde in `bathymetry.py::gate_centres()` (CCW-heuristiek) koppelen aan de nieuwe `side`-labels | Opgelost — `determine_gate_swap()` in `validate_lock_dimensions.py` oriënteert `crest1`/`crest2` (en dus `bobi_measured`/`bebu_measured`) aan de hand van `output/lock-schematization/nodes.geoparquet`'s `side`-label per kolk (118/501 kolken hebben een opgeloste zijde). Kolken zonder opgeloste zijde vallen terug op de ongewijzigde CCW-volgorde. |
@@ -296,13 +296,10 @@ uv run scrapy crawl dataservice -L INFO
 uv run scrapy crawl euris -L INFO
 uv run scrapy crawl disk -L INFO
 
-# Stap 2: drempelpunten samplen (vanuit reference/measurements.gpkg)
-uv run scripts/lock_validation/sample_drempel_points.py
-
-# Stap 3: rapport genereren (Deel B)
+# Stap 2: rapport genereren (Deel B)
 uv run scripts/lock_validation/validate_lock_dimensions.py
 
-# Stap 4: PDF samenstellen (Deel A + Deel B)
+# Stap 3: PDF samenstellen (Deel A + Deel B)
 make lock-validation-pdf
 ```
 

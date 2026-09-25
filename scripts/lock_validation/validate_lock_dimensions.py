@@ -1,31 +1,34 @@
-import os
+import argparse
+import html
 import json
+import logging
 import math
-import subprocess
+import os
+from pathlib import Path
 import re
 import sqlite3
-import argparse
-import pandas as pd
-import geopandas as gpd
-import numpy as np
-from shapely.geometry import Point, LineString
-import requests
-from fis import utils
-from fis.lock import orientation as lock_orientation
-from pathlib import Path
-import html
-
-# Ensure the lock_validation package directory is on the path so the sibling
-# bathymetry module can be imported regardless of how the script is invoked.
+import subprocess
 import sys as _sys
 
-_sys.path.insert(0, str(Path(__file__).resolve().parent))
-import bathymetry as bathy_mod
-
+import geopandas as gpd
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np
+import pandas as pd
+import requests
+from shapely.geometry import LineString, Point
+
+from fis import utils
+from fis.lock import orientation as lock_orientation
+
+# Ensure the lock_validation package directory is on the path so the sibling
+# bathymetry module can be imported regardless of how the script is invoked.
+_sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bathymetry as bathy_mod  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -70,11 +73,9 @@ def oriented_bbox_dims(geom):
     includes the lock walls, so it is used as a per-chamber cross-check and
     gross-error detector, not as an exact match against FIS.
     """
-    from shapely import minimum_rotated_rectangle
-
     if geom is None or geom.is_empty:
         return None, None
-    rect = minimum_rotated_rectangle(geom)
+    rect = geom.minimum_rotated_rectangle
     if not hasattr(rect, "exterior") or rect.exterior is None:
         return None, None
     xs, ys = rect.exterior.coords.xy
@@ -600,7 +601,7 @@ def generate_concept_diagram():
 def get_waterway_levels(isrs_code):
     """Return the waterway names and aimed water levels (streefpeil in NAP) for both sides of the lock by its ISRS code.
 
-    Thin wrapper: the actual table lives in fis.lock.levels.MANUAL_WATERWAY_LEVELS
+    Thin wrapper: the actual table lives in fis.lock.orientation.MANUAL_WATERWAY_LEVELS
     so there is one source of truth shared with the automatic (graph-based)
     boven/beneden resolution and its cross-validation script — see
     docs/werkwijze_sluiscontrole.md §3.4.
@@ -613,7 +614,7 @@ def load_chamber_side_lookup(nodes_path=LOCK_NODES):
 
     Returns a dict: chamber_id (str) -> {"boven": Point in EPSG:28992 or None,
     "beneden": Point in EPSG:28992 or None}, built from the chamber_start/
-    chamber_end nodes (see fis/lock/graph.py and fis/lock/levels.py). Chambers
+    chamber_end nodes (see fis/lock/graph.py and fis/lock/orientation.py). Chambers
     with no resolved side (streefpeil_source != "resolved"/"single_side_aimedlevel")
     are simply absent, and callers fall back to the existing geometry heuristic.
     """
@@ -1540,13 +1541,15 @@ def get_issue_body():
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        print(f"Fetching Issue {ISSUE_NUMBER} body via GitHub REST API...")
+        logger.info("Fetching Issue %s body via GitHub REST API...", ISSUE_NUMBER)
         resp = requests.get(api_url, headers=headers, timeout=15)
         if resp.status_code == 200:
             return resp.json().get("body", "") or ""
-        print(f"GitHub API returned HTTP {resp.status_code}; falling back to gh CLI.")
+        logger.warning(
+            "GitHub API returned HTTP %s; falling back to gh CLI.", resp.status_code
+        )
     except Exception as e:
-        print(f"GitHub API request failed ({e}); falling back to gh CLI.")
+        logger.warning("GitHub API request failed (%s); falling back to gh CLI.", e)
 
     try:
         res = subprocess.run(
@@ -1566,13 +1569,13 @@ def get_issue_body():
         )
         return json.loads(res.stdout).get("body", "")
     except Exception as e:
-        print(f"Error fetching issue body: {e}")
+        logger.error("Error fetching issue body: %s", e)
         return ""
 
 
 def parse_survey_table(body):
     """Parse Technical Specifications (Vraag 7) table from issue body."""
-    print("Parsing survey table from issue body...")
+    logger.info("Parsing survey table from issue body...")
     lines = body.split("\n")
     table_lines = []
     in_table = False
@@ -1590,7 +1593,7 @@ def parse_survey_table(body):
                 break
 
     if not table_lines:
-        print("Survey table not found in issue body.")
+        logger.warning("Survey table not found in issue body.")
         return pd.DataFrame()
 
     # Process table markdown
@@ -1602,7 +1605,7 @@ def parse_survey_table(body):
             rows.append(cells)
 
     df = pd.DataFrame(rows, columns=headers)
-    print(f"Parsed {len(df)} survey rows.")
+    logger.info("Parsed %d survey rows.", len(df))
     return df
 
 
@@ -1613,9 +1616,9 @@ def parse_local_excel(excel_path=LOCAL_EXCEL):
     index 4: FIS (cols 0-10), wiki (cols 12-19) and disk (cols 21-28). Columns are
     addressed positionally below (e.g. ``length_18``), matching that layout.
     """
-    print(f"Reading {excel_path}...")
+    logger.info("Reading %s...", excel_path)
     if not os.path.exists(excel_path):
-        print(f"Excel file {excel_path} not found.")
+        logger.error("Excel file %s not found.", excel_path)
         return pd.DataFrame()
 
     # Read Sluizen sheet
@@ -1636,15 +1639,15 @@ def parse_local_excel(excel_path=LOCAL_EXCEL):
 
     # Clean up empty rows
     data_df = data_df.dropna(subset=["Sluis_0", "name_1"])
-    print(f"Read {len(data_df)} lock rows from Excel.")
+    logger.info("Read %d lock rows from Excel.", len(data_df))
     return data_df
 
 
 def load_bivas_locks(db_path=BIVAS_DB, branch_set_id=337):
     """Load BIVAS locks from SQLite."""
-    print("Loading BIVAS locks...")
+    logger.info("Loading BIVAS locks...")
     if not os.path.exists(db_path):
-        print(f"BIVAS database not found at {db_path}")
+        logger.warning("BIVAS database not found at %s", db_path)
         return gpd.GeoDataFrame(
             columns=["id", "name", "bivas_length", "bivas_width"],
             geometry=[],
@@ -1718,7 +1721,7 @@ def save_osm_cache(cache):
         with open(OSM_CACHE_PATH, "w") as f:
             json.dump(cache, f, indent=2)
     except Exception as e:
-        print(f"Failed to save OSM cache: {e}")
+        logger.warning("Failed to save OSM cache: %s", e)
 
 
 def query_osm_lock(lon, lat, chamber_name=None, radius_m=250):
@@ -1819,7 +1822,7 @@ def query_osm_lock(lon, lat, chamber_name=None, radius_m=250):
                     "osm_source": "OpenStreetMap",
                 }
     except Exception as e:
-        print(f"OSM query failed for ({lon}, {lat}): {e}")
+        logger.warning("OSM query failed for (%s, %s): %s", lon, lat, e)
 
     cache[cache_key] = result
     save_osm_cache(cache)
@@ -1879,7 +1882,7 @@ def get_val(series, name):
 
 
 def main(excel_path=LOCAL_EXCEL, euris_path=None):
-    print("Starting validation report generator...")
+    logger.info("Starting validation report generator...")
 
     # 1. Load Survey Data and Target Locks Excel
     issue_body = get_issue_body()
@@ -1887,24 +1890,26 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     excel_df = parse_local_excel(excel_path)
 
     # 2. Load and normalize primary GIS datasets
-    print("Loading FIS chambers...")
+    logger.info("Loading FIS chambers...")
     fis = gpd.read_parquet(FIS_CHAMBERS)
-    print("Loading FIS sections (vaarwegroutes)...")
+    logger.info("Loading FIS sections (vaarwegroutes)...")
     try:
         sections_rd = gpd.read_parquet(FIS_SECTIONS).to_crs(epsg=28992)
     except Exception as e:
-        print(f"Warning: could not load sections ({e}); falling back to OBB axis.")
+        logger.warning(
+            "Warning: could not load sections (%s); falling back to OBB axis.", e
+        )
         sections_rd = None
     euris_path = euris_path or find_euris_chambers()
-    print(f"Loading EURIS chambers from {euris_path}...")
+    logger.info("Loading EURIS chambers from %s...", euris_path)
     euris = gpd.read_file(euris_path)
 
-    print("Normalizing attributes based on schema.toml...")
+    logger.info("Normalizing attributes based on schema.toml...")
     schema = utils.load_schema()
     fis = utils.normalize_attributes(fis, "chambers", schema)
     euris = utils.normalize_attributes(euris, "chambers", schema)
 
-    print("Loading BIVAS locks...")
+    logger.info("Loading BIVAS locks...")
     bivas_rd = load_bivas_locks()
 
     # Load manually placed drempelkruin measurements from reference/measurements.gpkg.
@@ -1921,18 +1926,22 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                     manual_measurements[
                         (mrow["sluis"], mrow["kolk"], mrow["zijde"])
                     ] = float(val)
-            print(f"Loaded {len(manual_measurements)} manual drempel measurements.")
+            logger.info(
+                "Loaded %d manual drempel measurements.", len(manual_measurements)
+            )
         except Exception as e:
-            print(f"Warning: could not load manual measurements ({e})")
+            logger.warning("Warning: could not load manual measurements (%s)", e)
 
     # Load boven/beneden gate positions from the lock schematization (per chamber),
     # used to orient the bathymetry gate order (see determine_gate_swap()).
-    print("Loading boven/beneden node labels...")
+    logger.info("Loading boven/beneden node labels...")
     chamber_side_points = load_chamber_side_lookup()
-    print(f"  {len(chamber_side_points)} chambers with a resolved boven/beneden side.")
+    logger.info(
+        "  %d chambers with a resolved boven/beneden side.", len(chamber_side_points)
+    )
 
     # 3. Load aimed water levels for vertical datum conversions
-    print("Loading Aimed Levels...")
+    logger.info("Loading Aimed Levels...")
     aimed_levels = gpd.read_parquet(AIMED_LEVELS)
     # aimedwaterlevel carries the operating range (max +/- deviation) per fairway,
     # used for the water-level cross-section figure.
@@ -2005,7 +2014,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
         )
 
     # 4. Join Aimed Water Levels to FIS Chambers
-    print("Joining target waterway levels to FIS chambers...")
+    logger.info("Joining target waterway levels to FIS chambers...")
     # Find nearest aimedlevel feature to each chamber centroid
     fis_rd["centroid"] = fis_rd.geometry.centroid
     # Convert centroids to GeoDataFrame
@@ -2024,7 +2033,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     )
 
     # 5. Core Comparison Join on ISRS Code
-    print("Merging FIS and EURIS on ISRS/locode...")
+    logger.info("Merging FIS and EURIS on ISRS/locode...")
 
     # Clean ISRS IDs (strip floats)
     def clean_isrs(val):
@@ -2043,10 +2052,12 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     )
     gis_merged = gpd.GeoDataFrame(gis_merged, geometry="geometry_fis", crs="EPSG:28992")
     n_euris = gis_merged["id_euris"].notna().sum()
-    print(f"FIS chambers: {len(gis_merged)}, of which {n_euris} matched to EURIS.")
+    logger.info(
+        "FIS chambers: %d, of which %d matched to EURIS.", len(gis_merged), n_euris
+    )
 
     # 6. Spatial match to BIVAS
-    print("Matching to BIVAS locks spatially...")
+    logger.info("Matching to BIVAS locks spatially...")
     # Buffer BIVAS lines by 150m for matching locks
     bivas_to_join = bivas_rd.rename(
         columns={"id": "bivas_id_orig", "name": "bivas_name_orig"}
@@ -2081,7 +2092,9 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
     kolk_count = excel_df.groupby("Sluis_0").size().to_dict()
 
     total_chambers = len(excel_df)
-    print(f"\nValidating dimensions for target locks ({total_chambers} chambers)...")
+    logger.info(
+        "Validating dimensions for target locks (%d chambers)...", total_chambers
+    )
     from tqdm import tqdm
 
     for _, row in tqdm(
@@ -2364,7 +2377,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
 
             # Sample bottom profile from bodemhoogte_1mtr (1m raster, NAP, EPSG:28992).
             # Orient gate1/gate2 (crest1/crest2) using the boven/beneden node labels
-            # from the lock schematization where resolved (fis/lock/levels.py),
+            # from the lock schematization where resolved (fis/lock/orientation.py),
             # instead of the unverified CCW geometry order (see
             # docs/werkwijze_sluiscontrole.md §3.4).
             gate_swap = determine_gate_swap(
@@ -2545,7 +2558,7 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                 f"Could not find matching GIS records for {sluis_name} - {chamber_name}"
             )
             # 8. Generate Markdown Report
-    print("Generating validation report...")
+    logger.info("Generating validation report...")
 
     report_content = f"""# Validatierapport Sluisafmetingen (Issue 58)
 **Gegenereerd op**: {pd.Timestamp.now().isoformat()}
@@ -2761,7 +2774,7 @@ We adviseren om de volgende **Werkwijze** te hanteren voor het bepalen van sluis
 """
     with open(REPORT_PATH, "w") as f:
         f.write(report_content)
-    print(f"Validation report saved successfully to {REPORT_PATH}")
+    logger.info("Validation report saved successfully to %s", REPORT_PATH)
 
     # 9. Generate HTML Dashboard
     write_html_report(results_list)
@@ -3380,10 +3393,13 @@ def write_html_report(results_list):
 """
     with open(HTML_REPORT_PATH, "w") as f:
         f.write(html_content)
-    print(f"HTML validation dashboard saved successfully to {HTML_REPORT_PATH}")
+    logger.info("HTML validation dashboard saved successfully to %s", HTML_REPORT_PATH)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
     parser = argparse.ArgumentParser(
         description="Validate Dutch lock dimensions across FIS/EURIS/BIVAS/survey/OSM."
     )
