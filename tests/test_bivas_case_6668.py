@@ -21,7 +21,7 @@ def test_case_6668():
     # 2. Load FIS data for 7070534
     fis_edges = gpd.read_parquet(fis_edges_path)
     fis_7070534_rows = fis_edges[
-        fis_edges["Id"].apply(
+        fis_edges["fis_id"].apply(
             lambda val: (
                 str(int(float(val))) == "7070534"
                 if val is not None and str(val) != "nan"

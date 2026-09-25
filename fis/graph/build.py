@@ -23,9 +23,9 @@ def filter_sections(sections: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         sections["StartJunctionId"].notna() & sections["EndJunctionId"].notna()
     ].copy()
 
-    # Convert junction IDs to int for consistency
-    valid["StartJunctionId"] = valid["StartJunctionId"].astype(int)
-    valid["EndJunctionId"] = valid["EndJunctionId"].astype(int)
+    # Convert junction IDs to str for canonical consistency
+    valid["StartJunctionId"] = valid["StartJunctionId"].astype(int).astype(str)
+    valid["EndJunctionId"] = valid["EndJunctionId"].astype(int).astype(str)
 
     logger.info(
         "Filtered sections: %d -> %d (removed %d without junction IDs)",
@@ -51,7 +51,9 @@ def filter_junctions(
     """
     referenced_ids = set(sections["StartJunctionId"]) | set(sections["EndJunctionId"])
 
-    valid = junctions[junctions["Id"].isin(referenced_ids)].copy()
+    valid = junctions.copy()
+    valid["Id"] = valid["Id"].astype(int).astype(str)
+    valid = valid[valid["Id"].isin(referenced_ids)].copy()
 
     logger.info(
         "Filtered junctions: %d -> %d (keeping only referenced)",

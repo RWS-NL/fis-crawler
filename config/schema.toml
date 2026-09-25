@@ -100,7 +100,7 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "GeoType" = "geo_type"
 "GeoGeneration" = "geo_generation"
 "Name" = "name"
-"VinCode" = "vincode"
+"VinCode" = "vin_code"
 "Direction" = "direction"
 "RouteKmEnd" = "route_km_end"
 "RouteKmBegin" = "route_km_begin"
@@ -244,10 +244,10 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 # Node attributes are mostly preserved as-is
 # FIS uses uppercase style, EURIS uses lowercase
 "Name" = "name"
-"VinCode" = "vincode"
+"VinCode" = "vin_code"
 "VoyagePlanningPoint" = "vplnpoint"
 "BorderPoint" = "borderpoint"
-"ForeignCode" = "foreigncode"
+"ForeignCode" = "foreign_code"
 "Id" = "fis_id"
 "GeoType" = "geo_type"
 "GeoGeneration" = "geo_generation"
@@ -321,7 +321,8 @@ columns = [
     "bridge_id",
     "chamber_id",
     "opening_id",
-    "constituent_ids"
+    "constituent_ids",
+    "vin_code"
 ]
 target_type = "string"
 

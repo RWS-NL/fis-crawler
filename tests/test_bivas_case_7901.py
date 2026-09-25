@@ -13,10 +13,10 @@ def test_case_7901_30984594():
 
     # FIS Edge 30984594
     fis_data = {
-        "Id": "30984594",
+        "fis_id": "30984594",
         "route_code": "121",
-        "RouteKmBegin": 104.598,
-        "RouteKmEnd": 116.71,
+        "route_km_begin": 104.598,
+        "route_km_end": 116.71,
     }
 
     # Combined route max KM (determined from full data previously)

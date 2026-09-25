@@ -155,7 +155,11 @@ def enrich_fis(
     edges_gdf["source"] = edges_gdf["source"].astype(str)
     edges_gdf["target"] = edges_gdf["target"].astype(str)
     edges_gdf.to_file(output_dir / "edges.geojson", driver="GeoJSON")
-    edges_gdf.to_parquet(output_dir / "edges.geoparquet")
+    edges_gdf.to_parquet(
+        output_dir / "edges.geoparquet",
+        schema_version="1.1.0",
+        geometry_encoding="geoarrow",
+    )
     logger.info("Exported %d enriched edges", len(edges_gdf))
 
     # Export nodes with enrichment as GeoJSON/GeoParquet
@@ -173,7 +177,11 @@ def enrich_fis(
     nodes_gdf = gpd.GeoDataFrame(node_data, crs="EPSG:4326")
     nodes_gdf["id"] = nodes_gdf["id"].astype(str)
     nodes_gdf.to_file(output_dir / "nodes.geojson", driver="GeoJSON")
-    nodes_gdf.to_parquet(output_dir / "nodes.geoparquet")
+    nodes_gdf.to_parquet(
+        output_dir / "nodes.geoparquet",
+        schema_version="1.1.0",
+        geometry_encoding="geoarrow",
+    )
     logger.info("Exported %d enriched nodes", len(nodes_gdf))
 
     # Summary with enrichment stats

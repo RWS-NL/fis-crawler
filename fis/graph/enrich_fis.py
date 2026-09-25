@@ -18,6 +18,7 @@ from shapely.geometry import LineString, Point
 from shapely.ops import transform
 
 from fis import settings, utils
+from fis.graph.schema import apply_schema_mapping
 from fis.splicer import FairwaySplicer, StructureCut
 from fis.utils import normalize_attributes, stringify_id
 
@@ -478,21 +479,24 @@ def enrich_fis_graph(
     Returns:
         Graph with enriched attributes.
     """
-    # 1. Enrich Edges
-    # Build edge → section mapping
+    # Build edge → section mapping supporting both string and integer IDs
     section_lookup = (
         sections[["Id", "StartJunctionId", "EndJunctionId"]]
         .dropna(subset=["StartJunctionId", "EndJunctionId"])
         .assign(
-            start=lambda df: df["StartJunctionId"].astype(int),
-            end=lambda df: df["EndJunctionId"].astype(int),
+            start=lambda df: df["StartJunctionId"].astype(int).astype(str),
+            end=lambda df: df["EndJunctionId"].astype(int).astype(str),
         )
     )
 
-    edge_to_section = {
-        **{(row.start, row.end): row.Id for row in section_lookup.itertuples()},
-        **{(row.end, row.start): row.Id for row in section_lookup.itertuples()},
-    }
+    edge_to_section = {}
+    for row in section_lookup.itertuples():
+        s_str, e_str, sid = row.start, row.end, row.Id
+        edge_to_section[(s_str, e_str)] = sid
+        edge_to_section[(e_str, s_str)] = sid
+        if s_str.isdigit() and e_str.isdigit():
+            edge_to_section[(int(s_str), int(e_str))] = sid
+            edge_to_section[(int(e_str), int(s_str))] = sid
 
     logger.info(
         "Built edge-to-section mapping with %d entries", len(edge_to_section) // 2
@@ -530,19 +534,17 @@ def enrich_fis_graph(
         "Enriching nodes using routejunction dataset, records: %d",
         len(route_junc),
     )
-    # Map section_junction_id -> first locode found
-    # Ensure SectionJunctionId is integer for matching with graph nodes
-    node_locode_map = (
-        route_junc.dropna(subset=["SectionJunctionId", "Code"])
-        .assign(sid=lambda df: df["SectionJunctionId"].astype(int))
-        .groupby("sid")["Code"]
-        .first()
-        .to_dict()
-    )
+    # Map section_junction_id -> first locode found supporting str and int IDs
+    node_locode_map = {}
+    for row in route_junc.dropna(subset=["SectionJunctionId", "Code"]).itertuples():
+        sid = row.SectionJunctionId
+        code = row.Code
+        node_locode_map.setdefault(str(sid), code)
+        if str(sid).isdigit():
+            node_locode_map.setdefault(int(sid), code)
 
     for node_id in graph.nodes():
-        # node_id in graph is the junction Id (int)
-        locode = node_locode_map.get(node_id)
+        locode = node_locode_map.get(node_id) or node_locode_map.get(str(node_id))
         if not locode:
             continue
 
@@ -557,6 +559,10 @@ def enrich_fis_graph(
 
     # 3. Integrate Harbours as Nodes & Edges
     graph = integrate_harbours(graph, node_enrichments, sections=sections)
+
+    # 4. Standardize and harmonize attributes according to canonical schema
+    schema = utils.load_schema()
+    graph = apply_schema_mapping(graph, schema)
 
     return graph
 
