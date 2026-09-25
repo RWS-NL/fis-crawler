@@ -80,7 +80,10 @@ def load_fis_node_enrichments(export_dir: pathlib.Path) -> dict[str, gpd.GeoData
             continue
 
         if is_geo:
-            datasets[name] = gpd.read_parquet(path)
+            df = gpd.read_parquet(path)
+            if "geometry" in df.columns and "Geometry" in df.columns:
+                df = df.drop(columns=["Geometry"])
+            datasets[name] = df
         else:
             datasets[name] = pd.read_parquet(path)
         if name == "vinharbour":
@@ -577,6 +580,8 @@ def integrate_harbours(
         return graph
 
     if "section_id" not in harbours.columns:
+        if "geometry" in harbours.columns and "Geometry" in harbours.columns:
+            harbours = harbours.drop(columns=["Geometry"])
         harbours = normalize_attributes(harbours, "harbours")
 
     if sections is None:

@@ -198,7 +198,7 @@ description = "Schema mapping for FIS-EURIS merged waterway network"
 "RouteKmEnd" = "route_km_end"
 "UnLocationCode" = "locode"
 "VinCode" = "vin_code"
-"Code" = "isrs_id"
+"Code" = "code"
 "City" = "city"
 "AdministrationId" = "administration_id"
 # EURIS → Canonical mappings
