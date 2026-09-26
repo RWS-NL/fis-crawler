@@ -12,24 +12,13 @@ Run:
 from pathlib import Path
 import click
 import geopandas as gpd
-import pyogrio
 import requests
 
-try:
-    from scripts.lock_validation.bathymetry import (
-        identify_bottom,
-        load_cache,
-        save_cache,
-    )
-except ImportError:
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from bathymetry import (
-        identify_bottom,
-        load_cache,
-        save_cache,
-    )
+from fis.lock.bathymetry import (
+    identify_bottom,
+    load_cache,
+    save_cache,
+)
 
 RD_CRS = "EPSG:28992"
 WGS84_CRS = "EPSG:4326"
@@ -140,18 +129,9 @@ def main(measurements: Path, layer: str, dry_run: bool, force: bool):
     for idx, val in results.items():
         gdf.at[idx, "meting_1m_nap"] = val
 
-    available_layers = pyogrio.list_layers(measurements)
-    layer_names = [lyr[0] for lyr in available_layers if lyr[0] != layer]
-    other_layers = {lyr: gpd.read_file(measurements, layer=lyr) for lyr in layer_names}
-
-    tmp_path = measurements.with_suffix(".tmp.gpkg")
-    gdf.to_file(tmp_path, layer=layer, driver="GPKG", mode="w")
-    for lyr, odf in other_layers.items():
-        odf.to_file(tmp_path, layer=lyr, driver="GPKG", mode="a")
-
-    tmp_path.replace(measurements)
+    gdf.to_file(measurements, layer=layer, driver="GPKG", mode="w")
     click.echo(
-        f"Successfully updated {measurements} with {len(results)} sampled measurements."
+        f"Successfully updated {measurements} ({layer}) with {len(results)} sampled measurements."
     )
 
 

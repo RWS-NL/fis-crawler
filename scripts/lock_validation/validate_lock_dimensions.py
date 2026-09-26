@@ -19,10 +19,7 @@ import pandas as pd
 import requests
 from shapely.geometry import LineString, Point
 
-try:
-    from scripts.lock_validation import bathymetry as bathy_mod
-except ImportError:
-    import bathymetry as bathy_mod
+from fis.lock import bathymetry as bathy_mod
 from fis import utils
 from fis.lock import orientation as lock_orientation
 
@@ -153,16 +150,18 @@ def resolve_sill_nap(
     if note_val is not None:
         # If measured_1m_nap is available and note_val deviates significantly (>1m)
         # while calculated FIS sill matches, prefer the calculated FIS sill.
-        if (
-            measured_1m_nap is not None
-            and abs(note_val - measured_1m_nap) > 1.0
-            and raw_val is not None
-        ):
+        note_deviates_from_bathymetry = (
+            measured_1m_nap is not None and abs(note_val - measured_1m_nap) > 1.0
+        )
+        if note_deviates_from_bathymetry and raw_val is not None:
             try:
                 val = float(raw_val)
                 if val > 0 and peil_side is not None:
                     calc_nap = float(peil_side) - val
-                    if abs(calc_nap - measured_1m_nap) <= DREMPEL_TOLERANCE_M:
+                    calculated_matches_bathymetry = (
+                        abs(calc_nap - measured_1m_nap) <= DREMPEL_TOLERANCE_M
+                    )
+                    if calculated_matches_bathymetry:
                         ref_label = fairway_ref_level if fairway_ref_level else "KP/SP"
                         return (
                             calc_nap,
@@ -202,10 +201,11 @@ def resolve_sill_nap(
 
     # 4. Negative value with 1m bathymetry verification
     if val < 0:
-        if (
+        matches_measured_bathymetry = (
             measured_1m_nap is not None
             and abs(val - measured_1m_nap) <= DREMPEL_TOLERANCE_M
-        ):
+        )
+        if matches_measured_bathymetry:
             return (
                 val,
                 f"FIS (vermoedelijk NAP-hoogte, bevestigd door 1m-bodemhoogte: {measured_1m_nap:.2f} m NAP)",
