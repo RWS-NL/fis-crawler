@@ -19,7 +19,10 @@ import pandas as pd
 import requests
 from shapely.geometry import LineString, Point
 
-import bathymetry as bathy_mod
+try:
+    from scripts.lock_validation import bathymetry as bathy_mod
+except ImportError:
+    import bathymetry as bathy_mod
 from fis import utils
 from fis.lock import orientation as lock_orientation
 
@@ -126,21 +129,48 @@ def parse_note_sill_nap(note_text, side):
 
 
 def resolve_sill_nap(
-    raw_val, height_ref_str, fairway_ref_level, peil_side, note_text, side
+    raw_val,
+    height_ref_str,
+    fairway_ref_level,
+    peil_side,
+    note_text,
+    side,
+    measured_1m_nap=None,
 ):
     """Convert a FIS sill value to an absolute NAP height with explicit source tracking.
 
     Precedence (highest to lowest confidence):
-    1. Explicit "Drempelhoogte NAP+X" in the Note field
+    1. Explicit "Drempelhoogte NAP+X" in the Note field (unless verified off vs measured)
     2. HeightReferenceLevel = 'NAP' → value is already a NAP height
     3. Positive value + known streefpeil → depth below KP/SP, compute NAP
-    4. Negative value → probably a NAP height, but flag as uncertain
+    4. Negative value + verified by 1m measurement (<0.5m) → accept as verified NAP height
+    5. Negative value (unverified) → probably a NAP height, but flag as uncertain
 
     Returns (nap_height_or_None, source_str, is_uncertain: bool).
     """
     # 1. Note field
     note_val, note_src = parse_note_sill_nap(note_text, side)
     if note_val is not None:
+        # If measured_1m_nap is available and note_val deviates significantly (>1m)
+        # while calculated FIS sill matches, prefer the calculated FIS sill.
+        if (
+            measured_1m_nap is not None
+            and abs(note_val - measured_1m_nap) > 1.0
+            and raw_val is not None
+        ):
+            try:
+                val = float(raw_val)
+                if val > 0 and peil_side is not None:
+                    calc_nap = float(peil_side) - val
+                    if abs(calc_nap - measured_1m_nap) <= DREMPEL_TOLERANCE_M:
+                        ref_label = fairway_ref_level if fairway_ref_level else "KP/SP"
+                        return (
+                            calc_nap,
+                            f"FIS (berekend: streefpeil {float(peil_side):.2f} − {val:.2f}m via {ref_label}; Note {note_val:.2f}m afwijkend)",
+                            False,
+                        )
+            except (ValueError, TypeError):
+                pass
         return note_val, note_src, False
 
     if raw_val is None:
@@ -170,8 +200,17 @@ def resolve_sill_nap(
         except (ValueError, TypeError):
             pass
 
-    # 4. Negative value → probably already a NAP height, but we cannot be sure
+    # 4. Negative value with 1m bathymetry verification
     if val < 0:
+        if (
+            measured_1m_nap is not None
+            and abs(val - measured_1m_nap) <= DREMPEL_TOLERANCE_M
+        ):
+            return (
+                val,
+                f"FIS (vermoedelijk NAP-hoogte, bevestigd door 1m-bodemhoogte: {measured_1m_nap:.2f} m NAP)",
+                False,
+            )
         return val, "FIS (vermoedelijk NAP-hoogte, negatieve waarde — onzeker)", True
 
     return None, "Onbepaald (waarde=0 of onbekend)", True
@@ -1727,7 +1766,7 @@ def query_osm_lock(lon, lat, chamber_name=None, radius_m=250):
     # Include query parameters and use higher coordinate precision so nearby
     # parallel chambers (e.g. Weurt Oost/West) don't collide on one cache entry.
     cache_key = f"{lat:.6f}_{lon:.6f}_{radius_m}_{normalize_name(chamber_name or '')}"
-    if cache_key in cache and cache[cache_key]:
+    if cache_key in cache:
         return cache[cache_key]
 
     # Convert radius in meters to approx degrees for bounding box
@@ -2182,12 +2221,32 @@ def main(excel_path=LOCAL_EXCEL, euris_path=None):
                 isrs_code
             )
 
+            # Lookup manually placed drempelkruin points for 1m-bathymetry verification
+            man_bobi = manual_measurements.get(
+                (sluis_name, chamber_name, "Bo")
+            ) or manual_measurements.get((sluis_name, chamber_name, "Bi"))
+            man_bebu = manual_measurements.get(
+                (sluis_name, chamber_name, "Be")
+            ) or manual_measurements.get((sluis_name, chamber_name, "Bu"))
+
             # Resolve sill heights to NAP with explicit source tracking
             sill_bobi_nap, sill_bobi_source, sill_bobi_uncertain = resolve_sill_nap(
-                sill_raw_bobi, height_ref_str, fairway_ref, peil_hoog, note_text, "bobi"
+                sill_raw_bobi,
+                height_ref_str,
+                fairway_ref,
+                peil_hoog,
+                note_text,
+                "bobi",
+                measured_1m_nap=man_bobi,
             )
             sill_bebu_nap, sill_bebu_source, sill_bebu_uncertain = resolve_sill_nap(
-                sill_raw_bebu, height_ref_str, fairway_ref, peil_laag, note_text, "bebu"
+                sill_raw_bebu,
+                height_ref_str,
+                fairway_ref,
+                peil_laag,
+                note_text,
+                "bebu",
+                measured_1m_nap=man_bebu,
             )
 
             # Legacy aliases (used in report)
