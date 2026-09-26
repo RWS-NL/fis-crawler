@@ -394,9 +394,10 @@ def _process_chambers(c, split_node_id, merge_node_id, split_point, merge_point)
             # Try to find doors
             door_start = None
             door_end = None
+            structural_len = chamber.get("structural_length")
             if c_geom and split_point and merge_point:
                 door_start, door_end = find_chamber_doors(
-                    c_geom, split_point, merge_point
+                    c_geom, split_point, merge_point, fis_length=structural_len
                 )
 
             # Chamber Nodes
