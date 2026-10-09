@@ -48,3 +48,28 @@ def test_find_chamber_doors_precision_fallback():
     # buffer slightly for floating point errors in intersection comparison
     assert c_geom.boundary.distance(start_door) < 1e-6
     assert c_geom.boundary.distance(end_door) < 1e-6
+
+
+def test_find_chamber_doors_adjusts_when_deviates_from_fis_length(caplog):
+    # Chamber that is 200m long geometrically, but FIS length is 100m (>15% difference)
+    c_geom = Polygon(
+        [
+            (4.1600, 51.6640),
+            (4.1600, 51.6660),
+            (4.1605, 51.6660),
+            (4.1605, 51.6640),
+            (4.1600, 51.6640),
+        ]
+    )
+    split_pt = Point(4.16025, 51.6630)
+    merge_pt = Point(4.16025, 51.6670)
+
+    # When fis_length=100.0 is passed (vs ~222m geometric), it should log warning and adjust
+    with caplog.at_level("WARNING"):
+        start_door, end_door = find_chamber_doors(
+            c_geom, split_pt, merge_pt, fis_length=100.0
+        )
+
+    assert start_door is not None
+    assert end_door is not None
+    assert "deviates >15%" in caplog.text

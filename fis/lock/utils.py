@@ -1,9 +1,12 @@
+import logging
 from shapely.ops import transform
 from shapely.geometry import Point
 import pyproj
 from shapely.geometry import LineString
 from shapely.ops import nearest_points
 from fis import settings
+
+logger = logging.getLogger(__name__)
 
 
 def project_geometry(geometry, crs_from="EPSG:4326", crs_to=None):
@@ -26,7 +29,7 @@ def project_geometry(geometry, crs_from="EPSG:4326", crs_to=None):
     return transform(project, geometry)
 
 
-def find_chamber_doors(chamber_geom, split_point, merge_point):
+def find_chamber_doors(chamber_geom, split_point, merge_point, fis_length=None):
     """
     Find the entrance and exit points (doors) of a chamber.
 
@@ -148,6 +151,30 @@ def find_chamber_doors(chamber_geom, split_point, merge_point):
 
     start_rd = scored[0][0]
     end_rd = scored[-1][0]
+
+    # Geometry quality check: if OBB length deviates >15% from FIS length (e.g. polygon includes voorhaven),
+    # log a warning and adjust doors symmetrically along the axis to match the FIS length.
+    if fis_length is not None and fis_length > 0:
+        geom_len = start_rd.distance(end_rd)
+        if abs(geom_len - fis_length) / fis_length > 0.15:
+            logger.warning(
+                "Chamber geometric length (%.1fm) deviates >15%% from FIS length (%.1fm); adjusting doors to FIS length.",
+                geom_len,
+                fis_length,
+            )
+            dx = end_rd.x - start_rd.x
+            dy = end_rd.y - start_rd.y
+            if geom_len > 0:
+                ux = dx / geom_len
+                uy = dy / geom_len
+                mid_x = (start_rd.x + end_rd.x) / 2
+                mid_y = (start_rd.y + end_rd.y) / 2
+                start_rd = Point(
+                    mid_x - ux * (fis_length / 2), mid_y - uy * (fis_length / 2)
+                )
+                end_rd = Point(
+                    mid_x + ux * (fis_length / 2), mid_y + uy * (fis_length / 2)
+                )
 
     # Project back to WGS84
     door_start = project_geometry(start_rd, settings.PROJECTED_CRS, "EPSG:4326")
