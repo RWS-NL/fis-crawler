@@ -14,44 +14,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           
       - name: Install dependencies
         run: uv sync --all-groups
         
       - name: Run Ruff Linter
-        run: uvx ruff@0.15.0 check fis/ tests/
+        run: uv run ruff check fis/ tests/
         
       - name: Run Ruff Formatter Check
-        run: uvx ruff@0.15.0 format --check fis/ tests/
+        run: uv run ruff format --check fis/ tests/
 
   test-dropins-schematization:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           
       - name: Install dependencies
         run: uv sync --all-groups
@@ -63,18 +65,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -86,18 +89,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           
       - name: Install dependencies
         run: uv sync --all-groups

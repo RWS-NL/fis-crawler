@@ -24,18 +24,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -55,18 +56,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -86,18 +88,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -118,16 +121,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -158,16 +162,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download EURIS Export
@@ -197,16 +202,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Enriched
@@ -233,16 +239,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -274,16 +281,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -310,16 +318,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -346,16 +355,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -382,16 +392,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -421,16 +432,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Enriched
@@ -456,16 +468,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download Merged Graph
@@ -491,16 +504,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Enriched
@@ -533,18 +547,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.2
         with:
+          version: "0.13.5"
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
           
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version-file: "pyproject.toml"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -633,4 +648,3 @@ jobs:
         env:
           ZENODO_KEY: ${{ secrets.ZENODO_KEY }}
           ZENODO_BASE_ID: ${{ github.event.inputs.base_id || vars.ZENODO_BASE_ID || '19389587' }}
-
