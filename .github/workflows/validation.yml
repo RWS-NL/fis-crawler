@@ -36,7 +36,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -68,7 +68,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -100,7 +100,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -131,7 +131,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -172,7 +172,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download EURIS Export
@@ -212,7 +212,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Enriched
@@ -249,7 +249,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -291,7 +291,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -328,7 +328,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -365,7 +365,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -402,7 +402,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Export
@@ -442,7 +442,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Enriched
@@ -478,7 +478,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download Merged Graph
@@ -514,7 +514,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
       - name: Install dependencies
         run: uv sync --all-groups
       - name: Download FIS Enriched

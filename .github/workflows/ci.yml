@@ -26,16 +26,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
           
       - name: Install dependencies
         run: uv sync --all-groups
         
       - name: Run Ruff Linter
-        run: uvx ruff@0.15.0 check fis/ tests/
+        run: uv run ruff check fis/ tests/
         
       - name: Run Ruff Formatter Check
-        run: uvx ruff@0.15.0 format --check fis/ tests/
+        run: uv run ruff format --check fis/ tests/
 
   test-dropins-schematization:
     runs-on: ubuntu-latest
@@ -53,7 +53,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
           
       - name: Install dependencies
         run: uv sync --all-groups
@@ -77,7 +77,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
 
       - name: Install dependencies
         run: uv sync --all-groups
@@ -101,7 +101,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.15"
+          python-version: "3.14"
           
       - name: Install dependencies
         run: uv sync --all-groups
