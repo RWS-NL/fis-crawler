@@ -1,17 +1,17 @@
 """Spatial capacity and network distance analysis for berths (ligplaatsen).
 
 Analyzes berth capacity, kegel (hazardous goods) berths, and car drop-off facilities
-against the spatial spacing criteria from Richtlijnen Vaarwegen 2020 (RVW 2020 § 6.3-6.4)
+against the spatial spacing criteria from Richtlijnen Vaarwegen 2020 (RVW 2020 § 6.3-6.6)
 and the Integrale Mobiliteitsanalyse (IMA 2021 Achtergrondrapportage Vaarwegen § 2.3):
 1. Overnight berth spacing: <= 30 km (<= 15 km to nearest berth along fairway).
 2. Kegel berth spacing: <= 60 km (<= 30 km to nearest kegel berth along fairway).
-3. Car drop-off facility: Required for overnight clusters with >= 15 berths.
-4. Route-level capacity and intensity comparison (trips, tonnage, and ship-length meters).
+3. Car drop-off facility: Required for overnight ports with capacity >= 15 ships.
+4. Route-level capacity and maximum intensity calculation up to the ship-length step,
+   split for regular overnight berths and kegel berths (RVW 2020 § 6.4.2).
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 import click
@@ -21,20 +21,28 @@ import numpy as np
 import pandas as pd
 from shapely.ops import substring
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
-)
 logger = logging.getLogger(__name__)
 
+# RVW 2020 & navigation constants
 NOMINAL_SHIP_LENGTH_M = 110.0  # CEMT Va standard vessel
 CLEARANCE_SPACING_M = 10.0  # RVW 2020 p. 146 spacing s for class V+
 SLOT_LENGTH_M = NOMINAL_SHIP_LENGTH_M + CLEARANCE_SPACING_M  # 120.0 m
+
+NORMAL_DAY_SAILING_HOURS = 14.0  # Exploitatievorm A1: max 14 sailing hours per day
+AVERAGE_SAILING_SPEED_KMH = 12.0  # Average commercial navigation speed (km/h)
+DAILY_SAILING_DISTANCE_KM = (
+    NORMAL_DAY_SAILING_HOURS * AVERAGE_SAILING_SPEED_KMH
+)  # 168.0 km
+
+MAX_CLUSTER_SPAN_KM = 0.5  # Max cluster diameter along fairway (500 m)
+CAR_DROPOFF_MIN_CAPACITY_SHIPS = (
+    15  # RVW § 6.6: capacity >= 15 ships requires car drop-off
+)
 
 
 def load_input_datasets(
     export_dir: Path,
 ) -> tuple[
-    gpd.GeoDataFrame,
     gpd.GeoDataFrame,
     gpd.GeoDataFrame,
     gpd.GeoDataFrame,
@@ -48,7 +56,6 @@ def load_input_datasets(
         "berth.geoparquet",
         "cardropoff.geoparquet",
         "fairwayclassification.geoparquet",
-        "section.geoparquet",
     ]
     for fname in required:
         fpath = export_dir / fname
@@ -61,9 +68,8 @@ def load_input_datasets(
     berths = gpd.read_parquet(export_dir / "berth.geoparquet")
     cardropoffs = gpd.read_parquet(export_dir / "cardropoff.geoparquet")
     fc = gpd.read_parquet(export_dir / "fairwayclassification.geoparquet")
-    sections = gpd.read_parquet(export_dir / "section.geoparquet")
 
-    return routes, rjs, berths, cardropoffs, fc, sections
+    return routes, rjs, berths, cardropoffs, fc
 
 
 def build_network_classification_map(fc: gpd.GeoDataFrame) -> dict[int, str]:
@@ -85,7 +91,7 @@ def build_network_classification_map(fc: gpd.GeoDataFrame) -> dict[int, str]:
 def classify_and_calculate_capacity(
     berths: gpd.GeoDataFrame, cardropoffs: gpd.GeoDataFrame
 ) -> gpd.GeoDataFrame:
-    """Classifies berths into overnight, kegel, and calculates physical capacity."""
+    """Classifies berths into overnight and kegel berths, calculating berth length and capacity."""
     df = berths.copy()
 
     cardropoff_berth_ids = set(cardropoffs["BerthId"].dropna().astype(int).unique())
@@ -110,36 +116,45 @@ def classify_and_calculate_capacity(
     def determine_kegels(row: pd.Series) -> int:
         sig = str(row.get("Signalling", ""))
         name = str(row.get("Name", "")).lower()
-        if "TWO_BLUE_LIGHTS" in sig or "2 kegel" in name or "2-kegel" in name:
+        if "TWO_BLUE_LIGHTS" in sig or "2 kegel" in name:
             return 2
-        elif (
-            "ONE_BLUE_LIGHT" in sig
-            or "1 kegel" in name
-            or "1-kegel" in name
-            or "kegel" in name
-        ):
+        if "ONE_BLUE_LIGHT" in sig or "1 kegel" in name:
+            return 1
+        if row.get("is_kegel"):
             return 1
         return 0
 
     df["kegel_count"] = df.apply(determine_kegels, axis=1)
 
-    rows = df["NumberOfRows"].fillna(1).astype(float)
-    rows = rows.where(rows > 0, 1.0)
+    def determine_capacity(row: pd.Series) -> int:
+        num_rows_val = row.get("NumberOfRows")
+        rows = int(num_rows_val) if pd.notna(num_rows_val) and num_rows_val > 0 else 1
 
-    length = df["Length"].fillna(0).astype(float)
-    derived_cap = np.maximum(1, np.floor(length / SLOT_LENGTH_M) * rows)
+        length_val = row.get("Length")
+        if pd.notna(length_val) and float(length_val) > 0:
+            len_m = float(length_val)
+            cap = int(np.floor((len_m + CLEARANCE_SPACING_M) / SLOT_LENGTH_M)) * rows
+            return max(1, cap)
 
-    explicit_cap = df["NumberOfMooringFacilities"].astype(float)
-    df["capacity_ships"] = np.where(
-        explicit_cap.notna() & (explicit_cap > 0), explicit_cap, derived_cap
-    ).astype(int)
+        mooring_fac = row.get("NumberOfMooringFacilities")
+        if pd.notna(mooring_fac) and float(mooring_fac) > 0:
+            return int(float(mooring_fac))
+
+        return 1
+
+    df["capacity_ships"] = df.apply(determine_capacity, axis=1)
+
+    # Effective berth length in meters (default to nominal vessel length if not registered)
+    df["effective_length_m"] = df["Length"].fillna(NOMINAL_SHIP_LENGTH_M).astype(float)
 
     logger.info(
-        "Classified %d berths: %d overnight (total capacity %d ships), %d kegel",
+        "Classified %d berths: %d overnight (total length %.0fm, capacity %d ships), %d kegel (total length %.0fm)",
         len(df),
         df["is_overnight"].sum(),
+        df.loc[df["is_overnight"], "effective_length_m"].sum(),
         df.loc[df["is_overnight"], "capacity_ships"].sum(),
         df["is_kegel"].sum(),
+        df.loc[df["is_kegel"], "effective_length_m"].sum(),
     )
     return df
 
@@ -150,52 +165,94 @@ def build_route_network_graph(
     berths: gpd.GeoDataFrame,
     type_map: dict[int, str],
 ) -> tuple[nx.Graph, list[dict]]:
-    """Builds the route-level NetworkX graph with berths and junctions spliced in."""
+    """Constructs a network graph from the simplified route network, with berths and junctions as nodes."""
+    logger.info("Constructing NetworkX route graph...")
     G = nx.Graph()
     route_segments: list[dict] = []
 
-    routes_by_id = routes.set_index("Id")
+    rj_by_route = rjs.groupby("RouteId")
+    berth_by_route = berths.groupby("RouteId")
 
-    for route_id, junc_group in rjs.groupby("RouteId"):
-        if route_id not in routes_by_id.index:
-            continue
-        route_row = routes_by_id.loc[route_id]
-        route_name = route_row["Name"]
-        route_code = route_row["Code"]
-        netwerk_type = type_map.get(int(route_id), "Niet geclassificeerd / Zee")
-        full_geom = route_row.geometry
-        full_km_begin = float(route_row["RouteKmBegin"])
-        full_km_end = float(route_row["RouteKmEnd"])
-        km_span_total = full_km_end - full_km_begin
+    for _, route in routes.iterrows():
+        route_id = int(route["Id"])
+        route_name = str(route.get("Name", f"Route {route_id}"))
+        route_code = str(route.get("Code", ""))
+        netwerk_type = type_map.get(route_id, "Niet geclassificeerd / Zee")
+        full_geom = route.geometry
 
-        points: list[tuple[float, str, str, dict]] = []
+        full_km_begin = (
+            float(route["RouteKmBegin"]) if pd.notna(route.get("RouteKmBegin")) else 0.0
+        )
+        full_km_end = (
+            float(route["RouteKmEnd"])
+            if pd.notna(route.get("RouteKmEnd"))
+            else full_km_begin
+        )
+        km_span_total = abs(full_km_end - full_km_begin)
 
-        for _, rj in junc_group.iterrows():
-            km = float(rj["RouteKmBegin"])
-            junc_id = f"junc_{rj['SectionJunctionId']}"
-            points.append(
-                (km, junc_id, "junction", {"junc_id": rj["SectionJunctionId"]})
-            )
+        points: list[tuple[float, str, str, dict]] = [
+            (
+                full_km_begin,
+                f"start_{route_id}",
+                "endpoint",
+                {"is_overnight": False, "is_kegel": False},
+            ),
+            (
+                full_km_end,
+                f"end_{route_id}",
+                "endpoint",
+                {"is_overnight": False, "is_kegel": False},
+            ),
+        ]
 
-        route_berths = berths[berths["RouteId"] == route_id]
-        for _, b in route_berths.iterrows():
-            km = float(b["RouteKmBegin"])
-            b_id = f"berth_{b['Id']}"
-            points.append(
-                (
-                    km,
-                    b_id,
-                    "berth",
-                    {
-                        "berth_id": b["Id"],
-                        "name": b["Name"],
-                        "is_overnight": b["is_overnight"],
-                        "is_kegel": b["is_kegel"],
-                        "capacity": b["capacity_ships"],
-                        "has_cardropoff": b["has_cardropoff"],
-                    },
+        if route_id in rj_by_route.groups:
+            route_rjs = rj_by_route.get_group(route_id)
+            for _, rj in route_rjs.iterrows():
+                sec_junc_id = rj.get("SectionJunctionId")
+                rj_node_id = (
+                    f"rj_{int(sec_junc_id)}"
+                    if pd.notna(sec_junc_id)
+                    else f"rj_id_{rj['Id']}"
                 )
-            )
+                km = (
+                    float(rj["RouteKmBegin"])
+                    if pd.notna(rj.get("RouteKmBegin"))
+                    else full_km_begin
+                )
+                points.append(
+                    (
+                        km,
+                        rj_node_id,
+                        "junction",
+                        {"is_overnight": False, "is_kegel": False},
+                    )
+                )
+
+        if route_id in berth_by_route.groups:
+            route_berths = berth_by_route.get_group(route_id)
+            for _, b in route_berths.iterrows():
+                km = (
+                    float(b["RouteKmBegin"])
+                    if pd.notna(b.get("RouteKmBegin"))
+                    else full_km_begin
+                )
+                b_node_id = f"berth_{b['Id']}"
+                points.append(
+                    (
+                        km,
+                        b_node_id,
+                        "berth",
+                        {
+                            "berth_id": b["Id"],
+                            "name": b["Name"],
+                            "is_overnight": b["is_overnight"],
+                            "is_kegel": b["is_kegel"],
+                            "capacity": b["capacity_ships"],
+                            "effective_length_m": b["effective_length_m"],
+                            "has_cardropoff": b["has_cardropoff"],
+                        },
+                    )
+                )
 
         points.sort(key=lambda x: x[0])
 
@@ -205,8 +262,17 @@ def build_route_network_graph(
 
             if id_a not in G:
                 G.add_node(id_a, type=type_a, km=km_a, route_id=route_id, **attrs_a)
+            else:
+                for k, v in attrs_a.items():
+                    if v:
+                        G.nodes[id_a][k] = v
+
             if id_b not in G:
                 G.add_node(id_b, type=type_b, km=km_b, route_id=route_id, **attrs_b)
+            else:
+                for k, v in attrs_b.items():
+                    if v:
+                        G.nodes[id_b][k] = v
 
             dist_km = abs(km_b - km_a)
 
@@ -232,7 +298,13 @@ def build_route_network_graph(
                 "length_km": dist_km,
                 "geometry": seg_geom,
             }
-            G.add_edge(id_a, id_b, **edge_data)
+
+            if G.has_edge(id_a, id_b):
+                existing_weight = G[id_a][id_b].get("weight", float("inf"))
+                if dist_km < existing_weight:
+                    G[id_a][id_b]["weight"] = dist_km
+            else:
+                G.add_edge(id_a, id_b, **edge_data)
 
             route_segments.append(
                 {
@@ -243,19 +315,59 @@ def build_route_network_graph(
             )
 
     logger.info(
-        "Built route graph: %d nodes, %d edges",
+        "Built route graph: %d nodes, %d edges, %d route segments",
         G.number_of_nodes(),
         G.number_of_edges(),
+        len(route_segments),
     )
     return G, route_segments
+
+
+def calc_segment_furthest_distance(d_u: float, d_v: float, L: float) -> float:
+    """Calculates the furthest distance along an edge (u, v) of length L to the nearest facility.
+
+    Conform metric graph theory:
+    Any point x in [0, L] has distance min(d_u + x, d_v + L - x).
+    The maximum occurs where d_u + x = d_v + L - x => x = (d_v - d_u + L) / 2.
+    If within [0, L], the peak distance is (d_u + d_v + L) / 2.
+    """
+    if d_u == float("inf") and d_v == float("inf"):
+        return float("inf")
+    if d_u == float("inf"):
+        return d_v + L
+    if d_v == float("inf"):
+        return d_u + L
+    if abs(d_u - d_v) <= L:
+        return (d_u + d_v + L) / 2.0
+    return max(d_u, d_v)
+
+
+def calc_segment_compliant_length(
+    d_u: float, d_v: float, L: float, threshold_radius: float
+) -> float:
+    """Calculates the exact continuous length along edge (u, v) within threshold_radius of a facility."""
+    if L <= 0.0:
+        return 0.0
+    reach_u = max(0.0, threshold_radius - d_u) if d_u != float("inf") else 0.0
+    reach_v = max(0.0, threshold_radius - d_v) if d_v != float("inf") else 0.0
+    return min(L, reach_u + reach_v)
 
 
 def run_spatial_distance_analysis(
     G: nx.Graph, route_segments: list[dict]
 ) -> gpd.GeoDataFrame:
-    """Calculates network distances from all segments to nearest overnight and kegel berths."""
+    """Calculates network distances and continuous coverage from all segments to nearest berths."""
     overnight_nodes = [n for n, d in G.nodes(data=True) if d.get("is_overnight")]
     kegel_nodes = [n for n, d in G.nodes(data=True) if d.get("is_kegel")]
+
+    if not overnight_nodes:
+        raise ValueError(
+            "No overnight berth nodes found in the network graph. Cannot calculate distances."
+        )
+    if not kegel_nodes:
+        raise ValueError(
+            "No kegel berth nodes found in the network graph. Cannot calculate distances."
+        )
 
     logger.info(
         "Running Dijkstra from %d overnight nodes and %d kegel nodes",
@@ -276,21 +388,24 @@ def run_spatial_distance_analysis(
         d_v_ov = dist_overnight.get(v, float("inf"))
         d_u_kg = dist_kegel.get(u, float("inf"))
         d_v_kg = dist_kegel.get(v, float("inf"))
-
         seg_len = seg["length_km"]
-        dist_mid_ov = min(d_u_ov, d_v_ov) + 0.5 * seg_len
-        dist_mid_kg = min(d_u_kg, d_v_kg) + 0.5 * seg_len
 
-        compliant_30km_overnight = dist_mid_ov <= 15.0
-        compliant_60km_kegel = dist_mid_kg <= 30.0
+        max_dist_ov = calc_segment_furthest_distance(d_u_ov, d_v_ov, seg_len)
+        max_dist_kg = calc_segment_furthest_distance(d_u_kg, d_v_kg, seg_len)
+
+        # RVW 2020: 30 km overnight spacing => radius <= 15 km; 60 km kegel spacing => radius <= 30 km
+        comp_len_ov = calc_segment_compliant_length(d_u_ov, d_v_ov, seg_len, 15.0)
+        comp_len_kg = calc_segment_compliant_length(d_u_kg, d_v_kg, seg_len, 30.0)
 
         records.append(
             {
                 **seg,
-                "dist_to_overnight_km": round(dist_mid_ov, 2),
-                "dist_to_kegel_km": round(dist_mid_kg, 2),
-                "compliant_30km_overnight": compliant_30km_overnight,
-                "compliant_60km_kegel": compliant_60km_kegel,
+                "dist_to_overnight_km": round(max_dist_ov, 2),
+                "compliant_30km_overnight_km": round(comp_len_ov, 3),
+                "is_fully_compliant_overnight": max_dist_ov <= 15.0,
+                "dist_to_kegel_km": round(max_dist_kg, 2),
+                "compliant_60km_kegel_km": round(comp_len_kg, 3),
+                "is_fully_compliant_kegel": max_dist_kg <= 30.0,
             }
         )
 
@@ -299,24 +414,28 @@ def run_spatial_distance_analysis(
 
 
 def cluster_berths_and_check_facilities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Clusters nearby berths by route into locations and checks autoafzetplaats requirement."""
+    """Clusters nearby berths by route into locations and checks autoafzetplaats requirement (RVW § 6.6)."""
     overnight = berths[berths["is_overnight"]].copy()
 
     clusters: list[dict] = []
     for route_id, group in overnight.groupby("RouteId"):
         group = group.sort_values("RouteKmBegin")
         curr_cluster: list[pd.Series] = []
-        curr_km = None
+        cluster_start_km = None
 
         for _, row in group.iterrows():
             km = row["RouteKmBegin"]
-            if curr_km is None or abs(km - curr_km) <= 0.5:
+            if (
+                cluster_start_km is None
+                or abs(km - cluster_start_km) <= MAX_CLUSTER_SPAN_KM
+            ):
+                if cluster_start_km is None:
+                    cluster_start_km = km
                 curr_cluster.append(row)
-                curr_km = km
             else:
                 clusters.append(_aggregate_cluster(curr_cluster))
                 curr_cluster = [row]
-                curr_km = km
+                cluster_start_km = km
         if curr_cluster:
             clusters.append(_aggregate_cluster(curr_cluster))
 
@@ -324,7 +443,9 @@ def cluster_berths_and_check_facilities(berths: gpd.GeoDataFrame) -> gpd.GeoData
     if cluster_df.empty:
         return gpd.GeoDataFrame(crs="EPSG:4326")
 
-    cluster_df["req_cardropoff"] = cluster_df["total_capacity_ships"] >= 15
+    cluster_df["req_cardropoff"] = (
+        cluster_df["total_capacity_ships"] >= CAR_DROPOFF_MIN_CAPACITY_SHIPS
+    )
     cluster_df["cardropoff_compliant"] = (
         ~cluster_df["req_cardropoff"] | cluster_df["has_cardropoff"]
     )
@@ -337,9 +458,10 @@ def _aggregate_cluster(rows: list[pd.Series]) -> dict:
     df = pd.DataFrame(rows)
     names = ", ".join(df["Name"].dropna().unique()[:3])
     total_cap = df["capacity_ships"].sum()
-    total_len = df["Length"].fillna(0).sum()
+    total_len = df["effective_length_m"].sum()
     has_cardrop = df["has_cardropoff"].any()
     kegel_cap = df[df["is_kegel"]]["capacity_ships"].sum()
+    kegel_len = df[df["is_kegel"]]["effective_length_m"].sum()
 
     geom = df.iloc[0]["geometry"]
 
@@ -353,26 +475,33 @@ def _aggregate_cluster(rows: list[pd.Series]) -> dict:
         "total_length_m": float(total_len),
         "has_cardropoff": bool(has_cardrop),
         "kegel_capacity_ships": int(kegel_cap),
+        "kegel_length_m": float(kegel_len),
         "geometry": geom,
     }
 
 
 def compute_route_capacity_and_intensity(
     routes: gpd.GeoDataFrame,
-    sections: gpd.GeoDataFrame,
     berths: gpd.GeoDataFrame,
     gdf_segments: gpd.GeoDataFrame,
-    intensity_path: Path | None = None,
-    dtv_path: Path | None = None,
 ) -> gpd.GeoDataFrame:
-    """Aggregates berth capacity, coverage, and maximum traffic intensity (trips, tonnage, ship-meters) per route."""
-    logger.info("Computing route-level capacity and intensity comparison dataset...")
+    """Aggregates berth capacity, coverage, and maximum carrying capacity up to the ship-length step per route.
+
+    Conform RVW 2020 § 6.4.2:
+    - Stop probability per passage: P_stop = L_route / DAILY_SAILING_DISTANCE_KM (168 km).
+    - Available berth-meter nights per year: L_kade * 365.
+    - Max carrying capacity in ship length kilometers per year:
+      (L_kade / 1000) * (DAILY_SAILING_DISTANCE_KM / L_route) * 365.
+    Split strictly between regular overnight berths and kegel berths.
+    """
+    logger.info("Computing route-level capacity and maximum carrying capacity...")
 
     ov_berths = (
         berths[berths["is_overnight"]]
         .groupby("RouteId")
         .agg(
             num_overnight_berths=("Id", "count"),
+            overnight_berth_length_m=("effective_length_m", "sum"),
             overnight_capacity_ships=("capacity_ships", "sum"),
             has_cardropoff=("has_cardropoff", "any"),
         )
@@ -384,6 +513,7 @@ def compute_route_capacity_and_intensity(
         .groupby("RouteId")
         .agg(
             num_kegel_berths=("Id", "count"),
+            kegel_berth_length_m=("effective_length_m", "sum"),
             kegel_capacity_ships=("capacity_ships", "sum"),
         )
         .reset_index()
@@ -393,17 +523,9 @@ def compute_route_capacity_and_intensity(
         gdf_segments.groupby("route_id")
         .agg(
             total_length_km=("length_km", "sum"),
-            overnight_compliant_km=(
-                "length_km",
-                lambda x: x[
-                    gdf_segments.loc[x.index, "compliant_30km_overnight"]
-                ].sum(),
-            ),
+            overnight_compliant_km=("compliant_30km_overnight_km", "sum"),
             max_dist_to_overnight_km=("dist_to_overnight_km", "max"),
-            kegel_compliant_km=(
-                "length_km",
-                lambda x: x[gdf_segments.loc[x.index, "compliant_60km_kegel"]].sum(),
-            ),
+            kegel_compliant_km=("compliant_60km_kegel_km", "sum"),
             max_dist_to_kegel_km=("dist_to_kegel_km", "max"),
             netwerk_type=("netwerk_type", "first"),
             route_name=("route_name", "first"),
@@ -412,114 +534,68 @@ def compute_route_capacity_and_intensity(
         .reset_index()
     )
 
-    route_int = pd.DataFrame(
-        columns=[
-            "RouteId",
-            "max_trip_count",
-            "max_ship_length_km",
-            "max_cargo_weight_ton",
-            "avg_trip_count",
-            "avg_ship_length_m",
-        ]
-    )
-
-    if intensity_path is not None and intensity_path.exists():
-        logger.info("Loading intensity data from %s", intensity_path)
-        intensity = gpd.read_parquet(intensity_path)
-
-        tons_ref = np.array(
-            [
-                118.0,
-                312.0,
-                490.0,
-                677.0,
-                995.0,
-                1272.0,
-                1722.0,
-                2286.0,
-                3315.0,
-                4636.0,
-                6923.0,
-            ]
-        )
-        lengths_ref = np.array(
-            [28.0, 39.0, 55.0, 70.0, 85.0, 85.0, 105.0, 110.0, 135.0, 105.0, 185.0]
-        )
-
-        if dtv_path is not None and dtv_path.exists():
-            with open(dtv_path, encoding="utf-8") as f:
-                dtv = json.load(f)
-            df_dtv = (
-                pd.DataFrame(dtv)
-                .dropna(subset=["Length [m]", "Load Weight average [ton]"])
-                .sort_values("Load Weight average [ton]")
-            )
-            tons_ref = df_dtv["Load Weight average [ton]"].values
-            lengths_ref = df_dtv["Length [m]"].values
-
-        intensity["avg_cargo_ton"] = (
-            intensity["cargo_weight_kg"] / 1000.0
-        ) / intensity["trip_count"]
-        intensity["est_ship_length_m"] = np.interp(
-            intensity["avg_cargo_ton"].fillna(1000.0), tons_ref, lengths_ref
-        )
-        intensity["ship_length_km"] = (
-            intensity["trip_count"] * intensity["est_ship_length_m"]
-        ) / 1000.0
-
-        intensity["section_id"] = pd.to_numeric(intensity["id"], errors="coerce")
-        merged_sec = intensity.merge(
-            sections[["Id", "RouteId"]],
-            left_on="section_id",
-            right_on="Id",
-            how="inner",
-        )
-        route_int = (
-            merged_sec.groupby("RouteId")
-            .agg(
-                max_trip_count=("trip_count", "max"),
-                max_ship_length_km=("ship_length_km", "max"),
-                max_cargo_weight_ton=("cargo_weight_kg", lambda x: x.max() / 1000.0),
-                avg_trip_count=("trip_count", "mean"),
-                avg_ship_length_m=("est_ship_length_m", "mean"),
-            )
-            .reset_index()
-        )
-        logger.info(
-            "Mapped intensity and ship-length meters for %d routes", len(route_int)
-        )
-
     df = route_cov.merge(
-        route_int.rename(columns={"RouteId": "route_id"}), on="route_id", how="left"
-    )
-    df = df.merge(
         ov_berths.rename(columns={"RouteId": "route_id"}), on="route_id", how="left"
     )
     df = df.merge(
         kg_berths.rename(columns={"RouteId": "route_id"}), on="route_id", how="left"
     )
 
-    df["overnight_coverage_pct"] = (
-        df["overnight_compliant_km"] / df["total_length_km"] * 100.0
-    ).round(1)
-    df["kegel_coverage_pct"] = (
-        df["kegel_compliant_km"] / df["total_length_km"] * 100.0
-    ).round(1)
-
-    df["max_trip_count"] = df["max_trip_count"].fillna(0).astype(int)
-    df["max_ship_length_km"] = df["max_ship_length_km"].fillna(0.0).round(1)
-    df["max_cargo_weight_ton"] = df["max_cargo_weight_ton"].fillna(0.0).round(1)
-    df["avg_trip_count"] = df["avg_trip_count"].fillna(0.0).round(1)
-    df["avg_ship_length_m"] = df["avg_ship_length_m"].fillna(0.0).round(1)
-
     df["num_overnight_berths"] = df["num_overnight_berths"].fillna(0).astype(int)
+    df["overnight_berth_length_m"] = df["overnight_berth_length_m"].fillna(0.0).round(1)
     df["overnight_capacity_ships"] = (
         df["overnight_capacity_ships"].fillna(0).astype(int)
     )
     df["has_cardropoff"] = df["has_cardropoff"].fillna(False).astype(bool)
 
     df["num_kegel_berths"] = df["num_kegel_berths"].fillna(0).astype(int)
+    df["kegel_berth_length_m"] = df["kegel_berth_length_m"].fillna(0.0).round(1)
     df["kegel_capacity_ships"] = df["kegel_capacity_ships"].fillna(0).astype(int)
+
+    # Coverage percentages
+    df["overnight_coverage_pct"] = np.where(
+        df["total_length_km"] > 0,
+        (df["overnight_compliant_km"] / df["total_length_km"] * 100.0).round(1),
+        0.0,
+    )
+    df["kegel_coverage_pct"] = np.where(
+        df["total_length_km"] > 0,
+        (df["kegel_compliant_km"] / df["total_length_km"] * 100.0).round(1),
+        0.0,
+    )
+
+    # Stop probability per passage (RVW § 6.4.2)
+    df["p_overnight_stop"] = np.where(
+        df["total_length_km"] > 0,
+        (df["total_length_km"] / DAILY_SAILING_DISTANCE_KM).round(4),
+        0.0,
+    )
+
+    # Available meter-nights per year
+    df["overnight_meter_nights_yr"] = (df["overnight_berth_length_m"] * 365.0).round(1)
+    df["kegel_meter_nights_yr"] = (df["kegel_berth_length_m"] * 365.0).round(1)
+
+    # Maximum annual carrying capacity in ship-length kilometers per year
+    # (L_kade / 1000) * (DAILY_SAILING_DISTANCE_KM / L_route) * 365
+    df["max_capacity_ship_length_km_yr"] = np.where(
+        df["total_length_km"] > 0,
+        (
+            (df["overnight_berth_length_m"] / 1000.0)
+            * (DAILY_SAILING_DISTANCE_KM / df["total_length_km"])
+            * 365.0
+        ).round(1),
+        0.0,
+    )
+
+    df["max_kegel_ship_length_km_yr"] = np.where(
+        df["total_length_km"] > 0,
+        (
+            (df["kegel_berth_length_m"] / 1000.0)
+            * (DAILY_SAILING_DISTANCE_KM / df["total_length_km"])
+            * 365.0
+        ).round(1),
+        0.0,
+    )
 
     routes_geom = routes.set_index("Id")["geometry"]
     df["geometry"] = df["route_id"].map(routes_geom)
@@ -536,7 +612,7 @@ def generate_markdown_summary(
     output_path: Path,
 ) -> None:
     """Generates a structured markdown report of the spatial berth analysis."""
-    netwerk_stats: list[dict] = []
+    netwerk_stats: dict[str, dict] = {}
     for ntype in [
         "Hoofdtransportas",
         "Hoofdvaarweg",
@@ -544,28 +620,32 @@ def generate_markdown_summary(
         "Niet geclassificeerd / Zee",
     ]:
         grp = gdf_segments[gdf_segments["netwerk_type"] == ntype]
-        if grp.empty:
-            continue
         tot = grp["length_km"].sum()
-        ov = grp[grp["compliant_30km_overnight"]]["length_km"].sum()
-        kg = grp[grp["compliant_60km_kegel"]]["length_km"].sum()
-        netwerk_stats.append(
-            {
-                "type": ntype,
-                "tot_km": tot,
-                "ov_km": ov,
-                "ov_pct": (ov / tot * 100.0) if tot > 0 else 0.0,
-                "kg_km": kg,
-                "kg_pct": (kg / tot * 100.0) if tot > 0 else 0.0,
-            }
-        )
+        ov = grp["compliant_30km_overnight_km"].sum()
+        kg = grp["compliant_60km_kegel_km"].sum()
+        netwerk_stats[ntype] = {
+            "type": ntype,
+            "tot_km": tot,
+            "ov_km": ov,
+            "ov_pct": (ov / tot * 100.0) if tot > 0 else 0.0,
+            "kg_km": kg,
+            "kg_pct": (kg / tot * 100.0) if tot > 0 else 0.0,
+        }
 
-    hvwn_grp = gdf_segments[
-        gdf_segments["netwerk_type"].isin(["Hoofdtransportas", "Hoofdvaarweg"])
-    ]
-    hvwn_tot = hvwn_grp["length_km"].sum()
-    hvwn_ov = hvwn_grp[hvwn_grp["compliant_30km_overnight"]]["length_km"].sum()
-    hvwn_kg = hvwn_grp[hvwn_grp["compliant_60km_kegel"]]["length_km"].sum()
+    hvwn_tot = sum(
+        netwerk_stats.get(t, {}).get("tot_km", 0.0)
+        for t in ["Hoofdtransportas", "Hoofdvaarweg"]
+    )
+    hvwn_ov = sum(
+        netwerk_stats.get(t, {}).get("ov_km", 0.0)
+        for t in ["Hoofdtransportas", "Hoofdvaarweg"]
+    )
+    hvwn_kg = sum(
+        netwerk_stats.get(t, {}).get("kg_km", 0.0)
+        for t in ["Hoofdtransportas", "Hoofdvaarweg"]
+    )
+    hvwn_ov_pct = (hvwn_ov / hvwn_tot * 100.0) if hvwn_tot > 0 else 0.0
+    hvwn_kg_pct = (hvwn_kg / hvwn_tot * 100.0) if hvwn_tot > 0 else 0.0
 
     large_clusters = (
         gdf_clusters[gdf_clusters["req_cardropoff"]]
@@ -578,21 +658,38 @@ def generate_markdown_summary(
         else pd.DataFrame()
     )
 
-    md = f"""# Ruimtelijke Analyse Ligplaatscapaciteit (Richtlijnen Vaarwegen 2020 & IMA 2021)
+    hta_stat = netwerk_stats.get(
+        "Hoofdtransportas",
+        {"tot_km": 0.0, "ov_km": 0.0, "ov_pct": 0.0, "kg_km": 0.0, "kg_pct": 0.0},
+    )
+    hvw_stat = netwerk_stats.get(
+        "Hoofdvaarweg",
+        {"tot_km": 0.0, "ov_km": 0.0, "ov_pct": 0.0, "kg_km": 0.0, "kg_pct": 0.0},
+    )
+    ovg_stat = netwerk_stats.get(
+        "Overige vaarweg",
+        {"tot_km": 0.0, "ov_km": 0.0, "ov_pct": 0.0, "kg_km": 0.0, "kg_pct": 0.0},
+    )
+    unc_stat = netwerk_stats.get(
+        "Niet geclassificeerd / Zee",
+        {"tot_km": 0.0, "ov_km": 0.0, "ov_pct": 0.0, "kg_km": 0.0, "kg_pct": 0.0},
+    )
+
+    md = f"""# Ruimtelijke Analyse Ligplaatscapaciteit en Maximale Draagkracht (RVW 2020 & IMA 2021)
 
 ## 1. Samenvatting Netwerkdekking per Netwerkcategorie
 
-Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapportage Vaarwegen IMA 2021 (§ 2.3)** gelden de volgende normen:
+Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapportage Vaarwegen IMA 2021 (§ 2.3)** gelden de volgende ruimtelijke normen:
 * **Overnachtingshavens**: maximaal **30 km** tussenruimte (elke locatie ligt binnen $\\le 15$ km van een ligplaats).
 * **Kegelligplaatsen**: maximaal **60 km** tussenruimte (elke locatie ligt binnen $\\le 30$ km van een kegelligplaats).
 
 | Netwerkcategorie | Totale lengte (km) | Overnachten $\\le 30$ km | Overnachten (%) | Kegel $\\le 60$ km | Kegel (%) |
 |---|---|---|---|---|---|
-| **Hoofdtransportassen (HTA)** | {netwerk_stats[0]["tot_km"]:,.1f} km | {netwerk_stats[0]["ov_km"]:,.1f} km | **{netwerk_stats[0]["ov_pct"]:.1f}%** | {netwerk_stats[0]["kg_km"]:,.1f} km | **{netwerk_stats[0]["kg_pct"]:.1f}%** |
-| **Hoofdvaarwegen (HVW)** | {netwerk_stats[1]["tot_km"]:,.1f} km | {netwerk_stats[1]["ov_km"]:,.1f} km | **{netwerk_stats[1]["ov_pct"]:.1f}%** | {netwerk_stats[1]["kg_km"]:,.1f} km | **{netwerk_stats[1]["kg_pct"]:.1f}%** |
-| **Totaal HVWN (HTA + HVW)** | **{hvwn_tot:,.1f} km** | **{hvwn_ov:,.1f} km** | **{(hvwn_ov / hvwn_tot * 100):.1f}%** | **{hvwn_kg:,.1f} km** | **{(hvwn_kg / hvwn_tot * 100):.1f}%** |
-| Overige vaarwegen | {netwerk_stats[2]["tot_km"]:,.1f} km | {netwerk_stats[2]["ov_km"]:,.1f} km | {netwerk_stats[2]["ov_pct"]:.1f}% | {netwerk_stats[2]["kg_km"]:,.1f} km | {netwerk_stats[2]["kg_pct"]:.1f}% |
-| Niet geclassificeerd (kust/zee) | {netwerk_stats[3]["tot_km"]:,.1f} km | {netwerk_stats[3]["ov_km"]:,.1f} km | {netwerk_stats[3]["ov_pct"]:.1f}% | {netwerk_stats[3]["kg_km"]:,.1f} km | {netwerk_stats[3]["kg_pct"]:.1f}% |
+| **Hoofdtransportassen (HTA)** | {hta_stat["tot_km"]:,.1f} km | {hta_stat["ov_km"]:,.1f} km | **{hta_stat["ov_pct"]:.1f}%** | {hta_stat["kg_km"]:,.1f} km | **{hta_stat["kg_pct"]:.1f}%** |
+| **Hoofdvaarwegen (HVW)** | {hvw_stat["tot_km"]:,.1f} km | {hvw_stat["ov_km"]:,.1f} km | **{hvw_stat["ov_pct"]:.1f}%** | {hvw_stat["kg_km"]:,.1f} km | **{hvw_stat["kg_pct"]:.1f}%** |
+| **Totaal HVWN (HTA + HVW)** | **{hvwn_tot:,.1f} km** | **{hvwn_ov:,.1f} km** | **{hvwn_ov_pct:.1f}%** | **{hvwn_kg:,.1f} km** | **{hvwn_kg_pct:.1f}%** |
+| Overige vaarwegen | {ovg_stat["tot_km"]:,.1f} km | {ovg_stat["ov_km"]:,.1f} km | {ovg_stat["ov_pct"]:.1f}% | {ovg_stat["kg_km"]:,.1f} km | {ovg_stat["kg_pct"]:.1f}% |
+| Niet geclassificeerd (kust/zee) | {unc_stat["tot_km"]:,.1f} km | {unc_stat["ov_km"]:,.1f} km | {unc_stat["ov_pct"]:.1f}% | {unc_stat["kg_km"]:,.1f} km | {unc_stat["kg_pct"]:.1f}% |
 
 ---
 
@@ -600,8 +697,9 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
 
 * **Totaal aantal ligplaatsrecords in FIS**: {len(berths):,}
 * **Aangemerkt als overnachtingsligplaats**: {berths["is_overnight"].sum():,} records
-* **Totale overnachtingscapaciteit**: **{berths.loc[berths["is_overnight"], "capacity_ships"].sum():,} scheepsplaatsen** (CEMT Va $110\\text{{m}} + 10\\text{{m}}$ tussenruimte)
-* **Kegelligplaatsen (blauw licht)**: {berths["is_kegel"].sum():,} records ({berths.loc[berths["is_kegel"], "capacity_ships"].sum():,} scheepsplaatsen)
+* **Totale kadelengte overnachten**: **{berths.loc[berths["is_overnight"], "effective_length_m"].sum():,.1f} m**
+* **Totale kadecapaciteit overnachten**: **{berths.loc[berths["is_overnight"], "effective_length_m"].sum() * 365.0:,.0f} meter-nachten per jaar**
+* **Kegelligplaatsen (gevaarlijke stoffen)**: {berths["is_kegel"].sum():,} records ({berths.loc[berths["is_kegel"], "effective_length_m"].sum():,.1f} m kadelengte)
 * **Aantal geclusterde overnachtingslocaties**: {len(gdf_clusters):,} locaties
 
 ---
@@ -622,41 +720,57 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
 
     # Specific gaps on Hoofdtransportassen and Hoofdvaarwegen
     md += "\n---\n\n## 4. Knelpunten op Hoofdtransportassen en Hoofdvaarwegen (Gap > 30 km)\n\n"
+    hvwn_grp = gdf_segments[
+        gdf_segments["netwerk_type"].isin(["Hoofdtransportas", "Hoofdvaarweg"])
+    ]
     hvwn_gaps = (
-        hvwn_grp[~hvwn_grp["compliant_30km_overnight"]]
+        hvwn_grp[~hvwn_grp["is_fully_compliant_overnight"]]
         .groupby(["route_id", "route_name", "netwerk_type"])
         .agg(gap_km=("length_km", "sum"), max_dist=("dist_to_overnight_km", "max"))
         .reset_index()
         .sort_values("gap_km", ascending=False)
         .head(15)
     )
-    md += "| Route ID | Routenaam | Netwerktype | Trajectlengte zonder dekking (km) | Max. afstand tot ligplaats (km) |\n|---|---|---|---|---|\n"
+    md += "| Route ID | Routenaam | Netwerktype | Trajectlengte zonder volledige dekking (km) | Max. afstand tot ligplaats (km) |\n|---|---|---|---|---|\n"
     for _, r in hvwn_gaps.iterrows():
         md += f"| {r['route_id']} | {r['route_name']} | {r['netwerk_type']} | {r['gap_km']:.1f} km | {r['max_dist']:.1f} km |\n"
 
-    # Section 5: Comparison of Capacity vs Maximum Traffic Intensity per Route
-    md += "\n---\n\n## 5. Vergelijking Ligplaatscapaciteit en Maximale Scheepvaartintensiteit per Route\n\n"
+    # Section 5: Maximum Carrying Capacity (Draagkracht) per Route
+    md += "\n---\n\n## 5. Maximale Draagkracht per Route (RVW 2020 § 6.4.2)\n\n"
     md += (
-        "Onderstaande tabel toont de drukste corridors en routes, gerangschikt op de **maximale scheepsintensiteit** "
-        "(passages/jaar én totale **scheepslengte-kilometers/jaar** op het drukste baanvak van de route), gekoppeld aan de lokale ligplaatscapaciteit en dekking:\n\n"
+        "Berekend tot de stap waar scheepslengte nodig is. Toont per route de beschikbare kadelengte en de maximale "
+        "jaardraagkracht in scheepslengte-kilometers per jaar (zowel regulier overnachten als kegel):\n\n"
     )
-    md += "| Code | Routenaam | Categorie | Max. Scheepslengte (km/jr) | Max. Intensiteit (reizen/jr) | Max. Tonnage (ton/jr) | Dekking (%) | Capaciteit (schepen) |\n"
-    md += "|---|---|---|---|---|---|---|---|\n"
+    md += "| Code | Routenaam | Categorie | Lengte (km) | Overnachting Kade (m) | Max. Draagkracht Overnachten (km schip/jr) | Kegel Kade (m) | Max. Draagkracht Kegel (km schip/jr) | Dekking Overnacht (%) |\n"
+    md += "|---|---|---|---|---|---|---|---|---|\n"
 
-    top_int = gdf_routes.sort_values("max_trip_count", ascending=False).head(20)
-    for _, r in top_int.iterrows():
-        trips_str = f"{r['max_trip_count']:,}" if r["max_trip_count"] > 0 else "-"
-        len_str = (
-            f"{r['max_ship_length_km']:,.1f} km" if r["max_ship_length_km"] > 0 else "-"
+    top_cap = gdf_routes.sort_values(
+        "max_capacity_ship_length_km_yr", ascending=False
+    ).head(20)
+    for _, r in top_cap.iterrows():
+        ov_kade_str = (
+            f"{r['overnight_berth_length_m']:,.0f} m"
+            if r["overnight_berth_length_m"] > 0
+            else "-"
         )
-        ton_str = (
-            f"{r['max_cargo_weight_ton']:,.0f}"
-            if r["max_cargo_weight_ton"] > 0
+        ov_draag_str = (
+            f"{r['max_capacity_ship_length_km_yr']:,.1f} km"
+            if r["max_capacity_ship_length_km_yr"] > 0
+            else "-"
+        )
+        kg_kade_str = (
+            f"{r['kegel_berth_length_m']:,.0f} m"
+            if r["kegel_berth_length_m"] > 0
+            else "-"
+        )
+        kg_draag_str = (
+            f"{r['max_kegel_ship_length_km_yr']:,.1f} km"
+            if r["max_kegel_ship_length_km_yr"] > 0
             else "-"
         )
         md += (
-            f"| {r['route_code']} | {r['route_name']} | {r['netwerk_type']} | "
-            f"{len_str} | {trips_str} | {ton_str} | {r['overnight_coverage_pct']:.1f}% | {r['overnight_capacity_ships']} |\n"
+            f"| {r['route_code']} | {r['route_name']} | {r['netwerk_type']} | {r['total_length_km']:.1f} km | "
+            f"{ov_kade_str} | {ov_draag_str} | {kg_kade_str} | {kg_draag_str} | {r['overnight_coverage_pct']:.1f}% |\n"
         )
 
     output_path.write_text(md, encoding="utf-8")
@@ -671,31 +785,20 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
     help="Directory containing FIS exported parquet files.",
 )
 @click.option(
-    "--intensity-path",
-    type=click.Path(path_type=Path),
-    default=Path("output/ivs-assignment/year=2025/intensity.geoparquet"),
-    help="Path to IVS traffic intensity parquet file.",
-)
-@click.option(
-    "--dtv-path",
-    type=click.Path(path_type=Path),
-    default=Path("reference/DTV_shiptypes_database.json"),
-    help="Path to DTV shiptypes database JSON.",
-)
-@click.option(
     "--output-dir",
     type=click.Path(path_type=Path),
     default=Path("output/berth-analysis"),
     help="Directory to save analysis outputs.",
 )
-def main(
-    export_dir: Path, intensity_path: Path, dtv_path: Path, output_dir: Path
-) -> None:
+def main(export_dir: Path, output_dir: Path) -> None:
     """Runs spatial capacity and distance analysis for berths across the route network."""
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    routes, rjs, berths, cardropoffs, fc, sections = load_input_datasets(export_dir)
-
+    routes, rjs, berths, cardropoffs, fc = load_input_datasets(export_dir)
     type_map = build_network_classification_map(fc)
 
     classified_berths = classify_and_calculate_capacity(berths, cardropoffs)
@@ -710,28 +813,24 @@ def main(
     )
     gdf_segments = run_spatial_distance_analysis(G, route_segments)
 
-    # 4. Compute route-level dataset joining capacity and intensity (including ship-length meters)
     gdf_routes = compute_route_capacity_and_intensity(
-        routes,
-        sections,
-        classified_berths,
-        gdf_segments,
-        intensity_path=intensity_path if intensity_path.exists() else None,
-        dtv_path=dtv_path if dtv_path.exists() else None,
+        routes, classified_berths, gdf_segments
     )
 
     logger.info("Exporting route compliance and intensity outputs...")
-    gdf_segments.to_parquet(output_dir / "route_segments_compliance.geoparquet")
-    gdf_segments.to_file(
-        output_dir / "route_segments_compliance.geojson", driver="GeoJSON"
-    )
-
+    # 1. Primary GeoParquet exports
     gdf_routes.to_parquet(output_dir / "route_capacity_and_intensity.geoparquet")
+    gdf_segments.to_parquet(output_dir / "route_segments_compliance.geoparquet")
+
+    # 2. Supplementary CSV and GeoJSON exports
     gdf_routes.drop(columns=["geometry"], errors="ignore").to_csv(
         output_dir / "route_capacity_and_intensity.csv", index=False
     )
     gdf_routes.to_file(
         output_dir / "route_capacity_and_intensity.geojson", driver="GeoJSON"
+    )
+    gdf_segments.to_file(
+        output_dir / "route_segments_compliance.geojson", driver="GeoJSON"
     )
 
     generate_markdown_summary(
