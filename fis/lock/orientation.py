@@ -44,7 +44,7 @@ def _normalize_id(val):
         return None
     try:
         return int(float(val))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return val
 
 

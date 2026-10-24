@@ -496,7 +496,7 @@ def route_batch_voyages_dask(
                     "cargo_weight": float(row["cargo_weight"]),
                 }
             )
-        except (nx.NetworkXNoPath, nx.NodeNotFound):
+        except nx.NetworkXNoPath, nx.NodeNotFound:
             batch_results.append({"status": "no_path"})
 
     return batch_results

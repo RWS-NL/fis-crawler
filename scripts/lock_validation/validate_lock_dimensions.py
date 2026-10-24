@@ -168,7 +168,7 @@ def resolve_sill_nap(
                             f"FIS (berekend: streefpeil {float(peil_side):.2f} − {val:.2f}m via {ref_label}; Note {note_val:.2f}m afwijkend)",
                             False,
                         )
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pass
         return note_val, note_src, False
 
@@ -178,7 +178,7 @@ def resolve_sill_nap(
         val = float(raw_val)
         if pd.isna(val):
             return None, "Geen waarde in FIS", True
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None, "Geen geldige waarde", True
 
     # 2. Explicit NAP reference
@@ -196,7 +196,7 @@ def resolve_sill_nap(
                 f"FIS (berekend: streefpeil {peil:.2f} − {val:.2f}m via {ref_label})",
                 False,
             )
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
 
     # 4. Negative value with 1m bathymetry verification
@@ -263,7 +263,7 @@ def classify_drempel_status(
         try:
             f = float(v)
             return f if f == f else None  # filter NaN
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def reference_value(measured, survey):
@@ -903,7 +903,7 @@ def generate_comparison_chart(
     def clean_val(val):
         try:
             return float(val) if pd.notna(val) else 0.0
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return 0.0
 
     sources = ["FIS", "EURIS", "BIVAS", "Survey", "Selected"]
