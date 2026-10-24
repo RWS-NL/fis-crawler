@@ -24,11 +24,6 @@ from shapely.ops import substring
 logger = logging.getLogger(__name__)
 
 # RVW 2020 & navigation constants
-# Standard reference vessel: CEMT Va (110m length, 11.4m beam)
-NOMINAL_SHIP_LENGTH_M = 110.0
-# Spacing s between moored vessels: RVW 2020 p. 146 (5m for class I-IV, 10m for class V+)
-CLEARANCE_SPACING_M = 10.0
-SLOT_LENGTH_M = NOMINAL_SHIP_LENGTH_M + CLEARANCE_SPACING_M  # 120.0 m
 
 # Commercial navigation speed & daily sailing distance:
 # RVW 2020 § 6.3 p. 144: "omstreeks 2 uur varen... circa 30 km" => ~15 km/h unobstructed,
@@ -164,18 +159,14 @@ def classify_and_calculate_capacity(
 
         length_val = row.get("Length")
         has_pos_len = pd.notna(length_val) and float(length_val) > 0
-        base_len = float(length_val) if has_pos_len else NOMINAL_SHIP_LENGTH_M
+        base_len = float(length_val) if has_pos_len else 0.0
         effective_len = base_len * rows
 
-        if has_pos_len:
-            cap = int(np.floor((base_len + CLEARANCE_SPACING_M) / SLOT_LENGTH_M)) * rows
-            cap = max(1, cap)
+        mooring_fac = row.get("NumberOfMooringFacilities")
+        if pd.notna(mooring_fac) and float(mooring_fac) > 0:
+            cap = int(float(mooring_fac))
         else:
-            mooring_fac = row.get("NumberOfMooringFacilities")
-            if pd.notna(mooring_fac) and float(mooring_fac) > 0:
-                cap = int(float(mooring_fac))
-            else:
-                cap = 1 * rows
+            cap = 1 * rows
 
         return cap, effective_len
 

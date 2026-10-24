@@ -83,10 +83,10 @@ class TestBerthSpatialCapacity(unittest.TestCase):
 
         df = classify_and_calculate_capacity(berths, cardropoffs)
 
-        # Berth 1: overnight, has cardropoff, capacity = (240 + 10) // 120 = 2 ships
+        # Berth 1: overnight, has cardropoff, capacity = 1 ship (pure berth count/mooring facilities)
         self.assertTrue(df.loc[df["Id"] == 1, "is_overnight"].iloc[0])
         self.assertTrue(df.loc[df["Id"] == 1, "has_cardropoff"].iloc[0])
-        self.assertEqual(df.loc[df["Id"] == 1, "capacity_ships"].iloc[0], 2)
+        self.assertEqual(df.loc[df["Id"] == 1, "capacity_ships"].iloc[0], 1)
         self.assertEqual(df.loc[df["Id"] == 1, "effective_length_m"].iloc[0], 240.0)
         self.assertFalse(df.loc[df["Id"] == 1, "is_kegel"].iloc[0])
 
