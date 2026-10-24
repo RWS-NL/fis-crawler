@@ -13,6 +13,8 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
         unzip \
         gdal-bin \
         libgdal-dev \
+        gh \
+        pandoc \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

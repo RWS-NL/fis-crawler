@@ -6,9 +6,12 @@
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/fis,type=bind",
   "workspaceFolder": "/workspaces/fis",
+  "initializeCommand": "touch ${localWorkspaceFolder}/.env ${localWorkspaceFolder}/.env.local",
   "runArgs": [
     "--memory=8g",
-    "--memory-swap=16g"
+    "--memory-swap=16g",
+    "--env-file=${localWorkspaceFolder}/.env",
+    "--env-file=${localWorkspaceFolder}/.env.local"
   ],
   "mounts": [
     {
