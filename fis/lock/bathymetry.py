@@ -68,7 +68,7 @@ def _query_identify(x, y, tolerance, session):
             continue
         try:
             return float(raw)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             continue
     return None
 

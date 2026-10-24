@@ -62,7 +62,7 @@ def _collect_berth_attrs(berth, geom_before, geom_after, dist_m):
                 berth_attrs[k] = v
             elif pd.notna(v):
                 berth_attrs[k] = v
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             berth_attrs[k] = v
 
     berth_attrs.update(
@@ -218,7 +218,7 @@ def stringify_id(val):
         if f_val.is_integer():
             return str(int(f_val))
         return str(val)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return str(val)
 
 

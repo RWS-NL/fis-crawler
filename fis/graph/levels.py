@@ -77,7 +77,7 @@ def enrich_edges_with_streefpeil(graph, sections_gdf, aimedlevel_gdf):
     for row in section_lookup.itertuples():
         try:
             u, v = int(row.start_junction_id), int(row.end_junction_id)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         edge_to_section[(u, v)] = row.id
         edge_to_section[(v, u)] = row.id
