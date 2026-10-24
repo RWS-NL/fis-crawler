@@ -2,6 +2,11 @@ import unittest
 import geopandas as gpd
 import networkx as nx
 from shapely.geometry import LineString, Point
+from scripts.berth_analysis.route_network_graph import (
+    extract_segment_geometry,
+    add_or_update_node,
+    build_route_network_graph,
+)
 from scripts.berth_analysis.analyze_spatial_capacity import (
     calc_segment_compliant_length,
     calc_segment_furthest_distance,
@@ -320,6 +325,86 @@ class TestBerthSpatialCapacity(unittest.TestCase):
         self.assertEqual(format_draagkracht(0.0), "-")
         self.assertEqual(format_dist(14.82), "14.8 km")
         self.assertEqual(format_dist(float("inf")), "Geen ligplaats bereikbaar")
+
+    def test_extract_segment_geometry(self):
+        line = LineString([(0, 0), (0, 20)])
+
+        # Increasing kilometrage: 5km to 15km on 0-20km line
+        sub = extract_segment_geometry(line, 5.0, 15.0, 0.0, 20.0)
+        self.assertIsNotNone(sub)
+        self.assertAlmostEqual(sub.length, 10.0)
+
+        # Decreasing kilometrage: 15km to 5km on 20-0km line
+        sub_rev = extract_segment_geometry(line, 5.0, 15.0, 20.0, 0.0)
+        self.assertIsNotNone(sub_rev)
+        self.assertAlmostEqual(sub_rev.length, 10.0)
+
+        # Degenerate span returns None
+        self.assertIsNone(extract_segment_geometry(line, 5.0, 5.0, 0.0, 20.0))
+        self.assertIsNone(extract_segment_geometry(None, 0.0, 10.0, 0.0, 20.0))
+
+    def test_add_or_update_node(self):
+        G = nx.Graph()
+        add_or_update_node(G, "node_1", "junction", 10.0, 100, {"is_overnight": False})
+        self.assertIn("node_1", G)
+        self.assertFalse(G.nodes["node_1"]["is_overnight"])
+
+        # Update node with overnight berth flag
+        add_or_update_node(G, "node_1", "berth", 10.0, 100, {"is_overnight": True})
+        self.assertTrue(G.nodes["node_1"]["is_overnight"])
+
+    def test_build_route_network_graph_synthetic(self):
+        routes = gpd.GeoDataFrame(
+            [
+                {
+                    "Id": 100,
+                    "Name": "Test Fairway",
+                    "Code": "TF1",
+                    "RouteKmBegin": 0.0,
+                    "RouteKmEnd": 30.0,
+                    "geometry": LineString([(0, 0), (0, 30)]),
+                }
+            ],
+            crs="EPSG:4326",
+        )
+        rjs = gpd.GeoDataFrame(
+            [
+                {
+                    "Id": 1,
+                    "RouteId": 100,
+                    "SectionJunctionId": 501,
+                    "RouteKmBegin": 10.0,
+                    "geometry": Point(0, 10),
+                }
+            ],
+            crs="EPSG:4326",
+        )
+        berths = gpd.GeoDataFrame(
+            [
+                {
+                    "Id": 10,
+                    "RouteId": 100,
+                    "Name": "Berth 10",
+                    "RouteKmBegin": 20.0,
+                    "is_overnight": True,
+                    "is_kegel": False,
+                    "capacity_ships": 2.0,
+                    "effective_length_m": 240.0,
+                    "has_cardropoff": True,
+                    "geometry": Point(0, 20),
+                }
+            ],
+            crs="EPSG:4326",
+        )
+        type_map = {100: "Hoofdtransportas"}
+
+        G, segments = build_route_network_graph(routes, rjs, berths, type_map)
+        self.assertEqual(G.number_of_nodes(), 4)  # start, rj_501, berth_10, end
+        self.assertEqual(len(segments), 3)
+        self.assertTrue(G.nodes["berth_10"]["is_overnight"])
+        self.assertEqual(segments[0]["source"], "start_100")
+        self.assertEqual(segments[0]["target"], "rj_501")
+        self.assertEqual(segments[0]["length_km"], 10.0)
 
     def test_empty_sources_dijkstra_fails_fast(self):
         G = nx.Graph()
