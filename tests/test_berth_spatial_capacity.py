@@ -16,6 +16,7 @@ from scripts.berth_analysis.analyze_spatial_capacity import (
     determine_kegels,
     determine_capacity_and_length,
     build_network_classification_map,
+    compute_route_carrying_capacity,
     compute_route_capacity_and_intensity,
     run_spatial_distance_analysis,
     DAILY_SAILING_DISTANCE_KM,
@@ -227,7 +228,7 @@ class TestBerthSpatialCapacity(unittest.TestCase):
         self.assertEqual(seg_jk["compliant_30km_overnight_km"], 0.0)
         self.assertFalse(seg_jk["is_fully_compliant_overnight"])
 
-    def test_compute_route_capacity_and_intensity(self):
+    def test_compute_route_carrying_capacity(self):
         routes = gpd.GeoDataFrame(
             [
                 {
@@ -283,7 +284,11 @@ class TestBerthSpatialCapacity(unittest.TestCase):
             crs="EPSG:4326",
         )
 
-        gdf_routes = compute_route_capacity_and_intensity(routes, berths, gdf_segments)
+        # Verify alias
+        self.assertIs(
+            compute_route_capacity_and_intensity, compute_route_carrying_capacity
+        )
+        gdf_routes = compute_route_carrying_capacity(routes, berths, gdf_segments)
 
         self.assertEqual(len(gdf_routes), 1)
         r = gdf_routes.iloc[0]

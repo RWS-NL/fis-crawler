@@ -6,7 +6,7 @@ and the Integrale Mobiliteitsanalyse (IMA 2021 Achtergrondrapportage Vaarwegen ย
 1. Overnight berth spacing: <= 30 km (<= 15 km to nearest berth along fairway).
 2. Kegel berth spacing: <= 60 km (<= 30 km to nearest kegel berth along fairway).
 3. Car drop-off facility: Required for overnight ports with capacity >= 15 ships.
-4. Route-level capacity and maximum intensity calculation up to the ship-length step,
+4. Route-level carrying capacity calculation up to the ship-length step,
    split for regular overnight berths and kegel berths (RVW 2020 ยง 6.4.2).
 """
 
@@ -395,7 +395,7 @@ def _aggregate_cluster(rows: list[pd.Series]) -> dict:
     }
 
 
-def compute_route_capacity_and_intensity(
+def compute_route_carrying_capacity(
     routes: gpd.GeoDataFrame,
     berths: gpd.GeoDataFrame,
     gdf_segments: gpd.GeoDataFrame,
@@ -715,6 +715,10 @@ def calculate_report_metrics(
     }
 
 
+# Backward-compatible alias
+compute_route_capacity_and_intensity = compute_route_carrying_capacity
+
+
 def generate_markdown_summary(
     gdf_segments: gpd.GeoDataFrame,
     gdf_clusters: gpd.GeoDataFrame,
@@ -790,24 +794,22 @@ def main(export_dir: Path, output_dir: Path) -> None:
     )
     gdf_segments = run_spatial_distance_analysis(G, route_segments)
 
-    gdf_routes = compute_route_capacity_and_intensity(
+    gdf_routes = compute_route_carrying_capacity(
         routes, classified_berths, gdf_segments
     )
 
-    logger.info("Exporting route compliance and intensity outputs...")
+    logger.info("Exporting route compliance and carrying capacity outputs...")
     # Primary exports: strictly focused on Hoofdvaarwegennet (HTA + HVW) conform RVW 2020 & IMA 2021
     gdf_hvwn = gdf_routes[gdf_routes["is_hvwn"]].copy()
     logger.info("Exporting primary HVWN routes: %d routes", len(gdf_hvwn))
-    gdf_hvwn.to_parquet(output_dir / "route_capacity_and_intensity.geoparquet")
+    gdf_hvwn.to_parquet(output_dir / "route_carrying_capacity.geoparquet")
     gdf_hvwn.drop(columns=["geometry"], errors="ignore").to_csv(
-        output_dir / "route_capacity_and_intensity.csv", index=False
+        output_dir / "route_carrying_capacity.csv", index=False
     )
-    gdf_hvwn.to_file(
-        output_dir / "route_capacity_and_intensity.geojson", driver="GeoJSON"
-    )
+    gdf_hvwn.to_file(output_dir / "route_carrying_capacity.geojson", driver="GeoJSON")
 
     # Supplementary export: complete network including regional / unclassified routes
-    gdf_routes.to_parquet(output_dir / "route_capacity_and_intensity_all.geoparquet")
+    gdf_routes.to_parquet(output_dir / "route_carrying_capacity_all.geoparquet")
 
     # Segment compliance: primary HVWN and complete
     gdf_segments_hvwn = gdf_segments[gdf_segments["is_hvwn"]].copy()
