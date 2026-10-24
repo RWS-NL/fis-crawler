@@ -61,6 +61,6 @@
     8888,
     8787
   ],
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/data 2>/dev/null || true; uv sync --all-groups",
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/data 2>/dev/null || true; uv sync --all-groups && uv run pre-commit install",
   "remoteUser": "vscode"
 }
