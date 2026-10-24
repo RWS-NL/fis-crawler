@@ -400,6 +400,8 @@ def run_spatial_distance_analysis(
         records.append(
             {
                 **seg,
+                "is_hvwn": seg.get("netwerk_type")
+                in ["Hoofdtransportas", "Hoofdvaarweg"],
                 "dist_to_overnight_km": round(max_dist_ov, 2),
                 "compliant_30km_overnight_km": round(comp_len_ov, 3),
                 "is_fully_compliant_overnight": max_dist_ov <= 15.0,
@@ -596,6 +598,8 @@ def compute_route_capacity_and_intensity(
         ).round(1),
         0.0,
     )
+
+    df["is_hvwn"] = df["netwerk_type"].isin(["Hoofdtransportas", "Hoofdvaarweg"])
 
     routes_geom = routes.set_index("Id")["geometry"]
     df["geometry"] = df["route_id"].map(routes_geom)
@@ -818,19 +822,28 @@ def main(export_dir: Path, output_dir: Path) -> None:
     )
 
     logger.info("Exporting route compliance and intensity outputs...")
-    # 1. Primary GeoParquet exports
-    gdf_routes.to_parquet(output_dir / "route_capacity_and_intensity.geoparquet")
-    gdf_segments.to_parquet(output_dir / "route_segments_compliance.geoparquet")
-
-    # 2. Supplementary CSV and GeoJSON exports
-    gdf_routes.drop(columns=["geometry"], errors="ignore").to_csv(
+    # Primary exports: strictly focused on Hoofdvaarwegennet (HTA + HVW) conform RVW 2020 & IMA 2021
+    gdf_hvwn = gdf_routes[gdf_routes["is_hvwn"]].copy()
+    logger.info("Exporting primary HVWN routes: %d routes", len(gdf_hvwn))
+    gdf_hvwn.to_parquet(output_dir / "route_capacity_and_intensity.geoparquet")
+    gdf_hvwn.drop(columns=["geometry"], errors="ignore").to_csv(
         output_dir / "route_capacity_and_intensity.csv", index=False
     )
-    gdf_routes.to_file(
+    gdf_hvwn.to_file(
         output_dir / "route_capacity_and_intensity.geojson", driver="GeoJSON"
     )
-    gdf_segments.to_file(
+
+    # Supplementary export: complete network including regional / unclassified routes
+    gdf_routes.to_parquet(output_dir / "route_capacity_and_intensity_all.geoparquet")
+
+    # Segment compliance: primary HVWN and complete
+    gdf_segments_hvwn = gdf_segments[gdf_segments["is_hvwn"]].copy()
+    gdf_segments_hvwn.to_parquet(output_dir / "route_segments_compliance.geoparquet")
+    gdf_segments_hvwn.to_file(
         output_dir / "route_segments_compliance.geojson", driver="GeoJSON"
+    )
+    gdf_segments.to_parquet(
+        output_dir / "route_segments_compliance_all.geoparquet"
     )
 
     generate_markdown_summary(

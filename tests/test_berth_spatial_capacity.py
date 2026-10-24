@@ -162,6 +162,7 @@ class TestBerthSpatialCapacity(unittest.TestCase):
 
         # Segment A-J
         seg_aj = gdf.iloc[0]
+        self.assertTrue(seg_aj["is_hvwn"])
         self.assertEqual(seg_aj["dist_to_overnight_km"], 20.0)
         self.assertEqual(seg_aj["compliant_30km_overnight_km"], 15.0)
         self.assertFalse(seg_aj["is_fully_compliant_overnight"])
@@ -232,6 +233,7 @@ class TestBerthSpatialCapacity(unittest.TestCase):
 
         self.assertEqual(len(gdf_routes), 1)
         r = gdf_routes.iloc[0]
+        self.assertTrue(r["is_hvwn"])
 
         # Stop probability = 20 / 168
         expected_p_stop = round(20.0 / DAILY_SAILING_DISTANCE_KM, 4)
