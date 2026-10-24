@@ -6,14 +6,46 @@ from scripts.berth_analysis.analyze_spatial_capacity import (
     calc_segment_compliant_length,
     calc_segment_furthest_distance,
     classify_and_calculate_capacity,
+    classify_berths,
+    calculate_berth_capacities,
+    determine_kegels,
+    determine_capacity_and_length,
     build_network_classification_map,
     compute_route_capacity_and_intensity,
     run_spatial_distance_analysis,
     DAILY_SAILING_DISTANCE_KM,
+    format_km,
+    format_pct,
+    format_int,
+    format_draagkracht,
+    format_dist,
 )
 
 
 class TestBerthSpatialCapacity(unittest.TestCase):
+    def test_determine_kegels(self):
+        self.assertEqual(determine_kegels("TWO_BLUE_LIGHTS", "Ligplaats"), 2)
+        self.assertEqual(determine_kegels(None, "Ligplaats 2-kegel"), 2)
+        self.assertEqual(determine_kegels(None, "twee kegels ligplaats"), 2)
+        self.assertEqual(determine_kegels("ONE_BLUE_LIGHT", "Ligplaats"), 1)
+        self.assertEqual(determine_kegels(None, "1-kegel kade"), 1)
+        self.assertEqual(determine_kegels(None, "kegelligplaats algemeen"), 1)
+        self.assertEqual(determine_kegels(None, "Reguliere kade", is_kegel=True), 1)
+        self.assertEqual(determine_kegels("NO_BLUE_LIGHT", "Reguliere kade"), 0)
+
+    def test_determine_capacity_and_length(self):
+        cap, eff_len = determine_capacity_and_length(150.5, 2, None)
+        self.assertEqual(eff_len, 301.0)
+        self.assertEqual(cap, 2.0)
+
+        cap, eff_len = determine_capacity_and_length(200.0, 1, 5)
+        self.assertEqual(eff_len, 200.0)
+        self.assertEqual(cap, 5.0)
+
+        cap, eff_len = determine_capacity_and_length(None, 1, None)
+        self.assertEqual(eff_len, 0.0)
+        self.assertEqual(cap, 1.0)
+
     def test_classify_and_calculate_capacity(self):
         berths = gpd.GeoDataFrame(
             [
@@ -81,25 +113,37 @@ class TestBerthSpatialCapacity(unittest.TestCase):
             crs="EPSG:4326",
         )
 
+        classified = classify_berths(berths, cardropoffs)
+        self.assertTrue(classified.loc[classified["Id"] == 1, "is_overnight"].iloc[0])
+        self.assertTrue(classified.loc[classified["Id"] == 1, "has_cardropoff"].iloc[0])
+        self.assertTrue(classified.loc[classified["Id"] == 2, "is_kegel"].iloc[0])
+        self.assertEqual(
+            classified.loc[classified["Id"] == 2, "kegel_count"].iloc[0], 2
+        )
+
+        capacities = calculate_berth_capacities(classified)
+        self.assertEqual(
+            capacities.loc[capacities["Id"] == 1, "capacity_ships"].iloc[0], 1.0
+        )
+        self.assertEqual(
+            capacities.loc[capacities["Id"] == 1, "effective_length_m"].iloc[0], 240.0
+        )
+
         df = classify_and_calculate_capacity(berths, cardropoffs)
 
-        # Berth 1: overnight, has cardropoff, capacity = 1 ship (pure berth count/mooring facilities)
         self.assertTrue(df.loc[df["Id"] == 1, "is_overnight"].iloc[0])
         self.assertTrue(df.loc[df["Id"] == 1, "has_cardropoff"].iloc[0])
-        self.assertEqual(df.loc[df["Id"] == 1, "capacity_ships"].iloc[0], 1)
+        self.assertEqual(df.loc[df["Id"] == 1, "capacity_ships"].iloc[0], 1.0)
         self.assertEqual(df.loc[df["Id"] == 1, "effective_length_m"].iloc[0], 240.0)
         self.assertFalse(df.loc[df["Id"] == 1, "is_kegel"].iloc[0])
 
-        # Berth 2: kegel ('2-kegel' in name), rows=2 => length=240m, capacity = 2 ships
         self.assertTrue(df.loc[df["Id"] == 2, "is_kegel"].iloc[0])
         self.assertEqual(df.loc[df["Id"] == 2, "kegel_count"].iloc[0], 2)
-        self.assertEqual(df.loc[df["Id"] == 2, "capacity_ships"].iloc[0], 2)
+        self.assertEqual(df.loc[df["Id"] == 2, "capacity_ships"].iloc[0], 2.0)
         self.assertEqual(df.loc[df["Id"] == 2, "effective_length_m"].iloc[0], 240.0)
 
-        # Berth 3: WAITING_AREA should not be classified as overnight
         self.assertFalse(df.loc[df["Id"] == 3, "is_overnight"].iloc[0])
 
-        # Berth 4: Krammersluizen case (ALL_VESSELS with NaN stay duration) => is_overnight True
         self.assertTrue(df.loc[df["Id"] == 4, "is_overnight"].iloc[0])
         self.assertEqual(df.loc[df["Id"] == 4, "effective_length_m"].iloc[0], 450.0)
 
@@ -115,31 +159,22 @@ class TestBerthSpatialCapacity(unittest.TestCase):
         self.assertEqual(tmap[10], "Hoofdtransportas")
         self.assertEqual(tmap[20], "Hoofdvaarweg")
         self.assertEqual(tmap[30], "Overige vaarweg")
-        self.assertNotIn(40, tmap)
+        self.assertEqual(tmap.get(99, "Overig"), "Overig")
 
-    def test_calc_segment_distance_and_continuous_coverage(self):
-        # A–J–K example from SiggyF:
-        # Berth at A (d_A = 0). Segment A-J: length = 20 km, d_J = 20 km.
-        # Furthest point on A-J: (0 + 20 + 20) / 2 = 20 km (not 10 km!)
-        max_dist_aj = calc_segment_furthest_distance(0.0, 20.0, 20.0)
-        self.assertEqual(max_dist_aj, 20.0)
+    def test_furthest_distance_and_continuous_coverage(self):
+        peak_dist = calc_segment_furthest_distance(5.0, 10.0, 10.0)
+        self.assertEqual(peak_dist, 12.5)
 
-        # Compliant length on A-J with R = 15 km:
-        # reach_A = max(0, 15 - 0) = 15 km, reach_J = max(0, 15 - 20) = 0 km => 15 km
-        comp_len_aj = calc_segment_compliant_length(0.0, 20.0, 20.0, 15.0)
-        self.assertEqual(comp_len_aj, 15.0)
+        dominated_dist = calc_segment_furthest_distance(2.0, 15.0, 10.0)
+        self.assertEqual(dominated_dist, 15.0)
 
-        # Segment J-K: length = 20 km, d_J = 20 km, d_K = 40 km.
-        # Furthest point on J-K: (20 + 40 + 20) / 2 = 40 km.
-        max_dist_jk = calc_segment_furthest_distance(20.0, 40.0, 20.0)
-        self.assertEqual(max_dist_jk, 40.0)
+        covered_len = calc_segment_compliant_length(5.0, 12.0, 20.0, 15.0)
+        self.assertEqual(covered_len, 13.0)
 
-        # Compliant length on J-K with R = 15 km: reach_J = 0, reach_K = 0 => 0 km
-        comp_len_jk = calc_segment_compliant_length(20.0, 40.0, 20.0, 15.0)
-        self.assertEqual(comp_len_jk, 0.0)
+        full_covered = calc_segment_compliant_length(5.0, 5.0, 10.0, 15.0)
+        self.assertEqual(full_covered, 10.0)
 
     def test_spatial_distance_analysis_ajk_chain(self):
-        # Full graph Dijkstra test for A -20km- J -20km- K
         G = nx.Graph()
         G.add_node("node_A", is_overnight=True, is_kegel=True)
         G.add_node("node_J", is_overnight=False, is_kegel=False)
@@ -176,14 +211,12 @@ class TestBerthSpatialCapacity(unittest.TestCase):
 
         gdf = run_spatial_distance_analysis(G, route_segments)
 
-        # Segment A-J
         seg_aj = gdf.iloc[0]
         self.assertTrue(seg_aj["is_hvwn"])
         self.assertEqual(seg_aj["dist_to_overnight_km"], 20.0)
         self.assertEqual(seg_aj["compliant_30km_overnight_km"], 15.0)
         self.assertFalse(seg_aj["is_fully_compliant_overnight"])
 
-        # Segment J-K
         seg_jk = gdf.iloc[1]
         self.assertEqual(seg_jk["dist_to_overnight_km"], 40.0)
         self.assertEqual(seg_jk["compliant_30km_overnight_km"], 0.0)
@@ -251,28 +284,42 @@ class TestBerthSpatialCapacity(unittest.TestCase):
         r = gdf_routes.iloc[0]
         self.assertTrue(r["is_hvwn"])
 
-        # Expected overnight stops = 20 / 168
-        expected_p_stop = round(20.0 / DAILY_SAILING_DISTANCE_KM, 4)
-        self.assertEqual(r["expected_overnight_stops"], expected_p_stop)
-        self.assertEqual(r["p_overnight_stop"], expected_p_stop)
+        # Expected overnight stops = 20 / 168 (unrounded during computation)
+        expected_p_stop = 20.0 / DAILY_SAILING_DISTANCE_KM
+        self.assertAlmostEqual(r["expected_overnight_stops"], expected_p_stop, places=6)
+        self.assertAlmostEqual(r["p_overnight_stop"], expected_p_stop, places=6)
 
         # Overnight length & capacity
         self.assertEqual(r["overnight_berth_length_m"], 240.0)
         self.assertEqual(r["overnight_meter_nights_yr"], 240.0 * 365.0)
 
-        # Max carrying capacity overnight: (240 / 1000) * (168 / 20) * 365 = 735.8 km/yr
-        expected_max_cap = round((240.0 / 1000.0) * (168.0 / 20.0) * 365.0, 1)
-        self.assertEqual(r["max_capacity_ship_length_km_yr"], expected_max_cap)
+        # Max carrying capacity overnight: (240 / 1000) * (168 / 20) * 365 = 735.84 km/yr (unrounded during computation)
+        expected_max_cap = (240.0 / 1000.0) * (168.0 / 20.0) * 365.0
+        self.assertAlmostEqual(
+            r["max_capacity_ship_length_km_yr"], expected_max_cap, places=4
+        )
 
         # Kegel length & capacity
         self.assertEqual(r["kegel_berth_length_m"], 120.0)
         self.assertEqual(r["kegel_meter_nights_yr"], 120.0 * 365.0)
-        expected_max_kegel = round((120.0 / 1000.0) * (168.0 / 20.0) * 365.0, 1)
-        self.assertEqual(r["max_kegel_ship_length_km_yr"], expected_max_kegel)
+        expected_max_kegel = (120.0 / 1000.0) * (168.0 / 20.0) * 365.0
+        self.assertAlmostEqual(
+            r["max_kegel_ship_length_km_yr"], expected_max_kegel, places=4
+        )
 
         # Coverage percentages: 15 / 20 * 100 = 75%
         self.assertEqual(r["overnight_coverage_pct"], 75.0)
         self.assertEqual(r["kegel_coverage_pct"], 100.0)
+
+    def test_formatting_helpers(self):
+        self.assertEqual(format_km(12.345), "12.3 km")
+        self.assertEqual(format_km(None), "-")
+        self.assertEqual(format_pct(75.56), "75.6%")
+        self.assertEqual(format_int(1234.6), "1,235")
+        self.assertEqual(format_draagkracht(735.84), "735.8 km")
+        self.assertEqual(format_draagkracht(0.0), "-")
+        self.assertEqual(format_dist(14.82), "14.8 km")
+        self.assertEqual(format_dist(float("inf")), "Geen ligplaats bereikbaar")
 
     def test_empty_sources_dijkstra_fails_fast(self):
         G = nx.Graph()

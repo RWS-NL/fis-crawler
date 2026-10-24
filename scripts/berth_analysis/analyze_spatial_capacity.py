@@ -90,10 +90,65 @@ def build_network_classification_map(fc: gpd.GeoDataFrame) -> dict[int, str]:
     return type_map
 
 
-def classify_and_calculate_capacity(
+def determine_kegels(
+    signalling: str | None = None,
+    name: str | None = None,
+    is_kegel: bool = False,
+) -> int:
+    """Parses signalling and name attributes to determine the kegel count (0, 1, or 2).
+
+    Separated attribute parsing/formatting helper, decoupled from numerical computations.
+    """
+    sig = str(signalling or "")
+    n = str(name or "").lower()
+    if (
+        "TWO_BLUE_LIGHTS" in sig
+        or "2 kegel" in n
+        or "2-kegel" in n
+        or "2kegel" in n
+        or "twee kegel" in n
+    ):
+        return 2
+    if (
+        "ONE_BLUE_LIGHT" in sig
+        or "1 kegel" in n
+        or "1-kegel" in n
+        or "1kegel" in n
+        or "één kegel" in n
+        or "een kegel" in n
+        or "kegel" in n
+    ):
+        return 1
+    if is_kegel:
+        return 1
+    return 0
+
+
+def determine_capacity_and_length(
+    length: float | None,
+    num_rows: float | int | None,
+    mooring_facilities: float | int | None,
+) -> tuple[float, float]:
+    """Computes unrounded berth capacity (ships) and effective length (m).
+
+    Pure computation logic: rounding should be performed only while formatting.
+    """
+    rows = float(num_rows) if pd.notna(num_rows) and float(num_rows) > 0 else 1.0
+    base_len = float(length) if pd.notna(length) and float(length) > 0 else 0.0
+    effective_len = base_len * rows
+
+    if pd.notna(mooring_facilities) and float(mooring_facilities) > 0:
+        cap = float(mooring_facilities)
+    else:
+        cap = 1.0 * rows
+
+    return cap, effective_len
+
+
+def classify_berths(
     berths: gpd.GeoDataFrame, cardropoffs: gpd.GeoDataFrame
 ) -> gpd.GeoDataFrame:
-    """Classifies berths into overnight and kegel berths, calculating berth length and capacity."""
+    """Classifies berths into overnight and kegel berths, extracting attributes without numerical calculations."""
     df = berths.copy()
 
     cardropoff_berth_ids = set(cardropoffs["BerthId"].dropna().astype(int).unique())
@@ -127,56 +182,33 @@ def classify_and_calculate_capacity(
     is_name_kegel = df["Name"].astype(str).str.lower().str.contains("kegel")
     df["is_kegel"] = is_sig_kegel | is_name_kegel
 
-    def determine_kegels(row: pd.Series) -> int:
-        sig = str(row.get("Signalling", ""))
-        name = str(row.get("Name", "")).lower()
-        if (
-            "TWO_BLUE_LIGHTS" in sig
-            or "2 kegel" in name
-            or "2-kegel" in name
-            or "2kegel" in name
-            or "twee kegel" in name
-        ):
-            return 2
-        if (
-            "ONE_BLUE_LIGHT" in sig
-            or "1 kegel" in name
-            or "1-kegel" in name
-            or "1kegel" in name
-            or "één kegel" in name
-            or "een kegel" in name
-            or "kegel" in name
-        ):
-            return 1
-        if row.get("is_kegel"):
-            return 1
-        return 0
+    df["kegel_count"] = df.apply(
+        lambda row: determine_kegels(
+            row.get("Signalling"), row.get("Name"), bool(row.get("is_kegel"))
+        ),
+        axis=1,
+    )
 
-    df["kegel_count"] = df.apply(determine_kegels, axis=1)
+    return df
 
-    def determine_capacity_and_length(row: pd.Series) -> tuple[int, float]:
-        num_rows_val = row.get("NumberOfRows")
-        rows = int(num_rows_val) if pd.notna(num_rows_val) and num_rows_val > 0 else 1
 
-        length_val = row.get("Length")
-        has_pos_len = pd.notna(length_val) and float(length_val) > 0
-        base_len = float(length_val) if has_pos_len else 0.0
-        effective_len = base_len * rows
+def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Calculates unrounded berth capacity and effective length from physical dimensions."""
+    df = berths.copy()
 
-        mooring_fac = row.get("NumberOfMooringFacilities")
-        if pd.notna(mooring_fac) and float(mooring_fac) > 0:
-            cap = int(float(mooring_fac))
-        else:
-            cap = 1 * rows
-
-        return cap, effective_len
-
-    cap_len_results = df.apply(determine_capacity_and_length, axis=1)
+    cap_len_results = df.apply(
+        lambda row: determine_capacity_and_length(
+            row.get("Length"),
+            row.get("NumberOfRows"),
+            row.get("NumberOfMooringFacilities"),
+        ),
+        axis=1,
+    )
     df["capacity_ships"] = [res[0] for res in cap_len_results]
     df["effective_length_m"] = [res[1] for res in cap_len_results]
 
     logger.info(
-        "Classified %d berths: %d overnight (total length %.0fm, capacity %d ships), %d kegel (total length %.0fm)",
+        "Classified %d berths: %d overnight (total length %.0fm, capacity %.0f ships), %d kegel (total length %.0fm)",
         len(df),
         df["is_overnight"].sum(),
         df.loc[df["is_overnight"], "effective_length_m"].sum(),
@@ -185,6 +217,14 @@ def classify_and_calculate_capacity(
         df.loc[df["is_kegel"], "effective_length_m"].sum(),
     )
     return df
+
+
+def classify_and_calculate_capacity(
+    berths: gpd.GeoDataFrame, cardropoffs: gpd.GeoDataFrame
+) -> gpd.GeoDataFrame:
+    """Classifies berths and calculates physical capacities (unrounded)."""
+    classified = classify_berths(berths, cardropoffs)
+    return calculate_berth_capacities(classified)
 
 
 def build_route_network_graph(
@@ -441,14 +481,12 @@ def run_spatial_distance_analysis(
                 "is_hvwn": seg.get("netwerk_type")
                 in ["Hoofdtransportas", "Hoofdvaarweg"],
                 "is_reachable_overnight": is_reach_ov,
-                "dist_to_overnight_km": (
-                    round(max_dist_ov, 2) if is_reach_ov else np.nan
-                ),
-                "compliant_30km_overnight_km": round(comp_len_ov, 3),
+                "dist_to_overnight_km": (max_dist_ov if is_reach_ov else np.nan),
+                "compliant_30km_overnight_km": comp_len_ov,
                 "is_fully_compliant_overnight": (is_reach_ov and max_dist_ov <= 15.0),
                 "is_reachable_kegel": is_reach_kg,
-                "dist_to_kegel_km": (round(max_dist_kg, 2) if is_reach_kg else np.nan),
-                "compliant_60km_kegel_km": round(comp_len_kg, 3),
+                "dist_to_kegel_km": (max_dist_kg if is_reach_kg else np.nan),
+                "compliant_60km_kegel_km": comp_len_kg,
                 "is_fully_compliant_kegel": (is_reach_kg and max_dist_kg <= 30.0),
             }
         )
@@ -586,59 +624,53 @@ def compute_route_capacity_and_intensity(
     )
 
     df["num_overnight_berths"] = df["num_overnight_berths"].fillna(0).astype(int)
-    df["overnight_berth_length_m"] = df["overnight_berth_length_m"].fillna(0.0).round(1)
-    df["overnight_capacity_ships"] = (
-        df["overnight_capacity_ships"].fillna(0).astype(int)
-    )
+    df["overnight_berth_length_m"] = df["overnight_berth_length_m"].fillna(0.0)
+    df["overnight_capacity_ships"] = df["overnight_capacity_ships"].fillna(0.0)
     df["has_cardropoff"] = df["has_cardropoff"].fillna(False).astype(bool)
 
     df["num_kegel_berths"] = df["num_kegel_berths"].fillna(0).astype(int)
-    df["kegel_berth_length_m"] = df["kegel_berth_length_m"].fillna(0.0).round(1)
-    df["kegel_capacity_ships"] = df["kegel_capacity_ships"].fillna(0).astype(int)
+    df["kegel_berth_length_m"] = df["kegel_berth_length_m"].fillna(0.0)
+    df["kegel_capacity_ships"] = df["kegel_capacity_ships"].fillna(0.0)
 
-    # Coverage percentages
+    # Coverage percentages (unrounded during computation)
     df["overnight_coverage_pct"] = np.where(
         df["total_length_km"] > 0,
-        (df["overnight_compliant_km"] / df["total_length_km"] * 100.0).round(1),
+        df["overnight_compliant_km"] / df["total_length_km"] * 100.0,
         0.0,
     )
     df["kegel_coverage_pct"] = np.where(
         df["total_length_km"] > 0,
-        (df["kegel_compliant_km"] / df["total_length_km"] * 100.0).round(1),
+        df["kegel_compliant_km"] / df["total_length_km"] * 100.0,
         0.0,
     )
 
     # Expected overnight stops per passage (RVW § 6.4.2: L_route / 168km)
     df["expected_overnight_stops"] = np.where(
         df["total_length_km"] > 0,
-        (df["total_length_km"] / DAILY_SAILING_DISTANCE_KM).round(4),
+        df["total_length_km"] / DAILY_SAILING_DISTANCE_KM,
         0.0,
     )
     df["p_overnight_stop"] = df["expected_overnight_stops"]
 
     # Available meter-nights per year
-    df["overnight_meter_nights_yr"] = (df["overnight_berth_length_m"] * 365.0).round(1)
-    df["kegel_meter_nights_yr"] = (df["kegel_berth_length_m"] * 365.0).round(1)
+    df["overnight_meter_nights_yr"] = df["overnight_berth_length_m"] * 365.0
+    df["kegel_meter_nights_yr"] = df["kegel_berth_length_m"] * 365.0
 
     # Maximum annual carrying capacity in ship-length kilometers per year
     # (L_kade / 1000) * (DAILY_SAILING_DISTANCE_KM / L_route) * 365
     df["max_capacity_ship_length_km_yr"] = np.where(
-        df["total_length_km"] > 0,
-        (
-            (df["overnight_berth_length_m"] / 1000.0)
-            * (DAILY_SAILING_DISTANCE_KM / df["total_length_km"])
-            * 365.0
-        ).round(1),
+        df["expected_overnight_stops"] > 0,
+        (df["overnight_berth_length_m"] / 1000.0)
+        * (1.0 / df["expected_overnight_stops"])
+        * 365.0,
         0.0,
     )
 
     df["max_kegel_ship_length_km_yr"] = np.where(
-        df["total_length_km"] > 0,
-        (
-            (df["kegel_berth_length_m"] / 1000.0)
-            * (DAILY_SAILING_DISTANCE_KM / df["total_length_km"])
-            * 365.0
-        ).round(1),
+        df["expected_overnight_stops"] > 0,
+        (df["kegel_berth_length_m"] / 1000.0)
+        * (1.0 / df["expected_overnight_stops"])
+        * 365.0,
         0.0,
     )
 
@@ -651,23 +683,62 @@ def compute_route_capacity_and_intensity(
     return gdf
 
 
-def generate_markdown_summary(
+def format_km(val: float | None) -> str:
+    """Formats a kilometer value with 1 decimal place."""
+    if val is None or pd.isna(val):
+        return "-"
+    return f"{float(val):,.1f} km"
+
+
+def format_pct(val: float | None) -> str:
+    """Formats a percentage with 1 decimal place."""
+    if val is None or pd.isna(val):
+        return "0.0%"
+    return f"{float(val):.1f}%"
+
+
+def format_int(val: int | float | None) -> str:
+    """Formats a count or capacity integer with thousands separator."""
+    if val is None or pd.isna(val):
+        return "0"
+    return f"{int(round(float(val))):,}"
+
+
+def format_length_m(val: float | None) -> str:
+    """Formats meter length with 1 decimal place."""
+    if val is None or pd.isna(val):
+        return "0.0 m"
+    return f"{float(val):,.1f} m"
+
+
+def format_kade_m(val: float | None) -> str:
+    """Formats quay length in meters without decimals, or dash if 0."""
+    if val is None or pd.isna(val) or float(val) <= 0:
+        return "-"
+    return f"{float(val):,.0f} m"
+
+
+def format_draagkracht(val: float | None) -> str:
+    """Formats maximum carrying capacity (km ship/yr) with 1 decimal, or dash if 0."""
+    if val is None or pd.isna(val) or float(val) <= 0:
+        return "-"
+    return f"{float(val):,.1f} km"
+
+
+def format_dist(val: float | None) -> str:
+    """Formats distance in km, or fallback if unreachable."""
+    if val is None or pd.isna(val) or np.isinf(val):
+        return "Geen ligplaats bereikbaar"
+    return f"{float(val):.1f} km"
+
+
+def calculate_report_metrics(
     gdf_segments: gpd.GeoDataFrame,
     gdf_clusters: gpd.GeoDataFrame,
     gdf_routes: gpd.GeoDataFrame,
     berths: gpd.GeoDataFrame,
-    output_path: Path,
-) -> None:
-    """Generates a structured markdown report of the spatial berth analysis using Jinja2."""
-    template_dir = Path(__file__).parent / "templates"
-    env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(template_dir),
-        autoescape=False,
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
-    template = env.get_template("berth_spatial_report.md.j2")
-
+) -> dict:
+    """Computes pure summary metrics and aggregations for reporting without string formatting."""
     netwerk_stats: dict[str, dict] = {}
     for ntype in [
         "Hoofdtransportas",
@@ -676,9 +747,9 @@ def generate_markdown_summary(
         "Niet geclassificeerd / Zee",
     ]:
         grp = gdf_segments[gdf_segments["netwerk_type"] == ntype]
-        tot = grp["length_km"].sum()
-        ov = grp["compliant_30km_overnight_km"].sum()
-        kg = grp["compliant_60km_kegel_km"].sum()
+        tot = float(grp["length_km"].sum())
+        ov = float(grp["compliant_30km_overnight_km"].sum())
+        kg = float(grp["compliant_60km_kegel_km"].sum())
         netwerk_stats[ntype] = {
             "type": ntype,
             "tot_km": tot,
@@ -745,22 +816,16 @@ def generate_markdown_summary(
         .head(15)
     )
 
-    hvwn_gaps = []
-    for _, r in hvwn_gaps_df.iterrows():
-        dist_str = (
-            f"{r['max_dist']:.1f} km"
-            if pd.notna(r["max_dist"]) and not np.isinf(r["max_dist"])
-            else "Geen ligplaats bereikbaar"
-        )
-        hvwn_gaps.append(
-            {
-                "route_id": r["route_id"],
-                "route_name": r["route_name"],
-                "netwerk_type": r["netwerk_type"],
-                "gap_km": r["gap_km"],
-                "dist_str": dist_str,
-            }
-        )
+    hvwn_gaps = [
+        {
+            "route_id": r["route_id"],
+            "route_name": r["route_name"],
+            "netwerk_type": r["netwerk_type"],
+            "gap_km": float(r["gap_km"]),
+            "max_dist": float(r["max_dist"]) if pd.notna(r["max_dist"]) else np.nan,
+        }
+        for _, r in hvwn_gaps_df.iterrows()
+    ]
 
     top_cap_df = (
         gdf_routes[gdf_routes["is_hvwn"]]
@@ -768,43 +833,24 @@ def generate_markdown_summary(
         .head(20)
     )
 
-    top_cap = []
-    for _, r in top_cap_df.iterrows():
-        ov_kade_str = (
-            f"{r['overnight_berth_length_m']:,.0f} m"
-            if r["overnight_berth_length_m"] > 0
-            else "-"
-        )
-        ov_draag_str = (
-            f"{r['max_capacity_ship_length_km_yr']:,.1f} km"
-            if r["max_capacity_ship_length_km_yr"] > 0
-            else "-"
-        )
-        kg_kade_str = (
-            f"{r['kegel_berth_length_m']:,.0f} m"
-            if r["kegel_berth_length_m"] > 0
-            else "-"
-        )
-        kg_draag_str = (
-            f"{r['max_kegel_ship_length_km_yr']:,.1f} km"
-            if r["max_kegel_ship_length_km_yr"] > 0
-            else "-"
-        )
-        top_cap.append(
-            {
-                "route_code": r["route_code"],
-                "route_name": r["route_name"],
-                "netwerk_type": r["netwerk_type"],
-                "total_length_km": r["total_length_km"],
-                "ov_kade_str": ov_kade_str,
-                "ov_draag_str": ov_draag_str,
-                "kg_kade_str": kg_kade_str,
-                "kg_draag_str": kg_draag_str,
-                "overnight_coverage_pct": r["overnight_coverage_pct"],
-            }
-        )
+    top_cap = [
+        {
+            "route_code": r["route_code"],
+            "route_name": r["route_name"],
+            "netwerk_type": r["netwerk_type"],
+            "total_length_km": float(r["total_length_km"]),
+            "overnight_berth_length_m": float(r["overnight_berth_length_m"]),
+            "max_capacity_ship_length_km_yr": float(
+                r["max_capacity_ship_length_km_yr"]
+            ),
+            "kegel_berth_length_m": float(r["kegel_berth_length_m"]),
+            "max_kegel_ship_length_km_yr": float(r["max_kegel_ship_length_km_yr"]),
+            "overnight_coverage_pct": float(r["overnight_coverage_pct"]),
+        }
+        for _, r in top_cap_df.iterrows()
+    ]
 
-    context = {
+    return {
         "hta_stat": hta_stat,
         "hvw_stat": hvw_stat,
         "ovg_stat": ovg_stat,
@@ -834,6 +880,39 @@ def generate_markdown_summary(
         "hvwn_gaps": hvwn_gaps,
         "top_cap": top_cap,
     }
+
+
+def generate_markdown_summary(
+    gdf_segments: gpd.GeoDataFrame,
+    gdf_clusters: gpd.GeoDataFrame,
+    gdf_routes: gpd.GeoDataFrame,
+    berths: gpd.GeoDataFrame,
+    output_path: Path,
+) -> None:
+    """Generates a structured markdown report using Jinja2 with custom presentation filters."""
+    template_dir = Path(__file__).parent / "templates"
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(template_dir),
+        autoescape=False,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    env.filters["format_km"] = format_km
+    env.filters["format_pct"] = format_pct
+    env.filters["format_int"] = format_int
+    env.filters["format_length_m"] = format_length_m
+    env.filters["format_kade_m"] = format_kade_m
+    env.filters["format_draagkracht"] = format_draagkracht
+    env.filters["format_dist"] = format_dist
+
+    template = env.get_template("berth_spatial_report.md.j2")
+
+    context = calculate_report_metrics(
+        gdf_segments=gdf_segments,
+        gdf_clusters=gdf_clusters,
+        gdf_routes=gdf_routes,
+        berths=berths,
+    )
 
     rendered_md = template.render(**context)
     output_path.write_text(rendered_md, encoding="utf-8")

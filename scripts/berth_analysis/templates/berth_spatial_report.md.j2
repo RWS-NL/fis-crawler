@@ -8,22 +8,22 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
 
 | Netwerkcategorie | Totale lengte (km) | Overnachten $\le 30$ km | Overnachten (%) | Kegel $\le 60$ km | Kegel (%) |
 |---|---|---|---|---|---|
-| **Hoofdtransportassen (HTA)** | {{ "{:,.1f}".format(hta_stat.tot_km) }} km | {{ "{:,.1f}".format(hta_stat.ov_km) }} km | **{{ "{:.1f}".format(hta_stat.ov_pct) }}%** | {{ "{:,.1f}".format(hta_stat.kg_km) }} km | **{{ "{:.1f}".format(hta_stat.kg_pct) }}%** |
-| **Hoofdvaarwegen (HVW)** | {{ "{:,.1f}".format(hvw_stat.tot_km) }} km | {{ "{:,.1f}".format(hvw_stat.ov_km) }} km | **{{ "{:.1f}".format(hvw_stat.ov_pct) }}%** | {{ "{:,.1f}".format(hvw_stat.kg_km) }} km | **{{ "{:.1f}".format(hvw_stat.kg_pct) }}%** |
-| **Totaal HVWN (HTA + HVW)** | **{{ "{:,.1f}".format(hvwn_tot) }} km** | **{{ "{:,.1f}".format(hvwn_ov) }} km** | **{{ "{:.1f}".format(hvwn_ov_pct) }}%** | **{{ "{:,.1f}".format(hvwn_kg) }} km** | **{{ "{:.1f}".format(hvwn_kg_pct) }}%** |
-| Overige vaarwegen | {{ "{:,.1f}".format(ovg_stat.tot_km) }} km | {{ "{:,.1f}".format(ovg_stat.ov_km) }} km | {{ "{:.1f}".format(ovg_stat.ov_pct) }}% | {{ "{:,.1f}".format(ovg_stat.kg_km) }} km | {{ "{:.1f}".format(ovg_stat.kg_pct) }}% |
-| Niet geclassificeerd (kust/zee) | {{ "{:,.1f}".format(unc_stat.tot_km) }} km | {{ "{:,.1f}".format(unc_stat.ov_km) }} km | {{ "{:.1f}".format(unc_stat.ov_pct) }}% | {{ "{:,.1f}".format(unc_stat.kg_km) }} km | {{ "{:.1f}".format(unc_stat.kg_pct) }}% |
+| **Hoofdtransportassen (HTA)** | {{ hta_stat.tot_km | format_km }} | {{ hta_stat.ov_km | format_km }} | **{{ hta_stat.ov_pct | format_pct }}** | {{ hta_stat.kg_km | format_km }} | **{{ hta_stat.kg_pct | format_pct }}** |
+| **Hoofdvaarwegen (HVW)** | {{ hvw_stat.tot_km | format_km }} | {{ hvw_stat.ov_km | format_km }} | **{{ hvw_stat.ov_pct | format_pct }}** | {{ hvw_stat.kg_km | format_km }} | **{{ hvw_stat.kg_pct | format_pct }}** |
+| **Totaal HVWN (HTA + HVW)** | **{{ hvwn_tot | format_km }}** | **{{ hvwn_ov | format_km }}** | **{{ hvwn_ov_pct | format_pct }}** | **{{ hvwn_kg | format_km }}** | **{{ hvwn_kg_pct | format_pct }}** |
+| Overige vaarwegen | {{ ovg_stat.tot_km | format_km }} | {{ ovg_stat.ov_km | format_km }} | {{ ovg_stat.ov_pct | format_pct }} | {{ ovg_stat.kg_km | format_km }} | {{ ovg_stat.kg_pct | format_pct }} |
+| Niet geclassificeerd (kust/zee) | {{ unc_stat.tot_km | format_km }} | {{ unc_stat.ov_km | format_km }} | {{ unc_stat.ov_pct | format_pct }} | {{ unc_stat.kg_km | format_km }} | {{ unc_stat.kg_pct | format_pct }} |
 
 ---
 
 ## 2. Ligplaatscapaciteit en Aanbod
 
-* **Totaal aantal ligplaatsrecords in FIS**: {{ "{:,}".format(total_berths) }}
-* **Aangemerkt als overnachtingsligplaats**: {{ "{:,}".format(overnight_berths_count) }} records
-* **Totale kadelengte overnachten**: **{{ "{:,.1f}".format(overnight_kadelengte_m) }} m**
-* **Totale kadecapaciteit overnachten**: **{{ "{:,.0f}".format(overnight_meter_nachten) }} meter-nachten per jaar**
-* **Kegelligplaatsen (gevaarlijke stoffen)**: {{ "{:,}".format(kegel_berths_count) }} records ({{ "{:,.1f}".format(kegel_kadelengte_m) }} m kadelengte)
-* **Aantal geclusterde overnachtingslocaties**: {{ "{:,}".format(total_clusters) }} locaties
+* **Totaal aantal ligplaatsrecords in FIS**: {{ total_berths | format_int }}
+* **Aangemerkt als overnachtingsligplaats**: {{ overnight_berths_count | format_int }} records
+* **Totale kadelengte overnachten**: **{{ overnight_kadelengte_m | format_length_m }}**
+* **Totale kadecapaciteit overnachten**: **{{ overnight_meter_nachten | format_int }} meter-nachten per jaar**
+* **Kegelligplaatsen (gevaarlijke stoffen)**: {{ kegel_berths_count | format_int }} records ({{ kegel_kadelengte_m | format_length_m }} kadelengte)
+* **Aantal geclusterde overnachtingslocaties**: {{ total_clusters | format_int }} locaties
 
 ---
 
@@ -38,7 +38,7 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
 | Route ID | Locatie / Naam | Capaciteit (schepen) | Kadelengte (m) |
 |---|---|---|---|
 {% for r in missing_cardrop %}
-| {{ r.route_id }} | {{ r.cluster_name }} | {{ r.total_capacity_ships }} | {{ "{:.0f}".format(r.total_length_m) }}m |
+| {{ r.route_id }} | {{ r.cluster_name }} | {{ r.total_capacity_ships | format_int }} | {{ r.total_length_m | format_int }}m |
 {% endfor %}
 {% endif %}
 
@@ -49,7 +49,7 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
 | Route ID | Routenaam | Netwerktype | Trajectlengte zonder volledige dekking (km) | Max. afstand tot ligplaats |
 |---|---|---|---|---|
 {% for r in hvwn_gaps %}
-| {{ r.route_id }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ "{:.1f}".format(r.gap_km) }} km | {{ r.dist_str }} |
+| {{ r.route_id }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ r.gap_km | format_km }} | {{ r.max_dist | format_dist }} |
 {% endfor %}
 
 ---
@@ -57,12 +57,12 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
 ## 5. Maximale Draagkracht per Route (RVW 2020 § 6.4.2)
 
 > [!NOTE]
-> **Corridor-context**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte en verwachte overnachtingen op het deeltraject ($L_{\text{kade}} \times 365 / \text{verwachte stops}$). Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.
+> **Corridor-context**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte en verwachte overnachtingen op het deeltraject ($L_{\\text{kade}} \\times 365 / \\text{verwachte stops}$). Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.
 
 Berekend tot de stap waar scheepslengte nodig is. Toont per route de beschikbare kadelengte en de maximale jaardraagkracht in scheepslengte-kilometers per jaar (zowel regulier overnachten als kegel):
 
 | Code | Routenaam | Categorie | Lengte (km) | Overnachting Kade (m) | Max. Draagkracht Overnachten (km schip/jr) | Kegel Kade (m) | Max. Draagkracht Kegel (km schip/jr) | Dekking Overnacht (%) |
 |---|---|---|---|---|---|---|---|---|
 {% for r in top_cap %}
-| {{ r.route_code }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ "{:.1f}".format(r.total_length_km) }} km | {{ r.ov_kade_str }} | {{ r.ov_draag_str }} | {{ r.kg_kade_str }} | {{ r.kg_draag_str }} | {{ "{:.1f}".format(r.overnight_coverage_pct) }}% |
+| {{ r.route_code }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ r.total_length_km | format_km }} | {{ r.overnight_berth_length_m | format_kade_m }} | {{ r.max_capacity_ship_length_km_yr | format_draagkracht }} | {{ r.kegel_berth_length_m | format_kade_m }} | {{ r.max_kegel_ship_length_km_yr | format_draagkracht }} | {{ r.overnight_coverage_pct | format_pct }} |
 {% endfor %}
