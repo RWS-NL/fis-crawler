@@ -264,5 +264,13 @@ Backups.backupdb
 .MobileBackups.trash
 MobileBackups.trash
 tmbootpicker.efi
-.claude/settings.local.json
+
+# AI assistant settings and instructions (kept local, not shared)
+.claude/
 CLAUDE.md
+CLAUDE.local.md
+.gemini/
+GEMINI.md
+.cursor/
+.cursorrules
+.aider*
