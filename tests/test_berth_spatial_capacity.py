@@ -31,14 +31,14 @@ class TestBerthSpatialCapacity(unittest.TestCase):
                 },
                 {
                     "Id": 2,
-                    "Name": "Kegelligplaats B",
+                    "Name": "2-kegel ligplaats B",
                     "Facility": ["GANGWAY"],
                     "Category": "OTHER",
                     "MaximumStayDurationH": 24.0,
-                    "Signalling": "TWO_BLUE_LIGHTS",
+                    "Signalling": None,
                     "Length": 120.0,
-                    "NumberOfRows": 1,
-                    "NumberOfMooringFacilities": 2.0,
+                    "NumberOfRows": 2,
+                    "NumberOfMooringFacilities": None,
                     "geometry": Point(4.91, 52.11),
                 },
                 {
@@ -52,6 +52,18 @@ class TestBerthSpatialCapacity(unittest.TestCase):
                     "NumberOfRows": 1,
                     "NumberOfMooringFacilities": None,
                     "geometry": Point(4.92, 52.12),
+                },
+                {
+                    "Id": 4,
+                    "Name": "Ligplaats Duwvaartsluis Krammer",
+                    "Facility": [],
+                    "Category": "ALL_VESSELS",
+                    "MaximumStayDurationH": None,
+                    "Signalling": None,
+                    "Length": 450.0,
+                    "NumberOfRows": 1,
+                    "NumberOfMooringFacilities": None,
+                    "geometry": Point(4.93, 52.13),
                 },
             ],
             crs="EPSG:4326",
@@ -78,14 +90,18 @@ class TestBerthSpatialCapacity(unittest.TestCase):
         self.assertEqual(df.loc[df["Id"] == 1, "effective_length_m"].iloc[0], 240.0)
         self.assertFalse(df.loc[df["Id"] == 1, "is_kegel"].iloc[0])
 
-        # Berth 2: kegel (2 blue lights), capacity = 1 ship (120m)
+        # Berth 2: kegel ('2-kegel' in name), rows=2 => length=240m, capacity = 2 ships
         self.assertTrue(df.loc[df["Id"] == 2, "is_kegel"].iloc[0])
         self.assertEqual(df.loc[df["Id"] == 2, "kegel_count"].iloc[0], 2)
-        self.assertEqual(df.loc[df["Id"] == 2, "capacity_ships"].iloc[0], 1)
-        self.assertEqual(df.loc[df["Id"] == 2, "effective_length_m"].iloc[0], 120.0)
+        self.assertEqual(df.loc[df["Id"] == 2, "capacity_ships"].iloc[0], 2)
+        self.assertEqual(df.loc[df["Id"] == 2, "effective_length_m"].iloc[0], 240.0)
 
         # Berth 3: WAITING_AREA should not be classified as overnight
         self.assertFalse(df.loc[df["Id"] == 3, "is_overnight"].iloc[0])
+
+        # Berth 4: Krammersluizen case (ALL_VESSELS with NaN stay duration) => is_overnight True
+        self.assertTrue(df.loc[df["Id"] == 4, "is_overnight"].iloc[0])
+        self.assertEqual(df.loc[df["Id"] == 4, "effective_length_m"].iloc[0], 450.0)
 
     def test_build_network_classification_map(self):
         fc = gpd.GeoDataFrame(
@@ -235,8 +251,9 @@ class TestBerthSpatialCapacity(unittest.TestCase):
         r = gdf_routes.iloc[0]
         self.assertTrue(r["is_hvwn"])
 
-        # Stop probability = 20 / 168
+        # Expected overnight stops = 20 / 168
         expected_p_stop = round(20.0 / DAILY_SAILING_DISTANCE_KM, 4)
+        self.assertEqual(r["expected_overnight_stops"], expected_p_stop)
         self.assertEqual(r["p_overnight_stop"], expected_p_stop)
 
         # Overnight length & capacity

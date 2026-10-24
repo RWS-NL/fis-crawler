@@ -24,19 +24,25 @@ from shapely.ops import substring
 logger = logging.getLogger(__name__)
 
 # RVW 2020 & navigation constants
-NOMINAL_SHIP_LENGTH_M = 110.0  # CEMT Va standard vessel
-CLEARANCE_SPACING_M = 10.0  # RVW 2020 p. 146 spacing s for class V+
+# Standard reference vessel: CEMT Va (110m length, 11.4m beam)
+NOMINAL_SHIP_LENGTH_M = 110.0
+# Spacing s between moored vessels: RVW 2020 p. 146 (5m for class I-IV, 10m for class V+)
+CLEARANCE_SPACING_M = 10.0
 SLOT_LENGTH_M = NOMINAL_SHIP_LENGTH_M + CLEARANCE_SPACING_M  # 120.0 m
 
-NORMAL_DAY_SAILING_HOURS = 14.0  # Exploitatievorm A1: max 14 sailing hours per day
-AVERAGE_SAILING_SPEED_KMH = 12.0  # Average commercial navigation speed (km/h)
+# Commercial navigation speed & daily sailing distance:
+# RVW 2020 § 6.3 p. 144: "omstreeks 2 uur varen... circa 30 km" => ~15 km/h unobstructed,
+# approx. 12 km/h average over the fairway network including bends, locks, and speed limits.
+# Binnenvaartwet / RPR exploitatievorm A1: max. 14 sailing hours per day (min. 8 hours rest).
+NORMAL_DAY_SAILING_HOURS = 14.0
+AVERAGE_SAILING_SPEED_KMH = 12.0
 DAILY_SAILING_DISTANCE_KM = (
     NORMAL_DAY_SAILING_HOURS * AVERAGE_SAILING_SPEED_KMH
 )  # 168.0 km
 
 MAX_CLUSTER_SPAN_KM = 0.5  # Max cluster diameter along fairway (500 m)
 CAR_DROPOFF_MIN_CAPACITY_SHIPS = (
-    15  # RVW § 6.6: capacity >= 15 ships requires car drop-off
+    15  # RVW § 6.6: ports with capacity >= 15 ships require car drop-off
 )
 
 
@@ -103,10 +109,22 @@ def classify_and_calculate_capacity(
     is_fac_overnight = df["Facility"].astype(str).str.contains("OVERNIGHT_ACCOMODATION")
     is_waiting = df["Category"].isin(["WAITING_AREA"])
     is_loading = df["Category"].isin(["LOADING_AND_UNLOADING"])
-    is_long_stay = df["MaximumStayDurationH"].fillna(0) >= 12.0
+    is_short_stay = df["MaximumStayDurationH"].fillna(999.0) < 12.0
+    is_long_stay = df["MaximumStayDurationH"].fillna(0.0) >= 12.0
+    is_commercial_cat = df["Category"].isin(
+        ["ALL_VESSELS", "PUSH_TOW_VESSELS", "NON_PUSH_TOW_VESSELS"]
+    )
+    is_long_quay = (
+        (df["Length"].fillna(0.0) >= 100.0)
+        & (df["Category"] == "OTHER")
+        & df["MaximumStayDurationH"].isna()
+    )
 
-    df["is_overnight"] = (is_fac_overnight & ~is_waiting) | (
-        is_long_stay & ~is_waiting & ~is_loading
+    df["is_overnight"] = (
+        (is_fac_overnight | is_commercial_cat | is_long_stay | is_long_quay)
+        & ~is_waiting
+        & ~is_loading
+        & ~is_short_stay
     )
 
     is_sig_kegel = df["Signalling"].isin(["ONE_BLUE_LIGHT", "TWO_BLUE_LIGHTS"])
@@ -116,9 +134,23 @@ def classify_and_calculate_capacity(
     def determine_kegels(row: pd.Series) -> int:
         sig = str(row.get("Signalling", ""))
         name = str(row.get("Name", "")).lower()
-        if "TWO_BLUE_LIGHTS" in sig or "2 kegel" in name:
+        if (
+            "TWO_BLUE_LIGHTS" in sig
+            or "2 kegel" in name
+            or "2-kegel" in name
+            or "2kegel" in name
+            or "twee kegel" in name
+        ):
             return 2
-        if "ONE_BLUE_LIGHT" in sig or "1 kegel" in name:
+        if (
+            "ONE_BLUE_LIGHT" in sig
+            or "1 kegel" in name
+            or "1-kegel" in name
+            or "1kegel" in name
+            or "één kegel" in name
+            or "een kegel" in name
+            or "kegel" in name
+        ):
             return 1
         if row.get("is_kegel"):
             return 1
@@ -126,26 +158,30 @@ def classify_and_calculate_capacity(
 
     df["kegel_count"] = df.apply(determine_kegels, axis=1)
 
-    def determine_capacity(row: pd.Series) -> int:
+    def determine_capacity_and_length(row: pd.Series) -> tuple[int, float]:
         num_rows_val = row.get("NumberOfRows")
         rows = int(num_rows_val) if pd.notna(num_rows_val) and num_rows_val > 0 else 1
 
         length_val = row.get("Length")
-        if pd.notna(length_val) and float(length_val) > 0:
-            len_m = float(length_val)
-            cap = int(np.floor((len_m + CLEARANCE_SPACING_M) / SLOT_LENGTH_M)) * rows
-            return max(1, cap)
+        has_pos_len = pd.notna(length_val) and float(length_val) > 0
+        base_len = float(length_val) if has_pos_len else NOMINAL_SHIP_LENGTH_M
+        effective_len = base_len * rows
 
-        mooring_fac = row.get("NumberOfMooringFacilities")
-        if pd.notna(mooring_fac) and float(mooring_fac) > 0:
-            return int(float(mooring_fac))
+        if has_pos_len:
+            cap = int(np.floor((base_len + CLEARANCE_SPACING_M) / SLOT_LENGTH_M)) * rows
+            cap = max(1, cap)
+        else:
+            mooring_fac = row.get("NumberOfMooringFacilities")
+            if pd.notna(mooring_fac) and float(mooring_fac) > 0:
+                cap = int(float(mooring_fac))
+            else:
+                cap = 1 * rows
 
-        return 1
+        return cap, effective_len
 
-    df["capacity_ships"] = df.apply(determine_capacity, axis=1)
-
-    # Effective berth length in meters (default to nominal vessel length if not registered)
-    df["effective_length_m"] = df["Length"].fillna(NOMINAL_SHIP_LENGTH_M).astype(float)
+    cap_len_results = df.apply(determine_capacity_and_length, axis=1)
+    df["capacity_ships"] = [res[0] for res in cap_len_results]
+    df["effective_length_m"] = [res[1] for res in cap_len_results]
 
     logger.info(
         "Classified %d berths: %d overnight (total length %.0fm, capacity %d ships), %d kegel (total length %.0fm)",
@@ -278,8 +314,15 @@ def build_route_network_graph(
 
             seg_geom = None
             if full_geom is not None and km_span_total > 1e-4 and full_geom.length > 0:
-                f_a = max(0.0, min(1.0, (km_a - full_km_begin) / km_span_total))
-                f_b = max(0.0, min(1.0, (km_b - full_km_begin) / km_span_total))
+                if full_km_end >= full_km_begin:
+                    f_a = (km_a - full_km_begin) / km_span_total
+                    f_b = (km_b - full_km_begin) / km_span_total
+                else:
+                    f_a = (full_km_begin - km_a) / km_span_total
+                    f_b = (full_km_begin - km_b) / km_span_total
+
+                f_a = max(0.0, min(1.0, f_a))
+                f_b = max(0.0, min(1.0, f_b))
                 if abs(f_b - f_a) > 1e-6:
                     seg_geom = substring(
                         full_geom,
@@ -393,6 +436,9 @@ def run_spatial_distance_analysis(
         max_dist_ov = calc_segment_furthest_distance(d_u_ov, d_v_ov, seg_len)
         max_dist_kg = calc_segment_furthest_distance(d_u_kg, d_v_kg, seg_len)
 
+        is_reach_ov = max_dist_ov != float("inf")
+        is_reach_kg = max_dist_kg != float("inf")
+
         # RVW 2020: 30 km overnight spacing => radius <= 15 km; 60 km kegel spacing => radius <= 30 km
         comp_len_ov = calc_segment_compliant_length(d_u_ov, d_v_ov, seg_len, 15.0)
         comp_len_kg = calc_segment_compliant_length(d_u_kg, d_v_kg, seg_len, 30.0)
@@ -402,12 +448,16 @@ def run_spatial_distance_analysis(
                 **seg,
                 "is_hvwn": seg.get("netwerk_type")
                 in ["Hoofdtransportas", "Hoofdvaarweg"],
-                "dist_to_overnight_km": round(max_dist_ov, 2),
+                "is_reachable_overnight": is_reach_ov,
+                "dist_to_overnight_km": (
+                    round(max_dist_ov, 2) if is_reach_ov else np.nan
+                ),
                 "compliant_30km_overnight_km": round(comp_len_ov, 3),
-                "is_fully_compliant_overnight": max_dist_ov <= 15.0,
-                "dist_to_kegel_km": round(max_dist_kg, 2),
+                "is_fully_compliant_overnight": (is_reach_ov and max_dist_ov <= 15.0),
+                "is_reachable_kegel": is_reach_kg,
+                "dist_to_kegel_km": (round(max_dist_kg, 2) if is_reach_kg else np.nan),
                 "compliant_60km_kegel_km": round(comp_len_kg, 3),
-                "is_fully_compliant_kegel": max_dist_kg <= 30.0,
+                "is_fully_compliant_kegel": (is_reach_kg and max_dist_kg <= 30.0),
             }
         )
 
@@ -566,12 +616,13 @@ def compute_route_capacity_and_intensity(
         0.0,
     )
 
-    # Stop probability per passage (RVW § 6.4.2)
-    df["p_overnight_stop"] = np.where(
+    # Expected overnight stops per passage (RVW § 6.4.2: L_route / 168km)
+    df["expected_overnight_stops"] = np.where(
         df["total_length_km"] > 0,
         (df["total_length_km"] / DAILY_SAILING_DISTANCE_KM).round(4),
         0.0,
     )
+    df["p_overnight_stop"] = df["expected_overnight_stops"]
 
     # Available meter-nights per year
     df["overnight_meter_nights_yr"] = (df["overnight_berth_length_m"] * 365.0).round(1)
@@ -735,22 +786,34 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
         .sort_values("gap_km", ascending=False)
         .head(15)
     )
-    md += "| Route ID | Routenaam | Netwerktype | Trajectlengte zonder volledige dekking (km) | Max. afstand tot ligplaats (km) |\n|---|---|---|---|---|\n"
+    md += "| Route ID | Routenaam | Netwerktype | Trajectlengte zonder volledige dekking (km) | Max. afstand tot ligplaats |\n|---|---|---|---|---|\n"
     for _, r in hvwn_gaps.iterrows():
-        md += f"| {r['route_id']} | {r['route_name']} | {r['netwerk_type']} | {r['gap_km']:.1f} km | {r['max_dist']:.1f} km |\n"
+        dist_str = (
+            f"{r['max_dist']:.1f} km"
+            if pd.notna(r["max_dist"]) and not np.isinf(r["max_dist"])
+            else "Geen ligplaats bereikbaar"
+        )
+        md += f"| {r['route_id']} | {r['route_name']} | {r['netwerk_type']} | {r['gap_km']:.1f} km | {dist_str} |\n"
 
     # Section 5: Maximum Carrying Capacity (Draagkracht) per Route
     md += "\n---\n\n## 5. Maximale Draagkracht per Route (RVW 2020 § 6.4.2)\n\n"
     md += (
+        "> [!NOTE]\n"
+        "> **Corridor-context**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. "
+        "De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte "
+        "en verwachte overnachtingen op het deeltraject ($L_{\\text{kade}} \\times 365 / \\text{verwachte stops}$). "
+        "Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.\n\n"
         "Berekend tot de stap waar scheepslengte nodig is. Toont per route de beschikbare kadelengte en de maximale "
         "jaardraagkracht in scheepslengte-kilometers per jaar (zowel regulier overnachten als kegel):\n\n"
     )
     md += "| Code | Routenaam | Categorie | Lengte (km) | Overnachting Kade (m) | Max. Draagkracht Overnachten (km schip/jr) | Kegel Kade (m) | Max. Draagkracht Kegel (km schip/jr) | Dekking Overnacht (%) |\n"
     md += "|---|---|---|---|---|---|---|---|---|\n"
 
-    top_cap = gdf_routes.sort_values(
-        "max_capacity_ship_length_km_yr", ascending=False
-    ).head(20)
+    top_cap = (
+        gdf_routes[gdf_routes["is_hvwn"]]
+        .sort_values("max_capacity_ship_length_km_yr", ascending=False)
+        .head(20)
+    )
     for _, r in top_cap.iterrows():
         ov_kade_str = (
             f"{r['overnight_berth_length_m']:,.0f} m"
@@ -842,9 +905,7 @@ def main(export_dir: Path, output_dir: Path) -> None:
     gdf_segments_hvwn.to_file(
         output_dir / "route_segments_compliance.geojson", driver="GeoJSON"
     )
-    gdf_segments.to_parquet(
-        output_dir / "route_segments_compliance_all.geoparquet"
-    )
+    gdf_segments.to_parquet(output_dir / "route_segments_compliance_all.geoparquet")
 
     generate_markdown_summary(
         gdf_segments,
