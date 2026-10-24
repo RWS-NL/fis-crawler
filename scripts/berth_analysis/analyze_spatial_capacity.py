@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import jinja2
 import click
 import geopandas as gpd
 import networkx as nx
@@ -657,7 +658,16 @@ def generate_markdown_summary(
     berths: gpd.GeoDataFrame,
     output_path: Path,
 ) -> None:
-    """Generates a structured markdown report of the spatial berth analysis."""
+    """Generates a structured markdown report of the spatial berth analysis using Jinja2."""
+    template_dir = Path(__file__).parent / "templates"
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(template_dir),
+        autoescape=False,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("berth_spatial_report.md.j2")
+
     netwerk_stats: dict[str, dict] = {}
     for ntype in [
         "Hoofdtransportas",
@@ -698,7 +708,7 @@ def generate_markdown_summary(
         if not gdf_clusters.empty
         else pd.DataFrame()
     )
-    missing_cardrop = (
+    missing_cardrop_df = (
         large_clusters[~large_clusters["cardropoff_compliant"]]
         if not large_clusters.empty
         else pd.DataFrame()
@@ -721,55 +731,12 @@ def generate_markdown_summary(
         {"tot_km": 0.0, "ov_km": 0.0, "ov_pct": 0.0, "kg_km": 0.0, "kg_pct": 0.0},
     )
 
-    md = f"""# Ruimtelijke Analyse Ligplaatscapaciteit en Maximale Draagkracht (RVW 2020 & IMA 2021)
+    missing_cardrop = missing_cardrop_df.to_dict(orient="records")
 
-## 1. Samenvatting Netwerkdekking per Netwerkcategorie
-
-Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapportage Vaarwegen IMA 2021 (§ 2.3)** gelden de volgende ruimtelijke normen:
-* **Overnachtingshavens**: maximaal **30 km** tussenruimte (elke locatie ligt binnen $\\le 15$ km van een ligplaats).
-* **Kegelligplaatsen**: maximaal **60 km** tussenruimte (elke locatie ligt binnen $\\le 30$ km van een kegelligplaats).
-
-| Netwerkcategorie | Totale lengte (km) | Overnachten $\\le 30$ km | Overnachten (%) | Kegel $\\le 60$ km | Kegel (%) |
-|---|---|---|---|---|---|
-| **Hoofdtransportassen (HTA)** | {hta_stat["tot_km"]:,.1f} km | {hta_stat["ov_km"]:,.1f} km | **{hta_stat["ov_pct"]:.1f}%** | {hta_stat["kg_km"]:,.1f} km | **{hta_stat["kg_pct"]:.1f}%** |
-| **Hoofdvaarwegen (HVW)** | {hvw_stat["tot_km"]:,.1f} km | {hvw_stat["ov_km"]:,.1f} km | **{hvw_stat["ov_pct"]:.1f}%** | {hvw_stat["kg_km"]:,.1f} km | **{hvw_stat["kg_pct"]:.1f}%** |
-| **Totaal HVWN (HTA + HVW)** | **{hvwn_tot:,.1f} km** | **{hvwn_ov:,.1f} km** | **{hvwn_ov_pct:.1f}%** | **{hvwn_kg:,.1f} km** | **{hvwn_kg_pct:.1f}%** |
-| Overige vaarwegen | {ovg_stat["tot_km"]:,.1f} km | {ovg_stat["ov_km"]:,.1f} km | {ovg_stat["ov_pct"]:.1f}% | {ovg_stat["kg_km"]:,.1f} km | {ovg_stat["kg_pct"]:.1f}% |
-| Niet geclassificeerd (kust/zee) | {unc_stat["tot_km"]:,.1f} km | {unc_stat["ov_km"]:,.1f} km | {unc_stat["ov_pct"]:.1f}% | {unc_stat["kg_km"]:,.1f} km | {unc_stat["kg_pct"]:.1f}% |
-
----
-
-## 2. Ligplaatscapaciteit en Aanbod
-
-* **Totaal aantal ligplaatsrecords in FIS**: {len(berths):,}
-* **Aangemerkt als overnachtingsligplaats**: {berths["is_overnight"].sum():,} records
-* **Totale kadelengte overnachten**: **{berths.loc[berths["is_overnight"], "effective_length_m"].sum():,.1f} m**
-* **Totale kadecapaciteit overnachten**: **{berths.loc[berths["is_overnight"], "effective_length_m"].sum() * 365.0:,.0f} meter-nachten per jaar**
-* **Kegelligplaatsen (gevaarlijke stoffen)**: {berths["is_kegel"].sum():,} records ({berths.loc[berths["is_kegel"], "effective_length_m"].sum():,.1f} m kadelengte)
-* **Aantal geclusterde overnachtingslocaties**: {len(gdf_clusters):,} locaties
-
----
-
-## 3. Autoafzetplaatsen Toetsing (RVW § 6.6)
-* **Grote overnachtingslocaties (capaciteit $\\ge 15$ schepen)**: {len(large_clusters)} locaties
-* **Waarvan mét geregistreerde autoafzetplaats**: {len(large_clusters) - len(missing_cardrop)} locaties
-* **Ontbrekende autoafzetplaatsen**: {len(missing_cardrop)} locaties
-
-"""
-    if not missing_cardrop.empty:
-        md += (
-            "### Grote overnachtingslocaties zonder geregistreerde autoafzetplaats:\n\n"
-        )
-        md += "| Route ID | Locatie / Naam | Capaciteit (schepen) | Kadelengte (m) |\n|---|---|---|---|\n"
-        for _, r in missing_cardrop.iterrows():
-            md += f"| {r['route_id']} | {r['cluster_name']} | {r['total_capacity_ships']} | {r['total_length_m']:.0f}m |\n"
-
-    # Specific gaps on Hoofdtransportassen and Hoofdvaarwegen
-    md += "\n---\n\n## 4. Knelpunten op Hoofdtransportassen en Hoofdvaarwegen (Gap > 30 km)\n\n"
     hvwn_grp = gdf_segments[
         gdf_segments["netwerk_type"].isin(["Hoofdtransportas", "Hoofdvaarweg"])
     ]
-    hvwn_gaps = (
+    hvwn_gaps_df = (
         hvwn_grp[~hvwn_grp["is_fully_compliant_overnight"]]
         .groupby(["route_id", "route_name", "netwerk_type"])
         .agg(gap_km=("length_km", "sum"), max_dist=("dist_to_overnight_km", "max"))
@@ -777,35 +744,32 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
         .sort_values("gap_km", ascending=False)
         .head(15)
     )
-    md += "| Route ID | Routenaam | Netwerktype | Trajectlengte zonder volledige dekking (km) | Max. afstand tot ligplaats |\n|---|---|---|---|---|\n"
-    for _, r in hvwn_gaps.iterrows():
+
+    hvwn_gaps = []
+    for _, r in hvwn_gaps_df.iterrows():
         dist_str = (
             f"{r['max_dist']:.1f} km"
             if pd.notna(r["max_dist"]) and not np.isinf(r["max_dist"])
             else "Geen ligplaats bereikbaar"
         )
-        md += f"| {r['route_id']} | {r['route_name']} | {r['netwerk_type']} | {r['gap_km']:.1f} km | {dist_str} |\n"
+        hvwn_gaps.append(
+            {
+                "route_id": r["route_id"],
+                "route_name": r["route_name"],
+                "netwerk_type": r["netwerk_type"],
+                "gap_km": r["gap_km"],
+                "dist_str": dist_str,
+            }
+        )
 
-    # Section 5: Maximum Carrying Capacity (Draagkracht) per Route
-    md += "\n---\n\n## 5. Maximale Draagkracht per Route (RVW 2020 § 6.4.2)\n\n"
-    md += (
-        "> [!NOTE]\n"
-        "> **Corridor-context**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. "
-        "De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte "
-        "en verwachte overnachtingen op het deeltraject ($L_{\\text{kade}} \\times 365 / \\text{verwachte stops}$). "
-        "Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.\n\n"
-        "Berekend tot de stap waar scheepslengte nodig is. Toont per route de beschikbare kadelengte en de maximale "
-        "jaardraagkracht in scheepslengte-kilometers per jaar (zowel regulier overnachten als kegel):\n\n"
-    )
-    md += "| Code | Routenaam | Categorie | Lengte (km) | Overnachting Kade (m) | Max. Draagkracht Overnachten (km schip/jr) | Kegel Kade (m) | Max. Draagkracht Kegel (km schip/jr) | Dekking Overnacht (%) |\n"
-    md += "|---|---|---|---|---|---|---|---|---|\n"
-
-    top_cap = (
+    top_cap_df = (
         gdf_routes[gdf_routes["is_hvwn"]]
         .sort_values("max_capacity_ship_length_km_yr", ascending=False)
         .head(20)
     )
-    for _, r in top_cap.iterrows():
+
+    top_cap = []
+    for _, r in top_cap_df.iterrows():
         ov_kade_str = (
             f"{r['overnight_berth_length_m']:,.0f} m"
             if r["overnight_berth_length_m"] > 0
@@ -826,13 +790,56 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
             if r["max_kegel_ship_length_km_yr"] > 0
             else "-"
         )
-        md += (
-            f"| {r['route_code']} | {r['route_name']} | {r['netwerk_type']} | {r['total_length_km']:.1f} km | "
-            f"{ov_kade_str} | {ov_draag_str} | {kg_kade_str} | {kg_draag_str} | {r['overnight_coverage_pct']:.1f}% |\n"
+        top_cap.append(
+            {
+                "route_code": r["route_code"],
+                "route_name": r["route_name"],
+                "netwerk_type": r["netwerk_type"],
+                "total_length_km": r["total_length_km"],
+                "ov_kade_str": ov_kade_str,
+                "ov_draag_str": ov_draag_str,
+                "kg_kade_str": kg_kade_str,
+                "kg_draag_str": kg_draag_str,
+                "overnight_coverage_pct": r["overnight_coverage_pct"],
+            }
         )
 
-    output_path.write_text(md, encoding="utf-8")
-    logger.info("Summary report written to %s", output_path)
+    context = {
+        "hta_stat": hta_stat,
+        "hvw_stat": hvw_stat,
+        "ovg_stat": ovg_stat,
+        "unc_stat": unc_stat,
+        "hvwn_tot": hvwn_tot,
+        "hvwn_ov": hvwn_ov,
+        "hvwn_ov_pct": hvwn_ov_pct,
+        "hvwn_kg": hvwn_kg,
+        "hvwn_kg_pct": hvwn_kg_pct,
+        "total_berths": len(berths),
+        "overnight_berths_count": int(berths["is_overnight"].sum()),
+        "overnight_kadelengte_m": float(
+            berths.loc[berths["is_overnight"], "effective_length_m"].sum()
+        ),
+        "overnight_meter_nachten": float(
+            berths.loc[berths["is_overnight"], "effective_length_m"].sum() * 365.0
+        ),
+        "kegel_berths_count": int(berths["is_kegel"].sum()),
+        "kegel_kadelengte_m": float(
+            berths.loc[berths["is_kegel"], "effective_length_m"].sum()
+        ),
+        "total_clusters": len(gdf_clusters),
+        "large_clusters_count": len(large_clusters),
+        "cardropoff_ok_count": len(large_clusters) - len(missing_cardrop_df),
+        "missing_cardrop_count": len(missing_cardrop_df),
+        "missing_cardrop": missing_cardrop,
+        "hvwn_gaps": hvwn_gaps,
+        "top_cap": top_cap,
+    }
+
+    rendered_md = template.render(**context)
+    output_path.write_text(rendered_md, encoding="utf-8")
+    logger.info(
+        "Summary report rendered via Jinja2 template and written to %s", output_path
+    )
 
 
 @click.command()

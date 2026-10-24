@@ -1,0 +1,68 @@
+# Ruimtelijke Analyse Ligplaatscapaciteit en Maximale Draagkracht (RVW 2020 & IMA 2021)
+
+## 1. Samenvatting Netwerkdekking per Netwerkcategorie
+
+Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapportage Vaarwegen IMA 2021 (§ 2.3)** gelden de volgende ruimtelijke normen:
+* **Overnachtingshavens**: maximaal **30 km** tussenruimte (elke locatie ligt binnen $\le 15$ km van een ligplaats).
+* **Kegelligplaatsen**: maximaal **60 km** tussenruimte (elke locatie ligt binnen $\le 30$ km van een kegelligplaats).
+
+| Netwerkcategorie | Totale lengte (km) | Overnachten $\le 30$ km | Overnachten (%) | Kegel $\le 60$ km | Kegel (%) |
+|---|---|---|---|---|---|
+| **Hoofdtransportassen (HTA)** | {{ "{:,.1f}".format(hta_stat.tot_km) }} km | {{ "{:,.1f}".format(hta_stat.ov_km) }} km | **{{ "{:.1f}".format(hta_stat.ov_pct) }}%** | {{ "{:,.1f}".format(hta_stat.kg_km) }} km | **{{ "{:.1f}".format(hta_stat.kg_pct) }}%** |
+| **Hoofdvaarwegen (HVW)** | {{ "{:,.1f}".format(hvw_stat.tot_km) }} km | {{ "{:,.1f}".format(hvw_stat.ov_km) }} km | **{{ "{:.1f}".format(hvw_stat.ov_pct) }}%** | {{ "{:,.1f}".format(hvw_stat.kg_km) }} km | **{{ "{:.1f}".format(hvw_stat.kg_pct) }}%** |
+| **Totaal HVWN (HTA + HVW)** | **{{ "{:,.1f}".format(hvwn_tot) }} km** | **{{ "{:,.1f}".format(hvwn_ov) }} km** | **{{ "{:.1f}".format(hvwn_ov_pct) }}%** | **{{ "{:,.1f}".format(hvwn_kg) }} km** | **{{ "{:.1f}".format(hvwn_kg_pct) }}%** |
+| Overige vaarwegen | {{ "{:,.1f}".format(ovg_stat.tot_km) }} km | {{ "{:,.1f}".format(ovg_stat.ov_km) }} km | {{ "{:.1f}".format(ovg_stat.ov_pct) }}% | {{ "{:,.1f}".format(ovg_stat.kg_km) }} km | {{ "{:.1f}".format(ovg_stat.kg_pct) }}% |
+| Niet geclassificeerd (kust/zee) | {{ "{:,.1f}".format(unc_stat.tot_km) }} km | {{ "{:,.1f}".format(unc_stat.ov_km) }} km | {{ "{:.1f}".format(unc_stat.ov_pct) }}% | {{ "{:,.1f}".format(unc_stat.kg_km) }} km | {{ "{:.1f}".format(unc_stat.kg_pct) }}% |
+
+---
+
+## 2. Ligplaatscapaciteit en Aanbod
+
+* **Totaal aantal ligplaatsrecords in FIS**: {{ "{:,}".format(total_berths) }}
+* **Aangemerkt als overnachtingsligplaats**: {{ "{:,}".format(overnight_berths_count) }} records
+* **Totale kadelengte overnachten**: **{{ "{:,.1f}".format(overnight_kadelengte_m) }} m**
+* **Totale kadecapaciteit overnachten**: **{{ "{:,.0f}".format(overnight_meter_nachten) }} meter-nachten per jaar**
+* **Kegelligplaatsen (gevaarlijke stoffen)**: {{ "{:,}".format(kegel_berths_count) }} records ({{ "{:,.1f}".format(kegel_kadelengte_m) }} m kadelengte)
+* **Aantal geclusterde overnachtingslocaties**: {{ "{:,}".format(total_clusters) }} locaties
+
+---
+
+## 3. Autoafzetplaatsen Toetsing (RVW § 6.6)
+* **Grote overnachtingslocaties (capaciteit $\ge 15$ schepen)**: {{ large_clusters_count }} locaties
+* **Waarvan mét geregistreerde autoafzetplaats**: {{ cardropoff_ok_count }} locaties
+* **Ontbrekende autoafzetplaatsen**: {{ missing_cardrop_count }} locaties
+{% if missing_cardrop %}
+
+### Grote overnachtingslocaties zonder geregistreerde autoafzetplaats:
+
+| Route ID | Locatie / Naam | Capaciteit (schepen) | Kadelengte (m) |
+|---|---|---|---|
+{% for r in missing_cardrop %}
+| {{ r.route_id }} | {{ r.cluster_name }} | {{ r.total_capacity_ships }} | {{ "{:.0f}".format(r.total_length_m) }}m |
+{% endfor %}
+{% endif %}
+
+---
+
+## 4. Knelpunten op Hoofdtransportassen en Hoofdvaarwegen (Gap > 30 km)
+
+| Route ID | Routenaam | Netwerktype | Trajectlengte zonder volledige dekking (km) | Max. afstand tot ligplaats |
+|---|---|---|---|---|
+{% for r in hvwn_gaps %}
+| {{ r.route_id }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ "{:.1f}".format(r.gap_km) }} km | {{ r.dist_str }} |
+{% endfor %}
+
+---
+
+## 5. Maximale Draagkracht per Route (RVW 2020 § 6.4.2)
+
+> [!NOTE]
+> **Corridor-context**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte en verwachte overnachtingen op het deeltraject ($L_{\text{kade}} \times 365 / \text{verwachte stops}$). Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.
+
+Berekend tot de stap waar scheepslengte nodig is. Toont per route de beschikbare kadelengte en de maximale jaardraagkracht in scheepslengte-kilometers per jaar (zowel regulier overnachten als kegel):
+
+| Code | Routenaam | Categorie | Lengte (km) | Overnachting Kade (m) | Max. Draagkracht Overnachten (km schip/jr) | Kegel Kade (m) | Max. Draagkracht Kegel (km schip/jr) | Dekking Overnacht (%) |
+|---|---|---|---|---|---|---|---|---|
+{% for r in top_cap %}
+| {{ r.route_code }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ "{:.1f}".format(r.total_length_km) }} km | {{ r.ov_kade_str }} | {{ r.ov_draag_str }} | {{ r.kg_kade_str }} | {{ r.kg_draag_str }} | {{ "{:.1f}".format(r.overnight_coverage_pct) }}% |
+{% endfor %}
