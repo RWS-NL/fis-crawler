@@ -396,6 +396,13 @@ def test_compute_route_carrying_capacity(carrying_capacity_inputs):
     assert r["overnight_coverage_pct"] == 75.0
     assert r["kegel_coverage_pct"] == 100.0
 
+    # Without graph G, catchment capacity falls back to local route capacity
+    assert r["catchment_overnight_berths"] == 1
+    assert r["catchment_overnight_berth_length_m"] == 240.0
+    assert r["catchment_overnight_capacity_ships_85m"] == 2
+    assert r["catchment_overnight_capacity_ships_110m"] == 2
+    assert r["catchment_overnight_capacity_ships_135m"] == 1
+
 
 def test_formatting_helpers():
     assert fmt_num(12.345, 1, " km") == "12.3 km"

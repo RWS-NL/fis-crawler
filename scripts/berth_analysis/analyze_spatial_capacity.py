@@ -380,7 +380,7 @@ def cluster_berths_and_check_facilities(
 
 
 def _aggregate_berths_by_route(berths: gpd.GeoDataFrame, kind: str) -> pd.DataFrame:
-    """Aggregates berth counts, lengths, and 110m/135m ship capacities per route for a berth kind."""
+    """Aggregates berth counts, lengths, and 85m/110m/135m ship capacities per route for a berth kind."""
     sub = berths[berths[f"is_{kind}"]]
     agg_spec: dict[str, tuple[str, str]] = {
         f"num_{kind}_berths": ("id", "count"),
@@ -395,12 +395,74 @@ def _aggregate_berths_by_route(berths: gpd.GeoDataFrame, kind: str) -> pd.DataFr
     return sub.groupby("route_id").agg(**agg_spec).reset_index()
 
 
+def _aggregate_catchment_by_route(
+    G: nx.Graph,
+    gdf_segments: gpd.GeoDataFrame,
+    berths: gpd.GeoDataFrame,
+    kind: str,
+    radius_km: float,
+) -> pd.DataFrame:
+    """Aggregates reachable berth capacity within network distance radius_km of each route."""
+    node_routes: dict[str, set[str]] = {}
+    for s, t, rid in zip(
+        gdf_segments["source"], gdf_segments["target"], gdf_segments["route_id"]
+    ):
+        node_routes.setdefault(s, set()).add(rid)
+        node_routes.setdefault(t, set()).add(rid)
+
+    sub = berths[berths[f"is_{kind}"]].set_index("id")
+    route_to_berths: dict[str, set[str]] = {}
+    for bid in sub.index:
+        b_node = f"berth_{bid}"
+        if b_node not in G:
+            continue
+        dists = nx.single_source_dijkstra_path_length(
+            G, b_node, cutoff=radius_km, weight="weight"
+        )
+        for node in dists:
+            for rid in node_routes.get(node, ()):
+                route_to_berths.setdefault(rid, set()).add(bid)
+
+    rows = []
+    for rid, bids in route_to_berths.items():
+        b_slice = sub.loc[list(bids)]
+        rows.append(
+            {
+                "route_id": rid,
+                f"catchment_{kind}_berths": len(b_slice),
+                f"catchment_{kind}_berth_length_m": float(
+                    b_slice["effective_length_m"].sum()
+                ),
+                **{
+                    f"catchment_{kind}_capacity_ships_{suffix}": float(
+                        b_slice[f"capacity_ships_{suffix}"].sum()
+                    )
+                    for suffix, _ in SHIP_SCENARIOS
+                },
+            }
+        )
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "route_id",
+                f"catchment_{kind}_berths",
+                f"catchment_{kind}_berth_length_m",
+                *(
+                    f"catchment_{kind}_capacity_ships_{suffix}"
+                    for suffix, _ in SHIP_SCENARIOS
+                ),
+            ]
+        )
+    return pd.DataFrame(rows)
+
+
 def compute_route_carrying_capacity(
     routes: gpd.GeoDataFrame,
     berths: gpd.GeoDataFrame,
     gdf_segments: gpd.GeoDataFrame,
+    G: nx.Graph | None = None,
 ) -> gpd.GeoDataFrame:
-    """Computes route-level compliance, 110m/135m ship capacities, and annual carrying capacity."""
+    """Computes route-level compliance, local and catchment ship capacities, and annual carrying capacity."""
     logger.info("Computing route-level capacity and maximum carrying capacity...")
 
     df = (
@@ -422,7 +484,11 @@ def compute_route_carrying_capacity(
         0.0,
     )
 
-    for kind in ("overnight", "kegel"):
+    kind_radii = {
+        "overnight": OVERNIGHT_RADIUS_KM,
+        "kegel": KEGEL_RADIUS_KM,
+    }
+    for kind, radius_km in kind_radii.items():
         df = df.merge(
             _aggregate_berths_by_route(berths, kind), on="route_id", how="left"
         )
@@ -454,6 +520,39 @@ def compute_route_carrying_capacity(
                 / df["expected_overnight_stops"],
                 0.0,
             )
+
+        if G is not None and "source" in gdf_segments.columns:
+            catch_df = _aggregate_catchment_by_route(
+                G, gdf_segments, berths, kind, radius_km
+            )
+            df = df.merge(catch_df, on="route_id", how="left")
+        else:
+            df[f"catchment_{kind}_berths"] = df[f"num_{kind}_berths"]
+            df[f"catchment_{kind}_berth_length_m"] = df[f"{kind}_berth_length_m"]
+            for suffix, _ in SHIP_SCENARIOS:
+                df[f"catchment_{kind}_capacity_ships_{suffix}"] = df[
+                    f"{kind}_capacity_ships_{suffix}"
+                ]
+
+        df[f"catchment_{kind}_berths"] = (
+            df[f"catchment_{kind}_berths"].fillna(0).astype(int)
+        )
+        for col in (
+            f"catchment_{kind}_berth_length_m",
+            *(
+                f"catchment_{kind}_capacity_ships_{suffix}"
+                for suffix, _ in SHIP_SCENARIOS
+            ),
+        ):
+            df[col] = df[col].fillna(0.0)
+
+        df[f"catchment_max_{kind}_ship_length_km_yr"] = np.where(
+            df["expected_overnight_stops"] > 0,
+            (df[f"catchment_{kind}_berth_length_m"] / 1000.0)
+            / df["expected_overnight_stops"]
+            * 365.0,
+            0.0,
+        )
 
     df["has_cardropoff"] = df["has_cardropoff"].fillna(False).astype(bool)
     df["is_hvwn"] = df["network_type"].isin(HVWN_TYPES)
@@ -574,8 +673,16 @@ def calculate_report_metrics(
 
     top_cap_df = (
         gdf_routes[gdf_routes["is_hvwn"]]
-        .sort_values("max_overnight_ship_length_km_yr", ascending=False)
+        .sort_values(
+            ["max_overnight_ship_length_km_yr", "catchment_overnight_berth_length_m"],
+            ascending=False,
+        )
         .head(20)
+    )
+    zero_local_hvwn_df = (
+        gdf_routes[gdf_routes["is_hvwn"] & (gdf_routes["num_overnight_berths"] == 0)]
+        .sort_values("catchment_overnight_berth_length_m", ascending=False)
+        .head(15)
     )
 
     ov_mask = berths["is_overnight"]
@@ -606,6 +713,18 @@ def calculate_report_metrics(
         "hvwn_gaps": hvwn_gaps_df.to_dict(orient="records"),
         "top_cap": top_cap_df.drop(columns=["geometry"], errors="ignore").to_dict(
             orient="records"
+        ),
+        "zero_local_hvwn": zero_local_hvwn_df.drop(
+            columns=["geometry"], errors="ignore"
+        ).to_dict(orient="records"),
+        "hvwn_total_count": int(gdf_routes["is_hvwn"].sum()),
+        "hvwn_zero_local_count": int(
+            (gdf_routes["is_hvwn"] & (gdf_routes["num_overnight_berths"] == 0)).sum()
+        ),
+        "hvwn_zero_catchment_count": int(
+            (
+                gdf_routes["is_hvwn"] & (gdf_routes["catchment_overnight_berths"] == 0)
+            ).sum()
         ),
     }
 
@@ -670,7 +789,7 @@ def main(export_dir: Path, output_dir: Path) -> None:
     )
     gdf_segments = run_spatial_distance_analysis(G, route_segments)
     gdf_routes = compute_route_carrying_capacity(
-        routes, classified_berths, gdf_segments
+        routes, classified_berths, gdf_segments, G=G
     )
 
     logger.info("Exporting route compliance and carrying capacity outputs...")
