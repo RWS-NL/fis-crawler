@@ -48,6 +48,12 @@ OVERNIGHT_RADIUS_KM = 15.0  # Max 30 km spacing between overnight ports
 KEGEL_RADIUS_KM = 30.0  # Max 60 km spacing between kegel berths
 MAX_CLUSTER_SPAN_KM = 0.5  # Max cluster span along fairway (500 m)
 CAR_DROPOFF_MIN_CAPACITY_SHIPS = 15  # RVW § 6.6 threshold
+CAR_DROPOFF_SEARCH_RADIUS_M = (
+    500.0  # Max spatial distance (m) to link car drop-off to cluster
+)
+SHIP_WIDTH_M = (
+    11.4  # Standard CEMT Va/Vb reference ship width (m) for width-to-rows fallback
+)
 
 HVWN_TYPES = ("Hoofdtransportas", "Hoofdvaarweg")
 NETWORK_CATEGORIES = {
@@ -219,8 +225,15 @@ def classify_berths(
 def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """Computes effective quay length and ship capacities for 85 m, 110 m, and 135 m vessel scenarios."""
     df = berths.copy()
-    rows = pd.to_numeric(df.get("number_of_rows"), errors="coerce")
-    rows = rows.where(rows > 0, 1.0).fillna(1.0)
+    raw_rows = pd.to_numeric(
+        df.get("number_of_rows", pd.Series(np.nan, index=df.index)), errors="coerce"
+    )
+    width = pd.to_numeric(
+        df.get("width", pd.Series(np.nan, index=df.index)), errors="coerce"
+    )
+    width_rows = np.maximum(1.0, np.floor(width / SHIP_WIDTH_M)).where(width > 0, 1.0)
+    rows = raw_rows.where(raw_rows > 0, width_rows).fillna(1.0)
+    df["effective_rows"] = rows
 
     length = pd.to_numeric(df.get("length"), errors="coerce")
     length = length.where(length > 0, 0.0).fillna(0.0)
@@ -335,11 +348,51 @@ def _aggregate_cluster(rows: list[pd.Series]) -> dict:
     }
 
 
+def _collect_cardropoff_points_rd(
+    berths: gpd.GeoDataFrame, cardropoffs: gpd.GeoDataFrame | None
+) -> gpd.GeoSeries:
+    """Collects all car drop-off geometries projected to EPSG:28992 (RD New, meters)."""
+    geoms = []
+    if "has_cardropoff" in berths.columns and "geometry" in berths.columns:
+        cb = berths[berths["has_cardropoff"] & berths["geometry"].notna()]
+        if not cb.empty:
+            geoms.append(
+                gpd.GeoSeries(cb["geometry"], crs=berths.crs or "EPSG:4326").to_crs(
+                    "EPSG:28992"
+                )
+            )
+    if (
+        cardropoffs is not None
+        and not cardropoffs.empty
+        and "geometry" in cardropoffs.columns
+    ):
+        cd = cardropoffs[cardropoffs["geometry"].notna()]
+        if not cd.empty:
+            geoms.append(
+                gpd.GeoSeries(
+                    cd["geometry"], crs=cardropoffs.crs or "EPSG:4326"
+                ).to_crs("EPSG:28992")
+            )
+    if not geoms:
+        return gpd.GeoSeries(dtype="geometry", crs="EPSG:28992")
+    return gpd.GeoSeries(pd.concat(geoms, ignore_index=True), crs="EPSG:28992")
+
+
 def cluster_berths_and_check_facilities(
     berths: gpd.GeoDataFrame,
+    cardropoffs: gpd.GeoDataFrame | None = None,
 ) -> gpd.GeoDataFrame:
     """Clusters nearby overnight berths by route and evaluates RVW § 6.6 car drop-off compliance."""
     overnight = berths[berths["is_overnight"]].copy()
+    cardrop_berths = (
+        berths[berths["has_cardropoff"]]
+        if "has_cardropoff" in berths.columns
+        else pd.DataFrame()
+    )
+    cardrop_geoms_rd = _collect_cardropoff_points_rd(berths, cardropoffs)
+    cardrop_union_rd = (
+        cardrop_geoms_rd.union_all() if not cardrop_geoms_rd.empty else None
+    )
 
     clusters: list[dict] = []
     for _, group in overnight.groupby("route_id"):
@@ -367,6 +420,32 @@ def cluster_berths_and_check_facilities(
         return gpd.GeoDataFrame(crs="EPSG:4326")
 
     cluster_df = pd.DataFrame(clusters)
+
+    # Link car drop-off facilities within MAX_CLUSTER_SPAN_KM on the same route or 500 m in RD New
+    if not cardrop_berths.empty and "route_km" in cardrop_berths.columns:
+        for idx, crow in cluster_df.iterrows():
+            if crow["has_cardropoff"]:
+                continue
+            same_route_cd = cardrop_berths[
+                cardrop_berths["route_id"] == crow["route_id"]
+            ]
+            if not same_route_cd.empty:
+                km_min = crow["route_km_begin"] - MAX_CLUSTER_SPAN_KM
+                km_max = crow["route_km_end"] + MAX_CLUSTER_SPAN_KM
+                if (
+                    (same_route_cd["route_km"] >= km_min)
+                    & (same_route_cd["route_km"] <= km_max)
+                ).any():
+                    cluster_df.at[idx, "has_cardropoff"] = True
+
+    if cardrop_union_rd is not None:
+        cluster_geoms_rd = gpd.GeoSeries(
+            cluster_df["geometry"], crs=berths.crs or "EPSG:4326"
+        ).to_crs("EPSG:28992")
+        for idx, geom_rd in cluster_geoms_rd.items():
+            if not cluster_df.at[idx, "has_cardropoff"] and geom_rd is not None:
+                if geom_rd.distance(cardrop_union_rd) <= CAR_DROPOFF_SEARCH_RADIUS_M:
+                    cluster_df.at[idx, "has_cardropoff"] = True
     for suffix, _ in SHIP_SCENARIOS:
         req_col = f"req_cardropoff_{suffix}"
         comp_col = f"cardropoff_compliant_{suffix}"
@@ -390,9 +469,17 @@ def _aggregate_berths_by_route(berths: gpd.GeoDataFrame, kind: str) -> pd.DataFr
             for suffix, _ in SHIP_SCENARIOS
         },
     }
+    res = sub.groupby("route_id").agg(**agg_spec).reset_index()
     if kind == "overnight":
-        agg_spec["has_cardropoff"] = ("has_cardropoff", "any")
-    return sub.groupby("route_id").agg(**agg_spec).reset_index()
+        route_cd = (
+            berths.groupby("route_id")["has_cardropoff"]
+            .any()
+            .rename("has_cardropoff")
+            .reset_index()
+        )
+        res = res.merge(route_cd, on="route_id", how="left")
+        res["has_cardropoff"] = res["has_cardropoff"].fillna(False)
+    return res
 
 
 def _aggregate_catchment_by_route(
@@ -780,7 +867,7 @@ def main(export_dir: Path, output_dir: Path) -> None:
     classified_berths = classify_and_calculate_capacity(berths, cardropoffs)
     classified_berths.to_parquet(output_dir / "berths_analyzed.geoparquet")
 
-    gdf_clusters = cluster_berths_and_check_facilities(classified_berths)
+    gdf_clusters = cluster_berths_and_check_facilities(classified_berths, cardropoffs)
     if not gdf_clusters.empty:
         gdf_clusters.to_file(output_dir / "berth_clusters.geojson", driver="GeoJSON")
 

@@ -13,6 +13,7 @@ from scripts.berth_analysis.analyze_spatial_capacity import (
     calculate_berth_capacities,
     classify_and_calculate_capacity,
     classify_berths,
+    cluster_berths_and_check_facilities,
     compute_route_carrying_capacity,
     determine_kegels,
     fmt_dist,
@@ -313,6 +314,63 @@ def test_classify_and_calculate_capacity(sample_berths_and_cardropoffs):
     assert df.loc[df["id"] == "4", "capacity_ships_85m"].iloc[0] == 4
     assert df.loc[df["id"] == "4", "capacity_ships_110m"].iloc[0] == 3
     assert df.loc[df["id"] == "4", "capacity_ships_135m"].iloc[0] == 0
+
+
+def test_width_fallback_rows_and_spatial_cardropoff_clustering():
+    berths = gpd.GeoDataFrame(
+        [
+            {
+                "id": "b1",
+                "route_id": "33255",
+                "route_km": 0.8,
+                "name": "Overnachtingssteiger IJzendoorn",
+                "facility": ["OVERNIGHT_ACCOMODATION"],
+                "category": "ALL_VESSELS",
+                "maximum_stay_duration_h": 72.0,
+                "signalling": None,
+                "length": 700.0,
+                "width": 36.0,
+                "number_of_rows": None,
+                "maximal_ship_length": 135.0,
+                "geometry": Point(5.5500, 51.8900),
+            },
+            {
+                "id": "b2",
+                "route_id": "33255",
+                "route_km": 0.9,
+                "name": "Autosteiger IJzendoorn (kortverblijf)",
+                "facility": ["CAR_DROPOFF"],
+                "category": "OTHER",
+                "maximum_stay_duration_h": 1.0,
+                "signalling": None,
+                "length": 40.0,
+                "width": 12.0,
+                "number_of_rows": 1,
+                "maximal_ship_length": 110.0,
+                "geometry": Point(5.5505, 51.8902),
+            },
+        ],
+        crs="EPSG:4326",
+    )
+    cardropoffs = gpd.GeoDataFrame(
+        columns=["id", "berth_id", "name", "geometry"], crs="EPSG:4326"
+    )
+    df = classify_and_calculate_capacity(berths, cardropoffs)
+    # b1 has width=36.0 and number_of_rows=None -> floor(36.0 / 11.4) = 3 rows
+    assert df.loc[df["id"] == "b1", "effective_rows"].iloc[0] == 3.0
+    assert df.loc[df["id"] == "b1", "effective_length_m"].iloc[0] == 2100.0
+    # 700m @ 110m -> floor(710/120) = 5 per row * 3 rows = 15 ships (>= 15 threshold)
+    assert df.loc[df["id"] == "b1", "capacity_ships_110m"].iloc[0] == 15.0
+    # b2 is short stay (1h) so not overnight, but has_cardropoff is True
+    assert not df.loc[df["id"] == "b2", "is_overnight"].iloc[0]
+    assert df.loc[df["id"] == "b2", "has_cardropoff"].iloc[0]
+
+    clusters = cluster_berths_and_check_facilities(df, cardropoffs)
+    assert len(clusters) == 1
+    assert clusters.iloc[0]["total_capacity_ships_110m"] == 15.0
+    assert clusters.iloc[0]["req_cardropoff_110m"]
+    assert clusters.iloc[0]["has_cardropoff"]
+    assert clusters.iloc[0]["cardropoff_compliant_110m"]
 
 
 def test_build_network_classification_map():

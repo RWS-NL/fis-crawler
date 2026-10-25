@@ -134,27 +134,27 @@ Om te bepalen of de aanwezige capaciteit voldoet aan de daadwerkelijke verkeersi
 #### Stap B: Capaciteit in de direct aantakkende zijhavens en binnen bereik op de netwerkgraaf
 Wanneer we vanuit de knopen van het Beerkanaal (`40230`) over de netwerkgraaf zoeken naar overnachtingsligplaatsen in de direct aantakkende bekkenroutes en de omliggende corridor, vinden we:
 
-| Schaalniveau rond Beerkanaal (`40230`) | Aantal ligplaatsen | Kadelengte (m) | Capaciteit 85 m (IV) | Capaciteit 110 m (Va) | Capaciteit 135 m (Vb) |
+| Schaalniveau rond Beerkanaal (`40230`) | Aantal ligplaatsen | Effectieve kadelengte (m) | Capaciteit 85 m (IV) | Capaciteit 110 m (Va) | Capaciteit 135 m (Vb) |
 |---|---|---|---|---|---|
 | **1. Alleen `route_id = 40230` (lokaal)** | 0 | 0 m | **0 schepen** | **0 schepen** | **0 schepen** |
-| **2. Direct aantakkende zijbekkens van `40230`** *(Mississippihaven, Europahaven, Amazonehaven, 6e Petroleumhaven, Tennesseehaven)* | 21 | 4.263 m | **35 schepen** | **29 schepen** | **20 schepen** |
-| **3. Netwerkstraal $\le 5$ km** *(incl. Hartelhaven, Beneluxhaven, Elbehaven, Yangtzehaven en directe aansluiting Caland-/Hartelkanaal)* | 51 | 9.965 m | **83 schepen** | **68 schepen** | **48 schepen** |
-| **4. Volledig RVW-verzorgingsgebied $\le 15$ km** *(gehele Maasvlakte / Europoort / Rozenburg cluster)* | 107 | 21.707 m | **187 schepen** | **150 schepen** | **113 schepen** |
+| **2. Direct aantakkende zijbekkens van `40230`** *(Mississippihaven, Europahaven, Amazonehaven, 6e Petroleumhaven, Tennesseehaven)* | 21 | 9.153 m | **75 schepen** | **62 schepen** | **47 schepen** |
+| **3. Netwerkstraal $\le 5$ km** *(incl. Hartelhaven, Beneluxhaven, Elbehaven, Yangtzehaven en directe aansluiting Caland-/Hartelkanaal)* | 51 | 26.994 m | **224 schepen** | **186 schepen** | **135 schepen** |
+| **4. Volledig RVW-verzorgingsgebied $\le 15$ km** *(gehele Maasvlakte / Europoort / Rozenburg cluster)* | 107 | 59.627 m | **522 schepen** | **415 schepen** | **317 schepen** |
 
 #### Stap C: Voorbeeldtoetsing aan de verkeersintensiteit op het Beerkanaal
-Stel dat we voor het Beerkanaal en de directe Maasvlakte-bekkens toetsen op schaalniveau 2 (alleen de **direct aantakkende zijbekkens van het Beerkanaal**: $4.263$ m kade, oftewel **29 schepen @ 110 m** en **20 schepen @ 135 m**):
+Stel dat we voor het Beerkanaal en de directe Maasvlakte-bekkens toetsen op schaalniveau 2 (alleen de **direct aantakkende zijbekkens van het Beerkanaal**: $9.153$ m effectieve kadelengte incl. breedterijen, oftewel **75 schepen @ 85 m**, **62 schepen @ 110 m** en **47 schepen @ 135 m**):
 
 1. **Maximale jaarlijkse verkeersintensiteit (draagkracht) op basis van de zijbekkens**:
    Met $P_{\text{stop}} = 0{,}02547$ stops per passage en $\eta_{\text{norm}} = 0{,}80$ maximale bezettingsgraad kan het Beerkanaal met alleen zijn eigen zijbekkens de volgende verkeersintensiteit dragen:
-   * **Scenario 85 m (35 plaatsen)**: $\frac{35 \times 0{,}80}{0{,}02547} = \mathbf{1.099\text{ overnachtingsplichtige passages/etmaal}}$ ($\approx 401.200$ passages/jaar);
-   * **Scenario 110 m (29 plaatsen)**: $\frac{29 \times 0{,}80}{0{,}02547} = \mathbf{911\text{ overnachtingsplichtige passages/etmaal}}$ ($\approx 332.400$ passages/jaar);
-   * **Scenario 135 m (20 plaatsen)**: $\frac{20 \times 0{,}80}{0{,}02547} = \mathbf{628\text{ overnachtingsplichtige passages/etmaal}}$ ($\approx 229.300$ passages/jaar).
+   * **Scenario 85 m (75 plaatsen)**: $\frac{75 \times 0{,}80}{0{,}02547} = \mathbf{2.356\text{ overnachtingsplichtige passages/etmaal}}$ ($\approx 859.800$ passages/jaar);
+   * **Scenario 110 m (62 plaatsen)**: $\frac{62 \times 0{,}80}{0{,}02547} = \mathbf{1.947\text{ overnachtingsplichtige passages/etmaal}}$ ($\approx 710.800$ passages/jaar);
+   * **Scenario 135 m (47 plaatsen)**: $\frac{47 \times 0{,}80}{0{,}02547} = \mathbf{1.476\text{ overnachtingsplichtige passages/etmaal}}$ ($\approx 538.800$ passages/jaar).
 
 2. **Omgekeerde toets bij een gegeven verkeersintensiteit (bijv. $I = 40.000$ binnenvaartpassages/jaar $\approx 110$ schepen/etmaal)**:
    * Stel dat $60\%$ van de vloot in A1/A2-regime vaart ($f_{\text{overnacht}} = 0{,}60$) en dat een schip in het havengebied gemiddeld een corridorlengte van $\Delta L = 20$ km aflegt ($P_{\text{stop, corridor}} = 0{,}60 \times 20 / 168 = 0{,}0714$):
    * **Normvraag per nacht**:
      $$D_{\text{norm}} = \frac{110 \times 0{,}0714}{0{,}80} = \mathbf{9{,}8 \approx 10\text{ scheepsplaatsen}}$$
-   * **Toetsresultaat**: Met **35 plaatsen (85 m)**, **29 plaatsen (110 m)** en **20 plaatsen (135 m)** in de direct aantakkende zijbekkens van het Beerkanaal is $C_{\text{gebied}} \ge D_{\text{norm}}$ in alle drie de scheepslengtescenario's (**Voldoet**).
+   * **Toetsresultaat**: Met **75 plaatsen (85 m)**, **62 plaatsen (110 m)** en **47 plaatsen (135 m)** in de direct aantakkende zijbekkens van het Beerkanaal is $C_{\text{gebied}} \ge D_{\text{norm}}$ in alle drie de scheepslengtescenario's (**Voldoet**).
 
 ---
 
@@ -173,16 +173,12 @@ Onderstaande tabel toont de berekende verzorgingsgebied-capaciteit ($\le 15$ km)
 
 ---
 
-### 7.5 Aandachtspunten in de FIS-data voor Autoafzetplaatsen en Aantal Rijen (`number_of_rows` vs. `width`)
-Uit nadere inspectie van de FIS-export blijken drie registratie-effecten die verklaren waarom grote geclusterde locaties in Sectie 4 op `0` met autoafzetplaats uitkomen:
-1. **Autoafzetsteigers staan in FIS als aparte kortverblijf-records (`maximum_stay_duration_h = 1.0` u)**:
-   Van de 156 ligplaatsen met een autoafzetplaats in FIS (`CAR_DROPOFF` of gekoppeld via `cardropoff.geoparquet`) hebben er **48 een maximale verblijfsduur van 1 uur** en **61 categorie `OTHER` zonder overnachtingsvlag** (in totaal vallen 109 van de 156 autoafzet-records buiten `is_overnight`). Zo liggen in **Overnachtingshaven IJzendoorn** (`route_id = 33255`) en **Overnachtingshaven Haaften** (`route_id = 22637877`) de autosteigers op exact dezelfde locatie (`km 0.9` resp. `km 1.1`, op $< 150$ m van de overnachtingssteigers), maar als apart `berth`-record met `maximum_stay_duration_h = 1.0` uur en `category = "OTHER"`. Omdat de huidige clustering uitsluitend over `is_overnight == True` records loopt, worden deze losse autosteigers niet aan het overnachtingscluster gekoppeld. Bij **Terneuzen Goessekade** (`route_id = 6547`) ligt *Autoafzetplaats Terneuzen - Goessekade* eveneens op 355 m afstand op dezelfde route.
-2. **Ontbrekende `number_of_rows` (96% `NaN`) versus wel ingevulde vakbreedte `width`**:
-   Van de 821 overnachtingsligplaatsen is `number_of_rows` slechts bij **35 records (4%)** ingevuld, terwijl `width` bij **799 records (97%)** is ingevuld. In grote RWS-overnachtingshavens zoals **IJzendoorn** en **Haaften** staan de steigers geregistreerd met `length = 135.0` m, `number_of_rows = NaN`, maar **`width = 35.0` tot `40.0` m** (geschikt voor 3 schepen van $11{,}40$ m breed naast elkaar). Door de terugval op `rows = 1` bij `number_of_rows = NaN` komen IJzendoorn (11 schepen @ 110 m) en Haaften (9 schepen @ 110 m) nu onder de RVW-drempel van $\ge 15$ schepen uit, terwijl hun werkelijke capaciteit ~30–35 schepen bedraagt.
-3. **Grote open-water ankerplaatsen en ontbrekende koppelingen**:
-   De clusters die nu bij `rows = 1` wél $\ge 15$ schepen halen, zijn grotendeels **open-water ankerplaatsen** (*Ankerplaats Pampushaven Almere* 2.950 m, *Ankerplaats Westerschelde Terneuzen* 2.200 m, *Ankerplaats Bergsche Veld* 1.800 m) waar fysiek geen wal-autoafzetsteiger aanwezig is, plus **Overnachtingshaven Spijk** (`route_id = 43589453`, 18 steigers) waarvoor in `cardropoff.geoparquet` nog geen autoafzetplaats op route `43589453` is opgenomen.
-
-**Aanbeveling voor vervolgstap**:
-* Koppel bij de autoafzetplaatstest in `cluster_berths_and_check_facilities` alle records uit `cardropoff.geoparquet` én alle `berths` met `has_cardropoff == True` (ook met `maximum_stay_duration_h < 12` u) ruimtelijk (bijv. binnen $\le 500$ m of $\Delta \text{km} \le 0{,}5$ km op dezelfde route) aan het overnachtingscluster.
-* Leidt — wanneer `number_of_rows` `NaN` is maar `width` bekend is op een overnachtingssteiger — het aantal breedterijen indicatief af uit `floor(width / 11.4)` (of rapporteer dit als breedte-gecorrigeerd scenario).
+### 7.5 Verwerking van Autoafzetplaatsen ($\le 500$ m) en Aantal Rijen (`number_of_rows` vs. `width`)
+Uit nadere inspectie van de FIS-export bleken drie registratie-effecten die in de huidige berekening direct zijn gecorrigeerd:
+1. **Ruimtelijke koppeling van aparte autoafzetsteigers ($\le 500$ m / $\Delta \text{km} \le 0{,}5$ km)**:
+   Van de 156 ligplaatsen met een autoafzetplaats in FIS (`CAR_DROPOFF` of gekoppeld via `cardropoff.geoparquet`) hebben er **48 een maximale verblijfsduur van 1 uur** en **61 categorie `OTHER` zonder overnachtingsvlag** (omdat een schip aan de autosteiger zelf slechts kort mag aanmeren). In onder meer **Overnachtingshaven IJzendoorn** (`route_id = 33255`, km 0.9), **Overnachtingshaven Haaften** (`route_id = 22637877`, km 1.1) en **Terneuzen Goessekade** (`route_id = 6547`) staan deze autosteigers als aparte kortverblijf-records naast de overnachtingssteigers geregistreerd. In `cluster_berths_and_check_facilities` worden nu alle ligplaatsen met `has_cardropoff == True` én alle records uit `cardropoff.geoparquet` binnen $\Delta \text{km} \le 0{,}5$ km op dezelfde route of binnen $\le 500$ m (in RD New `EPSG:28992`) aan het overnachtingscluster gekoppeld.
+2. **Afleiding van het aantal breedterijen (`effective_rows`) uit `width` wanneer `number_of_rows` `NaN` is**:
+   Van de 821 overnachtingsligplaatsen is `number_of_rows` slechts bij **35 records (4%)** ingevuld, terwijl `width` bij **799 records (97%)** wél is ingevuld. In grote RWS-overnachtingshavens zoals **IJzendoorn** en **Haaften** staan de steigers geregistreerd met `length = 135.0` m, `number_of_rows = NaN`, en **`width = 35.0` tot `40.0` m** (geschikt voor 3 schepen van $11{,}40$ m breed naast elkaar). Wanneer `number_of_rows` niet is ingevuld, wordt `effective_rows` nu berekend als $\max(1, \lfloor \text{width} / 11{,}40 \rfloor)$. Hierdoor komen onder meer **IJzendoorn** (32 schepen @ 110 m), **Haaften** (26 schepen @ 110 m), **Beneden-Merwede** (36 schepen @ 110 m), **Werkendam** (35 schepen @ 110 m), **Maashaven** (25 schepen @ 110 m), **Amsterdam IJ-dok** (21 schepen @ 110 m), **Weurt** (16 schepen @ 110 m) en **Terneuzen Goessekade** (15 schepen @ 110 m) boven de drempel van $\ge 15$ schepen én slagen zij voor de autoafzetplaatstest (Sectie 4).
+3. **Resterende grote locaties zonder autoafzetplaats**:
+   De overblijvende locaties met $\ge 15$ schepen zonder geregistreerde autoafzetplaats in Sectie 4 bestaan hoofdzakelijk uit **open-water ankerplaatsen** (*Ankerplaats Pampushaven Almere*, *Ankerplaats Westerschelde Terneuzen*, *Ankerplaats Oosterschelde*, *Ankerplaats Krammer*, *Ankerplaats Bergsche Veld*), zeehavenbekkens met brede wateroppervlakken, plus **Overnachtingshaven Spijk** (`route_id = 43589453`) en **Overnachtingshaven Tuindorp (Lobith)** (`route_id = 30059`), waarvoor in `cardropoff.geoparquet` nog geen autoafzetplaats binnen 500 m is geregistreerd.
 
