@@ -13,21 +13,25 @@ import geopandas as gpd
 import networkx as nx
 import pandas as pd
 from pandas.core.groupby.generic import DataFrameGroupBy
-from shapely import line_merge
-from shapely.geometry import LineString, MultiLineString
+from shapely.geometry import LineString
 from shapely.ops import substring
 
 logger = logging.getLogger(__name__)
 
 
 def extract_segment_geometry(
-    full_geom: LineString | MultiLineString | None,
+    full_geom: LineString | None,
     km_a: float,
     km_b: float,
     full_km_begin: float,
     full_km_end: float,
 ) -> LineString | None:
-    """Extracts a sliced segment geometry along a route between km_a and km_b."""
+    """Extracts a sliced segment geometry along a route between km_a and km_b.
+
+    Computes the normalized fractional positions (in [0.0, 1.0]) of km_a and
+    km_b along the route's kilometrage span [full_km_begin, full_km_end] and
+    slices the corresponding LineString substring.
+    """
     km_span_total = abs(full_km_end - full_km_begin)
     if (
         full_geom is None
@@ -37,29 +41,25 @@ def extract_segment_geometry(
     ):
         return None
 
-    if isinstance(full_geom, MultiLineString):
-        full_geom = line_merge(full_geom)
-        if isinstance(full_geom, MultiLineString):
-            return None
-
+    # Normalized fractional position along the route geometry (0.0 at start, 1.0 at end),
+    # accounting for routes whose kilometrage runs in ascending or descending order.
     if full_km_end >= full_km_begin:
-        f_a = (km_a - full_km_begin) / km_span_total
-        f_b = (km_b - full_km_begin) / km_span_total
+        fraction_start = (km_a - full_km_begin) / km_span_total
+        fraction_end = (km_b - full_km_begin) / km_span_total
     else:
-        f_a = (full_km_begin - km_a) / km_span_total
-        f_b = (full_km_begin - km_b) / km_span_total
+        fraction_start = (full_km_begin - km_a) / km_span_total
+        fraction_end = (full_km_begin - km_b) / km_span_total
 
-    f_a = max(0.0, min(1.0, f_a))
-    f_b = max(0.0, min(1.0, f_b))
+    fraction_start = max(0.0, min(1.0, fraction_start))
+    fraction_end = max(0.0, min(1.0, fraction_end))
 
-    if abs(f_b - f_a) <= 1e-6:
+    if abs(fraction_end - fraction_start) <= 1e-6:
         return None
 
-    return substring(
-        full_geom,
-        min(f_a, f_b) * full_geom.length,
-        max(f_a, f_b) * full_geom.length,
-    )
+    start_distance = min(fraction_start, fraction_end) * full_geom.length
+    end_distance = max(fraction_start, fraction_end) * full_geom.length
+    segment_geom = substring(full_geom, start_distance, end_distance)
+    return segment_geom
 
 
 def extract_route_points(
@@ -80,12 +80,10 @@ def extract_route_points(
 
     if route_id in rj_by_route.groups:
         for _, rj in rj_by_route.get_group(route_id).iterrows():
-            sec_junc_id = rj.get("section_junction_id")
-            rj_node_id = (
-                f"rj_{sec_junc_id}"
-                if pd.notna(sec_junc_id) and sec_junc_id is not None
-                else f"rj_id_{rj['id']}"
-            )
+            # RouteJunctions link multiple routes via a shared SectionJunctionId
+            # (`section_junction_id`), which merges connecting routes into a single
+            # topological graph node `rj_{section_junction_id}`.
+            rj_node_id = f"rj_{rj['section_junction_id']}"
             km = (
                 float(rj["route_km_begin"])
                 if pd.notna(rj.get("route_km_begin"))
@@ -139,7 +137,7 @@ def build_route_network_graph(
         route_id = route["id"]
         route_name = str(route.get("name") or f"Route {route_id}")
         route_code = str(route.get("code") or "")
-        netwerk_type = type_map.get(route_id, "Niet geclassificeerd / Zee")
+        network_type = type_map.get(route_id, "Niet geclassificeerd / Zee")
         full_geom = route.geometry
 
         full_km_begin = (
@@ -175,13 +173,17 @@ def build_route_network_graph(
                 "route_id": route_id,
                 "route_name": route_name,
                 "route_code": route_code,
-                "netwerk_type": netwerk_type,
+                "network_type": network_type,
                 "km_from": km_a,
                 "km_to": km_b,
                 "length_km": dist_km,
                 "geometry": seg_geom,
             }
 
+            # Canonical undirected node-pair key so segments connecting the same
+            # two junctions in either direction map to the same key. If two routes
+            # share the exact same consecutive junction pair (a parallel edge),
+            # we deduplicate the segment and retain the shorter connection.
             pair_key = (id_a, id_b) if id_a <= id_b else (id_b, id_a)
             if pair_key in segment_by_pair:
                 parallel_edge_count += 1

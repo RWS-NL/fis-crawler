@@ -78,7 +78,7 @@ Om geen vaste aanname over de vlootopbouw te hoeven doen, wordt het fysieke kade
 | Route ID | Routenaam | Netwerktype | Trajectlengte zonder volledige dekking (km) | Max. afstand tot ligplaats |
 |---|---|---|---|---|
 {% for r in hvwn_gaps %}
-| {{ r.route_id }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ r.gap_km | fmt_num(1, " km") }} | {{ r.max_dist | fmt_dist }} |
+| {{ r.route_id }} | {{ r.route_name }} | {{ r.network_type }} | {{ r.gap_km | fmt_num(1, " km") }} | {{ r.max_dist | fmt_dist }} |
 {% endfor %}
 
 ---
@@ -91,5 +91,5 @@ Om geen vaste aanname over de vlootopbouw te hoeven doen, wordt het fysieke kade
 | Code | Routenaam | Categorie | Lengte | Overnacht Kade | Schepen (110m / 135m) | Max. Draagkracht Overnacht (km schip/jr) | Kegel Kade | Max. Draagkracht Kegel (km schip/jr) | Dekking Overnacht |
 |---|---|---|---|---|---|---|---|---|---|
 {% for r in top_cap %}
-| {{ r.route_code }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ r.total_length_km | fmt_num(1, " km") }} | {{ r.overnight_berth_length_m | fmt_num(0, " m", True) }} | {{ r.overnight_capacity_ships_110m | fmt_num(0) }} / {{ r.overnight_capacity_ships_135m | fmt_num(0) }} | {{ r.max_overnight_ship_length_km_yr | fmt_num(1, " km", True) }} | {{ r.kegel_berth_length_m | fmt_num(0, " m", True) }} | {{ r.max_kegel_ship_length_km_yr | fmt_num(1, " km", True) }} | {{ r.overnight_coverage_pct | fmt_pct }} |
+| {{ r.route_code }} | {{ r.route_name }} | {{ r.network_type }} | {{ r.total_length_km | fmt_num(1, " km") }} | {{ r.overnight_berth_length_m | fmt_num(0, " m", True) }} | {{ r.overnight_capacity_ships_110m | fmt_num(0) }} / {{ r.overnight_capacity_ships_135m | fmt_num(0) }} | {{ r.max_overnight_ship_length_km_yr | fmt_num(1, " km", True) }} | {{ r.kegel_berth_length_m | fmt_num(0, " m", True) }} | {{ r.max_kegel_ship_length_km_yr | fmt_num(1, " km", True) }} | {{ r.overnight_coverage_pct | fmt_pct }} |
 {% endfor %}
