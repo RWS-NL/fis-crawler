@@ -1,6 +1,6 @@
 """Spatial capacity and network distance analysis for berths (ligplaatsen).
 
-Analyzes berth capacity (discretized for 110 m and 135 m vessel scenarios),
+Analyzes berth capacity (discretized for 85 m, 110 m, and 135 m vessel scenarios),
 kegel (hazardous goods) berths, and car drop-off facilities against the spatial
 spacing criteria from Richtlijnen Vaarwegen 2020 (RVW 2020 § 6.3-6.6) and the
 Integrale Mobiliteitsanalyse (IMA 2021 Achtergrondrapportage Vaarwegen § 2.3).
@@ -27,9 +27,15 @@ from scripts.berth_analysis.route_network_graph import build_route_network_graph
 logger = logging.getLogger(__name__)
 
 # RVW 2020 § 6.3 - 6.6 constants
-SHIP_LENGTH_110_M = 110.0  # CEMT Va reference vessel
-SHIP_LENGTH_135_M = 135.0  # CEMT Vb Groot Rijnschip
-CLEARANCE_SPACING_M = 10.0  # RVW 2020 p. 146 longitudinal spacing s for class V+
+SHIP_LENGTH_85_M = 85.0  # CEMT IV Johann Welker
+SHIP_LENGTH_110_M = 110.0  # CEMT Va Groot Rijnschip
+SHIP_LENGTH_135_M = 135.0  # CEMT Vb Verlengd Groot Rijnschip
+CLEARANCE_SPACING_M = 10.0  # RVW 2020 p. 146 longitudinal spacing s
+SHIP_SCENARIOS = (
+    ("85m", SHIP_LENGTH_85_M),
+    ("110m", SHIP_LENGTH_110_M),
+    ("135m", SHIP_LENGTH_135_M),
+)
 
 # RVW 2020 § 6.3 p. 144 (~12 km/h network average) & Binnenvaartwet A1 (14h/day)
 NORMAL_DAY_SAILING_HOURS = 14.0
@@ -211,7 +217,7 @@ def classify_berths(
 
 
 def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Computes effective quay length and ship capacities for 110 m and 135 m vessel scenarios."""
+    """Computes effective quay length and ship capacities for 85 m, 110 m, and 135 m vessel scenarios."""
     df = berths.copy()
     rows = pd.to_numeric(df.get("number_of_rows"), errors="coerce")
     rows = rows.where(rows > 0, 1.0).fillna(1.0)
@@ -225,18 +231,17 @@ def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     )
 
     df["effective_length_m"] = length * rows
-    df["capacity_ships_110m"] = calc_berth_ship_slots(
-        length, rows, max_ship_len, SHIP_LENGTH_110_M
-    )
-    df["capacity_ships_135m"] = calc_berth_ship_slots(
-        length, rows, max_ship_len, SHIP_LENGTH_135_M
-    )
+    for suffix, ship_length_m in SHIP_SCENARIOS:
+        df[f"capacity_ships_{suffix}"] = calc_berth_ship_slots(
+            length, rows, max_ship_len, ship_length_m
+        )
 
     logger.info(
-        "Classified %d berths: %d overnight (%.0fm, %.0f ships @110m, %.0f ships @135m), %d kegel (%.0fm)",
+        "Classified %d berths: %d overnight (%.0fm, %.0f ships @85m, %.0f ships @110m, %.0f ships @135m), %d kegel (%.0fm)",
         len(df),
         df["is_overnight"].sum(),
         df.loc[df["is_overnight"], "effective_length_m"].sum(),
+        df.loc[df["is_overnight"], "capacity_ships_85m"].sum(),
         df.loc[df["is_overnight"], "capacity_ships_110m"].sum(),
         df.loc[df["is_overnight"], "capacity_ships_135m"].sum(),
         df["is_kegel"].sum(),
@@ -321,6 +326,7 @@ def _aggregate_cluster(rows: list[pd.Series]) -> dict:
         "route_km_end": float(df["route_km"].max()),
         "cluster_name": ", ".join(df["name"].dropna().astype(str).unique()[:3]),
         "num_berth_records": len(df),
+        "total_capacity_ships_85m": float(df["capacity_ships_85m"].sum()),
         "total_capacity_ships_110m": float(df["capacity_ships_110m"].sum()),
         "total_capacity_ships_135m": float(df["capacity_ships_135m"].sum()),
         "total_length_m": float(df["effective_length_m"].sum()),
@@ -361,7 +367,7 @@ def cluster_berths_and_check_facilities(
         return gpd.GeoDataFrame(crs="EPSG:4326")
 
     cluster_df = pd.DataFrame(clusters)
-    for suffix in ("110m", "135m"):
+    for suffix, _ in SHIP_SCENARIOS:
         req_col = f"req_cardropoff_{suffix}"
         comp_col = f"cardropoff_compliant_{suffix}"
         cluster_df[req_col] = (
@@ -379,8 +385,10 @@ def _aggregate_berths_by_route(berths: gpd.GeoDataFrame, kind: str) -> pd.DataFr
     agg_spec: dict[str, tuple[str, str]] = {
         f"num_{kind}_berths": ("id", "count"),
         f"{kind}_berth_length_m": ("effective_length_m", "sum"),
-        f"{kind}_capacity_ships_110m": ("capacity_ships_110m", "sum"),
-        f"{kind}_capacity_ships_135m": ("capacity_ships_135m", "sum"),
+        **{
+            f"{kind}_capacity_ships_{suffix}": (f"capacity_ships_{suffix}", "sum")
+            for suffix, _ in SHIP_SCENARIOS
+        },
     }
     if kind == "overnight":
         agg_spec["has_cardropoff"] = ("has_cardropoff", "any")
@@ -421,8 +429,7 @@ def compute_route_carrying_capacity(
         df[f"num_{kind}_berths"] = df[f"num_{kind}_berths"].fillna(0).astype(int)
         for col in (
             f"{kind}_berth_length_m",
-            f"{kind}_capacity_ships_110m",
-            f"{kind}_capacity_ships_135m",
+            *(f"{kind}_capacity_ships_{suffix}" for suffix, _ in SHIP_SCENARIOS),
         ):
             df[col] = df[col].fillna(0.0)
 
@@ -439,7 +446,7 @@ def compute_route_carrying_capacity(
             * 365.0,
             0.0,
         )
-        for suffix in ("110m", "135m"):
+        for suffix, _ in SHIP_SCENARIOS:
             df[f"max_{kind}_passages_{suffix}_yr"] = np.where(
                 df["expected_overnight_stops"] > 0,
                 df[f"{kind}_capacity_ships_{suffix}"]
@@ -531,7 +538,7 @@ def calculate_report_metrics(
             network_rows.append(summarize_segments(sub, NETWORK_CATEGORIES[cat]))
 
     cluster_stats: dict[str, int] = {}
-    for suffix in ("110m", "135m"):
+    for suffix, _ in SHIP_SCENARIOS:
         large = (
             gdf_clusters[gdf_clusters[f"req_cardropoff_{suffix}"]]
             if not gdf_clusters.empty
@@ -548,8 +555,8 @@ def calculate_report_metrics(
 
     missing_cardrop_df = (
         gdf_clusters[
-            gdf_clusters["req_cardropoff_110m"]
-            & ~gdf_clusters["cardropoff_compliant_110m"]
+            gdf_clusters["req_cardropoff_85m"]
+            & ~gdf_clusters["cardropoff_compliant_85m"]
         ]
         if not gdf_clusters.empty
         else pd.DataFrame()
@@ -585,10 +592,12 @@ def calculate_report_metrics(
         "ov_long_quay_count": int(berths["ov_by_long_quay"].sum()),
         "overnight_kadelengte_m": ov_len_m,
         "overnight_meter_nachten": ov_len_m * 365.0,
+        "overnight_ships_85m": float(berths.loc[ov_mask, "capacity_ships_85m"].sum()),
         "overnight_ships_110m": float(berths.loc[ov_mask, "capacity_ships_110m"].sum()),
         "overnight_ships_135m": float(berths.loc[ov_mask, "capacity_ships_135m"].sum()),
         "kegel_berths_count": int(kg_mask.sum()),
         "kegel_kadelengte_m": float(berths.loc[kg_mask, "effective_length_m"].sum()),
+        "kegel_ships_85m": float(berths.loc[kg_mask, "capacity_ships_85m"].sum()),
         "kegel_ships_110m": float(berths.loc[kg_mask, "capacity_ships_110m"].sum()),
         "kegel_ships_135m": float(berths.loc[kg_mask, "capacity_ships_135m"].sum()),
         "total_clusters": len(gdf_clusters),

@@ -157,6 +157,7 @@ def carrying_capacity_inputs():
                 "is_overnight": True,
                 "is_kegel": False,
                 "effective_length_m": 240.0,
+                "capacity_ships_85m": 2,
                 "capacity_ships_110m": 2,
                 "capacity_ships_135m": 1,
                 "has_cardropoff": True,
@@ -168,6 +169,7 @@ def carrying_capacity_inputs():
                 "is_overnight": False,
                 "is_kegel": True,
                 "effective_length_m": 120.0,
+                "capacity_ships_85m": 1,
                 "capacity_ships_110m": 1,
                 "capacity_ships_135m": 0,
                 "has_cardropoff": False,
@@ -231,6 +233,7 @@ def synthetic_graph_inputs():
                 "route_km": 20.0,
                 "is_overnight": True,
                 "is_kegel": False,
+                "capacity_ships_85m": 2,
                 "capacity_ships_110m": 2,
                 "capacity_ships_135m": 1,
                 "effective_length_m": 240.0,
@@ -257,14 +260,16 @@ def test_determine_kegels():
 
 
 def test_calc_berth_ship_slots():
-    lengths = pd.Series([240.0, 120.0, 300.0, 0.0])
+    lengths = pd.Series([240.0, 90.0, 300.0, 0.0])
     rows = pd.Series([1.0, 2.0, 1.0, 1.0])
-    max_len = pd.Series([float("nan"), float("nan"), 110.0, float("nan")])
+    max_len = pd.Series([float("nan"), 85.0, 110.0, float("nan")])
 
+    slots_85 = calc_berth_ship_slots(lengths, rows, max_len, 85.0)
     slots_110 = calc_berth_ship_slots(lengths, rows, max_len, 110.0)
     slots_135 = calc_berth_ship_slots(lengths, rows, max_len, 135.0)
 
-    assert list(slots_110) == [2.0, 2.0, 2.0, 0.0]
+    assert list(slots_85) == [2.0, 2.0, 3.0, 0.0]
+    assert list(slots_110) == [2.0, 0.0, 2.0, 0.0]
     assert list(slots_135) == [1.0, 0.0, 0.0, 0.0]
 
 
@@ -278,6 +283,7 @@ def test_classify_and_calculate_capacity(sample_berths_and_cardropoffs):
     assert classified.loc[classified["id"] == "2", "kegel_count"].iloc[0] == 2
 
     capacities = calculate_berth_capacities(classified)
+    assert capacities.loc[capacities["id"] == "1", "capacity_ships_85m"].iloc[0] == 2
     assert capacities.loc[capacities["id"] == "1", "capacity_ships_110m"].iloc[0] == 2
     assert capacities.loc[capacities["id"] == "1", "capacity_ships_135m"].iloc[0] == 1
     assert (
@@ -303,7 +309,8 @@ def test_classify_and_calculate_capacity(sample_berths_and_cardropoffs):
 
     assert df.loc[df["id"] == "4", "is_overnight"].iloc[0]
     assert df.loc[df["id"] == "4", "effective_length_m"].iloc[0] == 450.0
-    # 450m restricted to max 110m ships -> 3 ships at 110m, 0 ships at 135m
+    # 450m restricted to max 110m ships -> 4 ships at 85m, 3 ships at 110m, 0 ships at 135m
+    assert df.loc[df["id"] == "4", "capacity_ships_85m"].iloc[0] == 4
     assert df.loc[df["id"] == "4", "capacity_ships_110m"].iloc[0] == 3
     assert df.loc[df["id"] == "4", "capacity_ships_135m"].iloc[0] == 0
 

@@ -105,6 +105,7 @@ def extract_route_points(
                         "name": b.get("name"),
                         "is_overnight": bool(b.get("is_overnight", False)),
                         "is_kegel": bool(b.get("is_kegel", False)),
+                        "capacity_ships_85m": float(b.get("capacity_ships_85m", 0.0)),
                         "capacity_ships_110m": float(b.get("capacity_ships_110m", 0.0)),
                         "capacity_ships_135m": float(b.get("capacity_ships_135m", 0.0)),
                         "effective_length_m": float(b.get("effective_length_m", 0.0)),
