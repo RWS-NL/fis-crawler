@@ -373,6 +373,79 @@ def test_width_fallback_rows_and_spatial_cardropoff_clustering():
     assert clusters.iloc[0]["cardropoff_compliant_110m"]
 
 
+def test_anchorage_swing_diameter_and_max_quay_rows():
+    berths = gpd.GeoDataFrame(
+        [
+            {
+                "id": "anc1",
+                "route_id": "20940",
+                "route_km": 10.0,
+                "name": "Ankerplaats 1 Westerschelde Terneuzen",
+                "facility": [],
+                "category": "OTHER",
+                "maximum_stay_duration_h": None,
+                "signalling": None,
+                "length": 1600.0,
+                "width": 330.0,
+                "number_of_rows": None,
+                "maximal_ship_length": None,
+                "geometry": Point(3.8, 51.3),
+            },
+            {
+                "id": "anc2",
+                "route_id": "19631",
+                "route_km": 5.0,
+                "name": "Ankerplaats 1 Hollandsch Diep Willemstad",
+                "facility": ["OVERNIGHT_ACCOMODATION"],
+                "category": "ALL_VESSELS",
+                "maximum_stay_duration_h": None,
+                "signalling": None,
+                "length": 400.0,
+                "width": 300.0,
+                "number_of_rows": None,
+                "maximal_ship_length": None,
+                "geometry": Point(4.4, 51.7),
+            },
+            {
+                "id": "quay_wide",
+                "route_id": "100",
+                "route_km": 2.0,
+                "name": "Brede kade havenbekken",
+                "facility": ["OVERNIGHT_ACCOMODATION"],
+                "category": "ALL_VESSELS",
+                "maximum_stay_duration_h": 72.0,
+                "signalling": None,
+                "length": 300.0,
+                "width": 80.0,
+                "number_of_rows": None,
+                "maximal_ship_length": None,
+                "geometry": Point(4.5, 51.8),
+            },
+        ],
+        crs="EPSG:4326",
+    )
+    cardropoffs = gpd.GeoDataFrame(
+        columns=["id", "berth_id", "name", "geometry"], crs="EPSG:4326"
+    )
+    df = classify_and_calculate_capacity(berths, cardropoffs)
+
+    # anc1: 1600m x 330m anchorage -> swinging diameter ~300m -> 1 row (not 28 rows!)
+    assert df.loc[df["id"] == "anc1", "effective_rows"].iloc[0] == 1.0
+    assert df.loc[df["id"] == "anc1", "effective_length_m"].iloc[0] == 1600.0
+    # floor((1600 + 10) / 120) = 13 ships
+    assert df.loc[df["id"] == "anc1", "capacity_ships_110m"].iloc[0] == 13.0
+
+    # anc2: 400m x 300m anchorage -> swinging diameter ~300m -> 1 row (not 26 rows!)
+    assert df.loc[df["id"] == "anc2", "effective_rows"].iloc[0] == 1.0
+    assert df.loc[df["id"] == "anc2", "effective_length_m"].iloc[0] == 400.0
+    # floor((400 + 10) / 120) = 3 ships (matches empirical 4-month AIS timex!)
+    assert df.loc[df["id"] == "anc2", "capacity_ships_110m"].iloc[0] == 3.0
+
+    # quay_wide: 80m wide quay -> width / 11.4 = 7 rows, capped at MAX_QUAY_ROWS = 3.0
+    assert df.loc[df["id"] == "quay_wide", "effective_rows"].iloc[0] == 3.0
+    assert df.loc[df["id"] == "quay_wide", "effective_length_m"].iloc[0] == 900.0
+
+
 def test_build_network_classification_map():
     fc = gpd.GeoDataFrame(
         [

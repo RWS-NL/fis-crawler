@@ -60,9 +60,17 @@ $$\text{is\_kegel} = (\text{kegel\_count} > 0)$$
 De kadelengte $L$ komt uit het veld `length` (waarbij $L > 0$, anders $0{,}0\text{ m}$).
 
 #### Afleiding van het aantal rijen naast elkaar ($N_{\text{rijen}}$)
-In FIS is `number_of_rows` slechts bij ~4% van de overnachtingsligplaatsen expliciet ingevuld, terwijl `width` (totale vakbreedte in het water) bij ~97% van de overnachtingsligplaatsen wél is ingevuld (bijv. $35\text{--}40\text{ m}$ bij de grote RWS-overnachtingshavens IJzendoorn en Haaften). Wanneer `number_of_rows` ontbreekt (`NaN`) of $\le 0$ is, wordt het aantal breedterijen daarom afgeleid uit `width` op basis van de standaard CEMT Va/Vb scheepsbreedte $B_{\text{schip}} = 11{,}40\text{ m}$:
+In FIS is `number_of_rows` slechts bij ~4% van de overnachtingsligplaatsen expliciet ingevuld, terwijl `width` (totale vakbreedte in het water) bij ~97% van de overnachtingsligplaatsen wél is ingevuld (bijv. $35\text{--}40\text{ m}$ bij de grote RWS-overnachtingshavens IJzendoorn en Haaften). 
 
-$$N_{\text{rijen}} = \begin{cases} \text{number\_of\_rows} & \text{als } \text{number\_of\_rows} > 0 \\[6pt] \max\left(1,\; \left\lfloor \dfrac{\text{width}}{11{,}40} \right\rfloor\right) & \text{als } \text{number\_of\_rows is NaN} \land \text{width} > 0 \\[8pt] 1 & \text{anders} \end{cases}$$
+Het aantal effectieve rijen wordt gedifferentieerd naar type ligplaats:
+
+1. **Standaard kades en afmeersteigers**: Wanneer `number_of_rows` ontbreekt (`NaN`) of $\le 0$ is, wordt het aantal breedterijen afgeleid uit `width` op basis van de standaard CEMT Va/Vb scheepsbreedte $B_{\text{schip}} = 11{,}40\text{ m}$, begrensd op maximaal 3 rijen conform **RVW 2020 § 6.4.2** en **BPR art. 7.05** (enkel, dubbel of 3-dik afmeren):
+   $$N_{\text{rijen, kade}} = \begin{cases} \text{number\_of\_rows} & \text{als } \text{number\_of\_rows} > 0 \\[6pt] \min\left(3,\; \max\left(1,\; \left\lfloor \dfrac{\text{width}}{11{,}40} \right\rfloor\right)\right) & \text{als } \text{number\_of\_rows is NaN} \land \text{width} > 0 \\[8pt] 1 & \text{anders} \end{cases}$$
+
+2. **Open-water ankerplaatsen en reeden** (`name` bevat `"anker"` of `"reede"`, of `category == "ANCHORAGE"`):
+   Op open water (zoals Westerschelde, Hollandsch Diep, Oosterschelde, Krammer, Waddenzee) is er geen vaste infrastructuur. Schepen liggen solitair achter hun boeganker en zwaaien vrij rond onder invloed van wind en getijdestroom (draaicirkels van AIS-transponders). De breedte van de polygoon (200 tot 450 m) representeert de zwaairuimte van één file schepen ($D_{\text{zwaai}} \approx 300\text{ m}$ conform **PIANC WG 121**). Rijen worden derhalve berekend op basis van de zwaaidiameter:
+   $$N_{\text{rijen, anker}} = \max\left(1,\; \left\lfloor \dfrac{\text{width}}{300{,}0} \right\rfloor\right) \quad (\equiv 1{,}0\text{ voor reguliere vaarwegcorridors})$$
+   Hierdoor worden onrealistische vermenigvuldigingen (zoals 28 rijen schepen en 44,8 km kadelengte bij Terneuzen) voorkomen.
 
 De totale **effectieve ligplaatslengte** (`effective_length_m`) is:
 
@@ -165,7 +173,7 @@ $$D_{\text{dag}} = v_{\text{gem}} \times T_{\text{dag}} = 12 \times 14 = 168{,}0
 | `is_overnight` | `bool` | - | Eindclassificatie overnachtingsligplaats: `ov_by_facility \| ov_by_stay \| ov_by_category \| ov_by_long_quay`. |
 | `kegel_count` | `int64` | kegels | Aantal toegestane ADN-kegels (`0`, `1` of `2`) afgeleid uit `signalling` en `name`. |
 | `is_kegel` | `bool` | - | Eindclassificatie kegelligplaats: `kegel_count > 0`. |
-| `effective_rows` | `float64` | rijen | Effectief aantal scheepsrijen naast elkaar: `number_of_rows` indien $> 0$, anders afgeleid uit `max(1, floor(width / 11.4))` indien `width > 0`, anders `1.0`. |
+| `effective_rows` | `float64` | rijen | Effectief aantal scheepsrijen naast elkaar: `number_of_rows` indien $> 0$. Voor ankerplaatsen/reeden: afgeleid uit zwaaidiameter `max(1, floor(width / 300.0))` ($\equiv 1{,}0$ file). Voor kades/steigers: afgeleid uit `min(3, max(1, floor(width / 11.4)))` (RVW § 6.4.2 / BPR art. 7.05), anders `1.0`. |
 | `effective_length_m` | `float64` | m | Totale effectieve afmeerlengte: `length * effective_rows`. |
 | `capacity_ships_85m` | `float64` | schepen | Aantal schepen van **85 m (CEMT IV)** dat gelijktijdig kan afmeren: `floor((length + 10) / 95) * effective_rows` (indien toegestaan door `maximal_ship_length`). |
 | `capacity_ships_110m` | `float64` | schepen | Aantal schepen van **110 m (CEMT Va)** dat gelijktijdig kan afmeren: `floor((length + 10) / 120) * effective_rows` (indien toegestaan door `maximal_ship_length`). |

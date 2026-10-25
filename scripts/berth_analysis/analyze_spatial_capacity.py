@@ -54,6 +54,12 @@ CAR_DROPOFF_SEARCH_RADIUS_M = (
 SHIP_WIDTH_M = (
     11.4  # Standard CEMT Va/Vb reference ship width (m) for width-to-rows fallback
 )
+MAX_QUAY_ROWS = (
+    3.0  # Max abreast mooring rows for quays/jetties (RVW § 6.4.2 / BPR Art. 7.05)
+)
+ANCHORAGE_SWING_DIAMETER_M = (
+    300.0  # Min swinging corridor diameter (m) for open-water anchorages (PIANC WG 121)
+)
 
 HVWN_TYPES = ("Hoofdtransportas", "Hoofdvaarweg")
 NETWORK_CATEGORIES = {
@@ -231,8 +237,33 @@ def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     width = pd.to_numeric(
         df.get("width", pd.Series(np.nan, index=df.index)), errors="coerce"
     )
-    width_rows = np.maximum(1.0, np.floor(width / SHIP_WIDTH_M)).where(width > 0, 1.0)
+
+    name_lower = df.get("name", pd.Series("", index=df.index)).fillna("").str.lower()
+    category_upper = (
+        df.get("category", pd.Series("", index=df.index)).fillna("").str.upper()
+    )
+    is_anchorage = (
+        name_lower.str.contains("anker", na=False)
+        | name_lower.str.contains("reede", na=False)
+        | (category_upper == "ANCHORAGE")
+    )
+
+    # For standard quays/jetties: derive rows from width, capped at MAX_QUAY_ROWS (RVW § 6.4.2 / BPR art. 7.05)
+    quay_width_rows = np.clip(np.floor(width / SHIP_WIDTH_M), 1.0, MAX_QUAY_ROWS).where(
+        width > 0, 1.0
+    )
+
+    # For open-water anchorages: vessels swing freely on bow anchors and do not moor abreast.
+    # Rows represent independent swinging corridors along the fairway corridor (~300 m per file),
+    # defaulting to 1.0 row for standard fairway anchorages.
+    anchorage_rows = np.maximum(
+        1.0, np.floor(width / ANCHORAGE_SWING_DIAMETER_M)
+    ).where(width > 0, 1.0)
+
+    width_rows = quay_width_rows.where(~is_anchorage, anchorage_rows)
     rows = raw_rows.where(raw_rows > 0, width_rows).fillna(1.0)
+    # Cap anchorages at anchorage_rows so raw_rows or wide polygons do not assign multi-row abreast capacity
+    rows = rows.where(~is_anchorage, np.minimum(rows, anchorage_rows))
     df["effective_rows"] = rows
 
     length = pd.to_numeric(df.get("length"), errors="coerce")
