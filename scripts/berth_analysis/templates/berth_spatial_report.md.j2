@@ -8,37 +8,47 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
 
 | Netwerkcategorie | Totale lengte (km) | Overnachten $\le 30$ km | Overnachten (%) | Kegel $\le 60$ km | Kegel (%) |
 |---|---|---|---|---|---|
-| **Hoofdtransportassen (HTA)** | {{ hta_stat.tot_km | format_km }} | {{ hta_stat.ov_km | format_km }} | **{{ hta_stat.ov_pct | format_pct }}** | {{ hta_stat.kg_km | format_km }} | **{{ hta_stat.kg_pct | format_pct }}** |
-| **Hoofdvaarwegen (HVW)** | {{ hvw_stat.tot_km | format_km }} | {{ hvw_stat.ov_km | format_km }} | **{{ hvw_stat.ov_pct | format_pct }}** | {{ hvw_stat.kg_km | format_km }} | **{{ hvw_stat.kg_pct | format_pct }}** |
-| **Totaal HVWN (HTA + HVW)** | **{{ hvwn_tot | format_km }}** | **{{ hvwn_ov | format_km }}** | **{{ hvwn_ov_pct | format_pct }}** | **{{ hvwn_kg | format_km }}** | **{{ hvwn_kg_pct | format_pct }}** |
-| Overige vaarwegen | {{ ovg_stat.tot_km | format_km }} | {{ ovg_stat.ov_km | format_km }} | {{ ovg_stat.ov_pct | format_pct }} | {{ ovg_stat.kg_km | format_km }} | {{ ovg_stat.kg_pct | format_pct }} |
-| Niet geclassificeerd (kust/zee) | {{ unc_stat.tot_km | format_km }} | {{ unc_stat.ov_km | format_km }} | {{ unc_stat.ov_pct | format_pct }} | {{ unc_stat.kg_km | format_km }} | {{ unc_stat.kg_pct | format_pct }} |
+{% for row in network_rows %}
+{% if row.bold %}
+| **{{ row.label }}** | **{{ row.tot_km | fmt_num(1, " km") }}** | **{{ row.ov_km | fmt_num(1, " km") }}** | **{{ row.ov_pct | fmt_pct }}** | **{{ row.kg_km | fmt_num(1, " km") }}** | **{{ row.kg_pct | fmt_pct }}** |
+{% else %}
+| {{ row.label }} | {{ row.tot_km | fmt_num(1, " km") }} | {{ row.ov_km | fmt_num(1, " km") }} | {{ row.ov_pct | fmt_pct }} | {{ row.kg_km | fmt_num(1, " km") }} | {{ row.kg_pct | fmt_pct }} |
+{% endif %}
+{% endfor %}
 
 ---
 
-## 2. Ligplaatscapaciteit en Aanbod
+## 2. Ligplaatscapaciteit en Gevoeligheid Scheepslengte (110 m vs. 135 m)
 
-* **Totaal aantal ligplaatsrecords in FIS**: {{ total_berths | format_int }}
-* **Aangemerkt als overnachtingsligplaats**: {{ overnight_berths_count | format_int }} records
-* **Totale kadelengte overnachten**: **{{ overnight_kadelengte_m | format_length_m }}**
-* **Totale kadecapaciteit overnachten**: **{{ overnight_meter_nachten | format_int }} meter-nachten per jaar**
-* **Kegelligplaatsen (gevaarlijke stoffen)**: {{ kegel_berths_count | format_int }} records ({{ kegel_kadelengte_m | format_length_m }} kadelengte)
-* **Aantal geclusterde overnachtingslocaties**: {{ total_clusters | format_int }} locaties
+Om geen vaste aanname over de vlootopbouw te hoeven doen, wordt het fysieke kade-aanbod gediscretiseerd naar twee referentiescenario's (met onderlinge tussenruimte $s = 10$ m conform RVW 2020 p. 146):
+1. **Scenario 110 m (CEMT Va)**: aantal schepen uitgaand van $110$ m scheepslengte.
+2. **Scenario 135 m (CEMT Vb, waar toegestaan)**: aantal schepen uitgaand van $135$ m op ligplaatsen waar `maximal_ship_length` onbeperkt of $\ge 135$ m is.
+
+* **Totaal aantal ligplaatsrecords in FIS**: {{ total_berths | fmt_num(0) }}
+* **Overnachtingsligplaatsen**: {{ overnight_berths_count | fmt_num(0) }} records (**{{ overnight_kadelengte_m | fmt_num(1, " m") }}** kadelengte, **{{ overnight_meter_nachten | fmt_num(0) }}** meter-nachten/jaar)
+  * Capaciteit **scenario 110 m**: **{{ overnight_ships_110m | fmt_num(0) }} schepen**
+  * Capaciteit **scenario 135 m (waar toegestaan)**: **{{ overnight_ships_135m | fmt_num(0) }} schepen**
+* **Kegelligplaatsen (gevaarlijke stoffen)**: {{ kegel_berths_count | fmt_num(0) }} records (**{{ kegel_kadelengte_m | fmt_num(1, " m") }}** kadelengte)
+  * Capaciteit **scenario 110 m**: **{{ kegel_ships_110m | fmt_num(0) }} schepen**
+  * Capaciteit **scenario 135 m (waar toegestaan)**: **{{ kegel_ships_135m | fmt_num(0) }} schepen**
+* **Aantal geclusterde overnachtingslocaties**: {{ total_clusters | fmt_num(0) }} locaties
 
 ---
 
-## 3. Autoafzetplaatsen Toetsing (RVW § 6.6)
-* **Grote overnachtingslocaties (capaciteit $\ge 15$ schepen)**: {{ large_clusters_count }} locaties
-* **Waarvan mét geregistreerde autoafzetplaats**: {{ cardropoff_ok_count }} locaties
-* **Ontbrekende autoafzetplaatsen**: {{ missing_cardrop_count }} locaties
+## 3. Autoafzetplaatsen Toetsing (RVW § 6.6: $\ge 15$ schepen)
+
+| Scenario | Grote locaties ($\ge 15$ schepen) | Mét autoafzetplaats | Ontbrekende autoafzetplaats |
+|---|---|---|---|
+| **Scenario 110 m** | {{ large_clusters_110m_count }} locaties | {{ cardropoff_ok_110m_count }} locaties | {{ missing_cardrop_110m_count }} locaties |
+| **Scenario 135 m (waar toegestaan)** | {{ large_clusters_135m_count }} locaties | {{ cardropoff_ok_135m_count }} locaties | {{ missing_cardrop_135m_count }} locaties |
 {% if missing_cardrop %}
 
 ### Grote overnachtingslocaties zonder geregistreerde autoafzetplaats:
 
-| Route ID | Locatie / Naam | Capaciteit (schepen) | Kadelengte (m) |
-|---|---|---|---|
+| Route ID | Locatie / Naam | Capaciteit 110 m (schepen) | Capaciteit 135 m (schepen) | Kadelengte (m) |
+|---|---|---|---|---|
 {% for r in missing_cardrop %}
-| {{ r.route_id }} | {{ r.cluster_name }} | {{ r.total_capacity_ships | format_int }} | {{ r.total_length_m | format_int }}m |
+| {{ r.route_id }} | {{ r.cluster_name }} | {{ r.total_capacity_ships_110m | fmt_num(0) }} | {{ r.total_capacity_ships_135m | fmt_num(0) }} | {{ r.total_length_m | fmt_num(0, " m") }} |
 {% endfor %}
 {% endif %}
 
@@ -49,7 +59,7 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
 | Route ID | Routenaam | Netwerktype | Trajectlengte zonder volledige dekking (km) | Max. afstand tot ligplaats |
 |---|---|---|---|---|
 {% for r in hvwn_gaps %}
-| {{ r.route_id }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ r.gap_km | format_km }} | {{ r.max_dist | format_dist }} |
+| {{ r.route_id }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ r.gap_km | fmt_num(1, " km") }} | {{ r.max_dist | fmt_dist }} |
 {% endfor %}
 
 ---
@@ -57,12 +67,10 @@ Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapp
 ## 5. Maximale Draagkracht per Route (RVW 2020 § 6.4.2)
 
 > [!NOTE]
-> **Corridor-context**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte en verwachte overnachtingen op het deeltraject ($L_{\\text{kade}} \\times 365 / \\text{verwachte stops}$). Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.
+> **Corridor-context**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte en verwachte overnachtingen op het deeltraject ($L_{\text{kade}} \times 365 / \text{verwachte stops}$). Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.
 
-Berekend tot de stap waar scheepslengte nodig is. Toont per route de beschikbare kadelengte en de maximale jaardraagkracht in scheepslengte-kilometers per jaar (zowel regulier overnachten als kegel):
-
-| Code | Routenaam | Categorie | Lengte (km) | Overnachting Kade (m) | Max. Draagkracht Overnachten (km schip/jr) | Kegel Kade (m) | Max. Draagkracht Kegel (km schip/jr) | Dekking Overnacht (%) |
-|---|---|---|---|---|---|---|---|---|
+| Code | Routenaam | Categorie | Lengte | Overnacht Kade | Schepen (110m / 135m) | Max. Draagkracht Overnacht (km schip/jr) | Kegel Kade | Max. Draagkracht Kegel (km schip/jr) | Dekking Overnacht |
+|---|---|---|---|---|---|---|---|---|---|
 {% for r in top_cap %}
-| {{ r.route_code }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ r.total_length_km | format_km }} | {{ r.overnight_berth_length_m | format_kade_m }} | {{ r.max_capacity_ship_length_km_yr | format_draagkracht }} | {{ r.kegel_berth_length_m | format_kade_m }} | {{ r.max_kegel_ship_length_km_yr | format_draagkracht }} | {{ r.overnight_coverage_pct | format_pct }} |
+| {{ r.route_code }} | {{ r.route_name }} | {{ r.netwerk_type }} | {{ r.total_length_km | fmt_num(1, " km") }} | {{ r.overnight_berth_length_m | fmt_num(0, " m", True) }} | {{ r.overnight_capacity_ships_110m | fmt_num(0) }} / {{ r.overnight_capacity_ships_135m | fmt_num(0) }} | {{ r.max_capacity_ship_length_km_yr | fmt_num(1, " km", True) }} | {{ r.kegel_berth_length_m | fmt_num(0, " m", True) }} | {{ r.max_kegel_ship_length_km_yr | fmt_num(1, " km", True) }} | {{ r.overnight_coverage_pct | fmt_pct }} |
 {% endfor %}
