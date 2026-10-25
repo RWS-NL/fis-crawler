@@ -840,6 +840,15 @@ def generate_markdown_summary(
     output_path.write_text(template.render(**context), encoding="utf-8")
     logger.info("Summary report written to %s", output_path)
 
+    # Automatically generate styled HTML version alongside markdown report
+    try:
+        from scripts.render_reports_html import convert_markdown_to_html
+
+        html_out = convert_markdown_to_html(output_path)
+        logger.info("Rendered styled HTML report to %s", html_out)
+    except Exception as e:
+        logger.warning("Could not render HTML report: %s", e)
+
 
 @click.command()
 @click.option(
