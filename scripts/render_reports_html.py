@@ -42,6 +42,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     * {
       box-sizing: border-box;
     }
+    .katex-mathml {
+      display: none !important;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       color: var(--text);
