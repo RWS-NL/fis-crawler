@@ -40,6 +40,7 @@ $$\text{not\_excl} = \big(\text{maximum\_stay\_duration\_h is NaN} \lor \text{ma
 $$\text{is\_overnight} = \text{ov\_by\_facility} \lor \text{ov\_by\_stay} \lor \text{ov\_by\_category} \lor \text{ov\_by\_long\_quay}$$
 
 waarbij (elk gecombineerd met $\text{not\_excl}$):
+
 1. **Expliciete overnachtingsfaciliteit (`ov_by_facility`)**: $\text{"OVERNIGHT\_ACCOMODATION"} \in \text{facility} \land \text{not\_excl}$
 2. **Verblijfsduur $\ge 12$ uur (`ov_by_stay`)**: $\text{maximum\_stay\_duration\_h} \ge 12{,}0 \land \text{not\_excl}$
 3. **Commerciële binnenvaartcategorie (`ov_by_category`)**: $\text{category} \in \{\text{"ALL\_VESSELS"},\; \text{"PUSH\_TOW\_VESSELS"},\; \text{"NON\_PUSH\_TOW\_VESSELS"}\} \land \text{not\_excl}$
@@ -94,6 +95,7 @@ Overnachtingsligplaatsen op dezelfde `route_id` die binnen $\Delta \text{km} \le
 
 **Ruimtelijke koppeling van autoafzetplaatsen (`has_cardropoff` op clusterniveau)**:
 Omdat autoafzetsteigers in FIS vaak als apart kortverblijf-record (`maximum_stay_duration_h = 1.0` u, `category = "OTHER"`) naast de overnachtingssteigers staan geregistreerd, beschikt een cluster over een autoafzetplaats wanneer:
+
 1. Ten minste één overnachtingsligplaats in het cluster zelf `has_cardropoff == True` heeft, **óf**
 2. Er een ligplaats met `has_cardropoff == True` (ook met kort verblijf $< 12\text{ u}$) of een record uit `cardropoff.geoparquet` binnen $\le 500\text{ m}$ ($\Delta \text{km} \le 0{,}5\text{ km}$ op dezelfde route of $\le 500\text{ m}$ Euclidische afstand in RD New `EPSG:28992`) van het cluster ligt.
 
@@ -107,6 +109,7 @@ $$\text{cardropoff\_compliant\_}\{L_{\text{schip}}\} \iff \neg \text{req\_cardro
 
 ### 2.5 Ruimtelijke Netwerkdekking op Routetussenstukken (RVW 2020 § 6.4.2)
 Volgens RVW 2020 § 6.4.2 geldt langs hoofdtransportassen en hoofdvaarwegen:
+
 * **Reguliere overnachtingshavens**: onderlinge afstand maximaal $\Delta L_{\text{max}} = 30\text{ km}$. Een schip bevindt zich overal op een gedekt traject op ten hoogste de **halve tussenafstand** ($r_{\text{overnacht}} = 15{,}0\text{ km}$) van de dichtstbijzijnde overnachtingsligplaats.
 * **Kegelligplaatsen**: onderlinge afstand maximaal $\Delta L_{\text{max}} = 60\text{ km}$, oftewel een maximale afstand tot de dichtstbijzijnde kegelligplaats van $r_{\text{kegel}} = 30{,}0\text{ km}$.
 
@@ -150,6 +153,7 @@ $$D_{\text{dag}} = v_{\text{gem}} \times T_{\text{dag}} = 12 \times 14 = 168{,}0
    $$\mathcal{B}_{\text{corridor}}(r, R) = \left\{ b \in \mathcal{B} \;\middle|\; \min_{u \in V(r)} d_G(u, v_b) \le R \right\}$$
 
    Waaruit analoog aan de lokale capaciteit worden berekend:
+
    * `corridor_overnight_berths` $= |\mathcal{B}_{\text{corridor}}(r, 15\text{ km})|$
    * `corridor_overnight_berth_length_m` $= \sum_{b \in \mathcal{B}_{\text{corridor}}} L_{\text{eff}}(b)$
    * `corridor_overnight_capacity_ships_{85m,110m,135m}` $= \sum_{b \in \mathcal{B}_{\text{corridor}}} C_b(L_{\text{schip}})$
@@ -269,6 +273,7 @@ Dit bestand bevat de geclusterde overnachtingslocaties (overnachtingsligplaatsen
 
 ### 3.3 `route_segments_compliance.geoparquet` & `route_segments_compliance_all.geoparquet`
 Elk record in deze bestanden vertegenwoordigt een **routetussenstuk (edge)** op de topologische vaarweggraaf tussen twee opeenvolgende splitsingsknopen (`SectionJunction`) of ligplaatsprojectiepunten op een route.
+
 * `route_segments_compliance.geoparquet` bevat uitsluitend de segmenten op het **Hoofdvaarwegnet (`is_hvwn == True`)**.
 * `route_segments_compliance_all.geoparquet` bevat de segmenten van **alle** FIS-routes.
 
@@ -299,6 +304,7 @@ Elk record in deze bestanden vertegenwoordigt een **routetussenstuk (edge)** op 
 
 ### 3.4 `route_berth_capacity.geoparquet` (`.csv`, `.geojson`) & `route_berth_capacity_all.geoparquet`
 Elk record in deze bestanden vertegenwoordigt één **volledige FIS-vaarwegroute** (`route_id`) met zowel de **lokale ligplaatscapaciteit** (ligplaatsen met exact dezelfde `route_id`), de **ruimtelijke dekkingsgraad**, als de **corridorcapaciteit (≤ 15 km)** (alle ligplaatsen die over de vaarweggraaf binnen $\le 15\text{ km}$ resp. $\le 30\text{ km}$ vanaf de route bereikbaar zijn).
+
 * `route_berth_capacity.geoparquet` bevat de **HVWN-routes** (`is_hvwn == True`).
 * `route_berth_capacity_all.geoparquet` bevat **alle gekoppelde FIS-routes**.
 
