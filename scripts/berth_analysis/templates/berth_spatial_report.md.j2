@@ -34,7 +34,8 @@ Daarbij gelden de volgende **harde uitsluitingscriteria** (ongeacht bovenstaande
 
 * **Kortverblijfligplaatsen**: ligplaatsen met een maximale verblijfsduur korter dan 12 uur (`maximum_stay_duration_h < 12.0`);
 * **Wachtplaatsen bij kunstwerken**: ligplaatsen met `category == "WAITING_AREA"`;
-* **Laad- en loskades**: ligplaatsen met `category == "LOADING_AND_UNLOADING"`.
+* **Laad- en loskades**: ligplaatsen met `category == "LOADING_AND_UNLOADING"`;
+* **Recreatie- en pleziervaartvoorzieningen**: ligplaatsen voor de recreatievaart, passantenhavens en wacht-/ankerlocaties in aanloopgeulen naar jachtensluizen (zoals bij de Krammer Jachtensluizen).
 
 Tezamen (rekening houdend met overlap tussen de vier inclusiecriteria) resulteert dit in **{{ overnight_berths_count | fmt_num(0) }} overnachtingsligplaatsen**.
 

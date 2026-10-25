@@ -160,7 +160,9 @@ def calc_berth_ship_slots(
 
 
 def classify_berths(
-    berths: gpd.GeoDataFrame, cardropoffs: gpd.GeoDataFrame
+    berths: gpd.GeoDataFrame,
+    cardropoffs: gpd.GeoDataFrame,
+    routes: gpd.GeoDataFrame | None = None,
 ) -> gpd.GeoDataFrame:
     """Classifies berths into overnight, kegel (hazardous cargo), and car drop-off categories.
 
@@ -179,6 +181,8 @@ def classify_berths(
     - Short-stay berths (`maximum_stay_duration_h < 12.0`).
     - Lock/bridge waiting areas (`category == "WAITING_AREA"`).
     - Transshipment/loading quays (`category == "LOADING_AND_UNLOADING"`).
+    - Pleasure craft / recreation lock facilities (`jachtensluizen`, `passantenhaven`,
+      `recreatievaart`) unless explicitly designated for commercial push-tow / cargo vessels.
     """
     df = berths.copy()
 
@@ -189,10 +193,45 @@ def classify_berths(
     df["has_cardropoff"] = df["id"].isin(cardropoff_berth_ids) | has_car_dropoff_fac
 
     # 2. Hard exclusions for overnight stay: short-stay (< 12h), waiting areas at
-    # locks/bridges, and loading/unloading quays cannot serve as overnight ports.
+    # locks/bridges, loading/unloading quays, and recreation / yacht lock facilities.
     stay = df["maximum_stay_duration_h"]
     stay_ok = stay.isna() | (stay >= 12.0)
-    not_excl = stay_ok & ~df["category"].isin(["WAITING_AREA", "LOADING_AND_UNLOADING"])
+
+    jacht_route_ids: set[str] = set()
+    if routes is not None and "name" in routes.columns and "id" in routes.columns:
+        jacht_route_ids = set(
+            routes.loc[
+                routes["name"].str.lower().str.contains("jacht", na=False),
+                "id",
+            ].astype(str)
+        )
+
+    name_lower = df.get("name", pd.Series("", index=df.index)).fillna("").str.lower()
+    note_lower = (
+        df.get("note", pd.Series("", index=df.index))
+        .fillna("")
+        .astype(str)
+        .str.lower()
+    )
+    route_id_str = df.get("route_id", pd.Series("", index=df.index)).astype(str)
+
+    is_recreation = (
+        name_lower.str.contains(
+            r"recreatie|pleziervaart|passanten|jacht", regex=True, na=False
+        )
+        | note_lower.str.contains(
+            r"bestemd voor de pleziervaart|alleen voor pleziervaart|uitsluitend voor pleziervaart",
+            regex=True,
+            na=False,
+        )
+        | route_id_str.isin(jacht_route_ids)
+    ) & ~name_lower.str.contains(r"duwvaart|beroepsvaart", regex=True, na=False)
+
+    not_excl = (
+        stay_ok
+        & ~df["category"].isin(["WAITING_AREA", "LOADING_AND_UNLOADING"])
+        & ~is_recreation
+    )
 
     # 3. Four inclusion criteria for overnight berths (combined with `not_excl`):
     df["ov_by_facility"] = (
@@ -237,6 +276,7 @@ def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     width = pd.to_numeric(
         df.get("width", pd.Series(np.nan, index=df.index)), errors="coerce"
     )
+    width_rows = np.maximum(1.0, np.floor(width / SHIP_WIDTH_M)).where(width > 0, 1.0)
 
     name_lower = df.get("name", pd.Series("", index=df.index)).fillna("").str.lower()
     category_upper = (
@@ -295,10 +335,12 @@ def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 
 def classify_and_calculate_capacity(
-    berths: gpd.GeoDataFrame, cardropoffs: gpd.GeoDataFrame
+    berths: gpd.GeoDataFrame,
+    cardropoffs: gpd.GeoDataFrame,
+    routes: gpd.GeoDataFrame | None = None,
 ) -> gpd.GeoDataFrame:
     """Classifies berths and computes effective length and 110m/135m ship capacities."""
-    classified = classify_berths(berths, cardropoffs)
+    classified = classify_berths(berths, cardropoffs, routes=routes)
     berths_with_capacity = calculate_berth_capacities(classified)
     return berths_with_capacity
 
@@ -580,8 +622,8 @@ def compute_route_berth_capacity(
     gdf_segments: gpd.GeoDataFrame,
     G: nx.Graph | None = None,
 ) -> gpd.GeoDataFrame:
-    """Computes route-level compliance, local and corridor ship capacities, and maximum operable traffic volume."""
-    logger.info("Computing route-level berth capacity and maximum operable traffic volume...")
+    """Computes route-level compliance, local and catchment ship capacities, and annual carrying capacity."""
+    logger.info("Computing route-level capacity and maximum carrying capacity...")
 
     df = (
         gdf_segments.groupby("route_id")
@@ -904,7 +946,9 @@ def main(export_dir: Path, output_dir: Path) -> None:
     routes, rjs, berths, cardropoffs, fc = load_input_datasets(export_dir)
     type_map = build_network_classification_map(fc)
 
-    classified_berths = classify_and_calculate_capacity(berths, cardropoffs)
+    classified_berths = classify_and_calculate_capacity(
+        berths, cardropoffs, routes=routes
+    )
     classified_berths.to_parquet(output_dir / "berths_analyzed.geoparquet")
 
     gdf_clusters = cluster_berths_and_check_facilities(classified_berths, cardropoffs)

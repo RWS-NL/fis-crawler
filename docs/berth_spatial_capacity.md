@@ -35,7 +35,11 @@ De analyse genereert de volgende bestanden in `output/berth-analysis/`:
 ### 2.1 Classificatie van Overnachtingsligplaatsen (`is_overnight`)
 Omdat de ruwe FIS-export het vlaggetje `OVERNIGHT_ACCOMODATION` in `facility` slechts bij een deel van de ligplaatsen invult, wordt een ligplaats geclassificeerd als overnachtingsligplaats (`is_overnight = True`) wanneer deze **niet is uitgesloten** (`not_excl`) én aan ten minste één van vier inclusiecriteria voldoet:
 
-$$\text{not\_excl} = \big(\text{maximum\_stay\_duration\_h is NaN} \lor \text{maximum\_stay\_duration\_h} \ge 12{,}0\big) \land \big(\text{category} \notin \{\text{"WAITING\_AREA"},\; \text{"LOADING\_AND\_UNLOADING"}\}\big)$$
+$$\text{not\_excl} = \big(\text{maximum\_stay\_duration\_h is NaN} \lor \text{maximum\_stay\_duration\_h} \ge 12{,}0\big) \land \big(\text{category} \notin \{\text{"WAITING\_AREA"},\; \text{"LOADING\_AND\_UNLOADING"}\}\big) \land \neg \text{is\_recreation}$$
+
+waarbij recreatie- en pleziervaartvoorzieningen (`is_recreation`) hard worden uitgesloten van de commerciële beroepsvaartcapaciteit:
+* Ligplaatsen met `recreatie`, `pleziervaart`, `passanten` of `jacht` in de naam of toelichting (tenzij expliciet bestemd voor `duwvaart` of `beroepsvaart`);
+* Ligplaatsen gelegen op routes van **jachtensluizen** of jachthavens (zoals *Ankerplaats 1 Krammer* in de westelijke voorhaven van de Krammer Jachtsluizen).
 
 $$\text{is\_overnight} = \text{ov\_by\_facility} \lor \text{ov\_by\_stay} \lor \text{ov\_by\_category} \lor \text{ov\_by\_long\_quay}$$
 

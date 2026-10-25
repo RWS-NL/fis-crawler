@@ -446,6 +446,93 @@ def test_anchorage_swing_diameter_and_max_quay_rows():
     assert df.loc[df["id"] == "quay_wide", "effective_length_m"].iloc[0] == 900.0
 
 
+def test_recreation_and_yacht_lock_exclusion():
+    routes = gpd.GeoDataFrame(
+        [
+            {
+                "id": "30984852",
+                "name": "Westelijke voorhaven Krammer Jachtsluizen - Krammer",
+                "geometry": LineString([(4.12, 51.66), (4.13, 51.67)]),
+            },
+            {
+                "id": "54844",
+                "name": "Zuid Vlije, Jachtensluis Krammersluizen en Krammer-Sport",
+                "geometry": LineString([(4.13, 51.67), (4.14, 51.68)]),
+            },
+            {
+                "id": "100",
+                "name": "Waal",
+                "geometry": LineString([(5.0, 51.8), (5.1, 51.8)]),
+            },
+        ],
+        crs="EPSG:4326",
+    )
+    berths = gpd.GeoDataFrame(
+        [
+            {
+                "id": "rec_krammer",
+                "route_id": "30984852",
+                "name": "Ankerplaats 1 Krammer",
+                "facility": [],
+                "category": "OTHER",
+                "maximum_stay_duration_h": None,
+                "length": 822.0,
+                "width": 355.0,
+                "geometry": Point(4.125, 51.666),
+            },
+            {
+                "id": "rec_worp",
+                "route_id": "100",
+                "name": "Ligplaats recreatievaart IJssel Worpzijde",
+                "facility": [],
+                "category": "OTHER",
+                "maximum_stay_duration_h": None,
+                "length": 105.0,
+                "width": 7.0,
+                "geometry": Point(5.05, 51.81),
+            },
+            {
+                "id": "rec_gennep",
+                "route_id": "100",
+                "name": "Ligplaats loswal Gennep",
+                "note": "Bestemd voor de pleziervaart.",
+                "facility": ["GANGWAY"],
+                "category": "ALL_VESSELS",
+                "maximum_stay_duration_h": None,
+                "length": 90.0,
+                "width": 15.0,
+                "geometry": Point(5.06, 51.82),
+            },
+            {
+                "id": "comm_duwvaart",
+                "route_id": "54844",
+                "name": "Ligplaats 1 Duwvaartsluis Krammer oostzijde Bruinisse",
+                "note": "Voor schepen, zowel duwvaart als andere schepen dan duwvaart.",
+                "facility": [],
+                "category": "OTHER",
+                "maximum_stay_duration_h": None,
+                "length": 180.0,
+                "width": 40.0,
+                "geometry": Point(4.135, 51.675),
+            },
+        ],
+        crs="EPSG:4326",
+    )
+    cardropoffs = gpd.GeoDataFrame(
+        columns=["id", "berth_id", "name", "geometry"], crs="EPSG:4326"
+    )
+
+    df = classify_and_calculate_capacity(berths, cardropoffs, routes=routes)
+
+    # Recreation berths and yacht lock approach anchorages are excluded:
+    assert not df.loc[df["id"] == "rec_krammer", "is_overnight"].iloc[0]
+    assert not df.loc[df["id"] == "rec_worp", "is_overnight"].iloc[0]
+    assert not df.loc[df["id"] == "rec_gennep", "is_overnight"].iloc[0]
+
+    # Commercial duwvaart berth at Krammer is preserved:
+    assert df.loc[df["id"] == "comm_duwvaart", "is_overnight"].iloc[0]
+
+
 def test_build_network_classification_map():
     fc = gpd.GeoDataFrame(
         [
