@@ -564,10 +564,43 @@ def calculate_report_metrics(
     kg_mask = berths["is_kegel"]
     ov_len_m = float(berths.loc[ov_mask, "effective_length_m"].sum())
 
+    stay = berths["maximum_stay_duration_h"]
+    stay_ok = stay.isna() | (stay >= 12.0)
+    not_excl = stay_ok & ~berths["category"].isin(
+        ["WAITING_AREA", "LOADING_AND_UNLOADING"]
+    )
+    ov_explicit_count = int(
+        (
+            berths["facility"].astype(str).str.contains("OVERNIGHT_ACCOMODATION")
+            & not_excl
+        ).sum()
+    )
+    ov_stay_12h_count = int(((stay >= 12.0) & not_excl).sum())
+    ov_commercial_count = int(
+        (
+            berths["category"].isin(
+                ["ALL_VESSELS", "PUSH_TOW_VESSELS", "NON_PUSH_TOW_VESSELS"]
+            )
+            & not_excl
+        ).sum()
+    )
+    ov_long_quay_count = int(
+        (
+            (berths["length"].fillna(0.0) >= 100.0)
+            & (berths["category"] == "OTHER")
+            & stay.isna()
+            & not_excl
+        ).sum()
+    )
+
     return {
         "network_rows": network_rows,
         "total_berths": len(berths),
         "overnight_berths_count": int(ov_mask.sum()),
+        "ov_explicit_count": ov_explicit_count,
+        "ov_stay_12h_count": ov_stay_12h_count,
+        "ov_commercial_count": ov_commercial_count,
+        "ov_long_quay_count": ov_long_quay_count,
         "overnight_kadelengte_m": ov_len_m,
         "overnight_meter_nachten": ov_len_m * 365.0,
         "overnight_ships_110m": float(berths.loc[ov_mask, "capacity_ships_110m"].sum()),
@@ -642,7 +675,7 @@ def main(export_dir: Path, output_dir: Path) -> None:
         gdf_clusters.to_file(output_dir / "berth_clusters.geojson", driver="GeoJSON")
 
     G, route_segments = build_route_network_graph(
-        routes, rjs, classified_berths, type_map
+        routes, rjs, classified_berths, type_map, expected_parallel_edges=1
     )
     gdf_segments = run_spatial_distance_analysis(G, route_segments)
     gdf_routes = compute_route_carrying_capacity(

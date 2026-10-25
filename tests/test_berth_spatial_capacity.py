@@ -419,13 +419,67 @@ class TestBerthSpatialCapacity(unittest.TestCase):
         )
         type_map = {"100": "Hoofdtransportas"}
 
-        G, segments = build_route_network_graph(routes, rjs, berths, type_map)
+        G, segments = build_route_network_graph(
+            routes, rjs, berths, type_map, expected_parallel_edges=0
+        )
         self.assertEqual(G.number_of_nodes(), 4)  # start, rj_501, berth_10, end
         self.assertEqual(len(segments), 3)
         self.assertTrue(G.nodes["berth_10"]["is_overnight"])
         self.assertEqual(segments[0]["source"], "start_100")
         self.assertEqual(segments[0]["target"], "rj_501")
         self.assertEqual(segments[0]["length_km"], 10.0)
+
+        # Add a second route sharing two junctions (rj_501 -> rj_502) to verify parallel edge removal and assertion
+        routes_dup = gpd.GeoDataFrame(
+            [
+                routes.iloc[0].to_dict(),
+                {
+                    "id": "200",
+                    "name": "Overlap Route",
+                    "code": "OR2",
+                    "route_km_begin": 0.0,
+                    "route_km_end": 5.0,
+                    "geometry": LineString([(0, 10), (0, 15)]),
+                },
+            ],
+            crs="EPSG:4326",
+        )
+        rjs_dup = gpd.GeoDataFrame(
+            [
+                rjs.iloc[0].to_dict(),
+                {
+                    "id": "2",
+                    "route_id": "100",
+                    "section_junction_id": "502",
+                    "route_km_begin": 15.0,
+                    "geometry": Point(0, 15),
+                },
+                {
+                    "id": "3",
+                    "route_id": "200",
+                    "section_junction_id": "501",
+                    "route_km_begin": 0.0,
+                    "geometry": Point(0, 10),
+                },
+                {
+                    "id": "4",
+                    "route_id": "200",
+                    "section_junction_id": "502",
+                    "route_km_begin": 3.0,
+                    "geometry": Point(0, 15),
+                },
+            ],
+            crs="EPSG:4326",
+        )
+        G_dup, segments_dup = build_route_network_graph(
+            routes_dup, rjs_dup, berths, type_map, expected_parallel_edges=1
+        )
+        self.assertEqual(G_dup.number_of_edges(), len(segments_dup))
+        self.assertEqual(G_dup.edges["rj_501", "rj_502"]["weight"], 3.0)
+        with self.assertRaises(AssertionError):
+            build_route_network_graph(
+                routes_dup, rjs_dup, berths, type_map, expected_parallel_edges=0
+            )
 
     def test_empty_sources_dijkstra_fails_fast(self):
         G = nx.Graph()

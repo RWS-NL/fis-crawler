@@ -124,11 +124,13 @@ def build_route_network_graph(
     rjs: gpd.GeoDataFrame,
     berths: gpd.GeoDataFrame,
     type_map: dict[str, str],
+    expected_parallel_edges: int | None = None,
 ) -> tuple[nx.Graph, list[dict[str, Any]]]:
     """Constructs an undirected network graph from routes, junctions, and berths."""
     logger.info("Constructing NetworkX route graph...")
     G = nx.Graph()
-    route_segments: list[dict[str, Any]] = []
+    segment_by_pair: dict[tuple[str, str], dict[str, Any]] = {}
+    parallel_edge_count = 0
 
     rj_by_route = rjs.groupby("route_id")
     berth_by_route = berths.groupby("route_id")
@@ -180,18 +182,35 @@ def build_route_network_graph(
                 "geometry": seg_geom,
             }
 
-            if G.has_edge(id_a, id_b):
-                if dist_km < G[id_a][id_b].get("weight", float("inf")):
-                    G[id_a][id_b]["weight"] = dist_km
+            pair_key = (id_a, id_b) if id_a <= id_b else (id_b, id_a)
+            if pair_key in segment_by_pair:
+                parallel_edge_count += 1
+                if dist_km < segment_by_pair[pair_key]["length_km"]:
+                    G.edges[id_a, id_b].update(edge_data)
+                    segment_by_pair[pair_key] = {
+                        "source": id_a,
+                        "target": id_b,
+                        **edge_data,
+                    }
             else:
                 G.add_edge(id_a, id_b, **edge_data)
+                segment_by_pair[pair_key] = {
+                    "source": id_a,
+                    "target": id_b,
+                    **edge_data,
+                }
 
-            route_segments.append({"source": id_a, "target": id_b, **edge_data})
+    if expected_parallel_edges is not None:
+        assert parallel_edge_count == expected_parallel_edges, (
+            f"Expected {expected_parallel_edges} parallel edge(s), found {parallel_edge_count}"
+        )
 
+    route_segments = list(segment_by_pair.values())
     logger.info(
-        "Built route graph: %d nodes, %d edges, %d route segments",
+        "Built route graph: %d nodes, %d edges, %d route segments (removed %d parallel edge(s))",
         G.number_of_nodes(),
         G.number_of_edges(),
         len(route_segments),
+        parallel_edge_count,
     )
     return G, route_segments
