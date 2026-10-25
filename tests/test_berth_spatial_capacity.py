@@ -14,7 +14,7 @@ from scripts.berth_analysis.analyze_spatial_capacity import (
     classify_and_calculate_capacity,
     classify_berths,
     cluster_berths_and_check_facilities,
-    compute_route_carrying_capacity,
+    compute_route_berth_capacity,
     determine_kegels,
     fmt_dist,
     fmt_num,
@@ -136,7 +136,7 @@ def ajk_chain_graph_and_segments():
 
 
 @pytest.fixture
-def carrying_capacity_inputs():
+def berth_capacity_inputs():
     routes = gpd.GeoDataFrame(
         [
             {
@@ -412,9 +412,9 @@ def test_spatial_distance_analysis_ajk_chain(ajk_chain_graph_and_segments):
     assert not seg_jk["is_fully_compliant_overnight"]
 
 
-def test_compute_route_carrying_capacity(carrying_capacity_inputs):
-    routes, berths, gdf_segments = carrying_capacity_inputs
-    gdf_routes = compute_route_carrying_capacity(routes, berths, gdf_segments)
+def test_compute_route_berth_capacity(berth_capacity_inputs):
+    routes, berths, gdf_segments = berth_capacity_inputs
+    gdf_routes = compute_route_berth_capacity(routes, berths, gdf_segments)
 
     assert len(gdf_routes) == 1
     r = gdf_routes.iloc[0]
@@ -432,7 +432,7 @@ def test_compute_route_carrying_capacity(carrying_capacity_inputs):
 
     # Max carrying capacity overnight: (240 / 1000) * (168 / 20) * 365 = 735.84 km/yr
     expected_max_cap = (240.0 / 1000.0) * (168.0 / 20.0) * 365.0
-    assert r["max_overnight_ship_length_km_yr"] == pytest.approx(
+    assert r["max_overnight_traffic_volume_km_yr"] == pytest.approx(
         expected_max_cap, abs=1e-4
     )
     assert r["max_overnight_passages_110m_yr"] == pytest.approx(
@@ -446,7 +446,7 @@ def test_compute_route_carrying_capacity(carrying_capacity_inputs):
     assert r["kegel_berth_length_m"] == 120.0
     assert r["kegel_meter_nights_yr"] == 120.0 * 365.0
     expected_max_kegel = (120.0 / 1000.0) * (168.0 / 20.0) * 365.0
-    assert r["max_kegel_ship_length_km_yr"] == pytest.approx(
+    assert r["max_kegel_traffic_volume_km_yr"] == pytest.approx(
         expected_max_kegel, abs=1e-4
     )
 
@@ -455,11 +455,11 @@ def test_compute_route_carrying_capacity(carrying_capacity_inputs):
     assert r["kegel_coverage_pct"] == 100.0
 
     # Without graph G, catchment capacity falls back to local route capacity
-    assert r["catchment_overnight_berths"] == 1
-    assert r["catchment_overnight_berth_length_m"] == 240.0
-    assert r["catchment_overnight_capacity_ships_85m"] == 2
-    assert r["catchment_overnight_capacity_ships_110m"] == 2
-    assert r["catchment_overnight_capacity_ships_135m"] == 1
+    assert r["corridor_overnight_berths"] == 1
+    assert r["corridor_overnight_berth_length_m"] == 240.0
+    assert r["corridor_overnight_capacity_ships_85m"] == 2
+    assert r["corridor_overnight_capacity_ships_110m"] == 2
+    assert r["corridor_overnight_capacity_ships_135m"] == 1
 
 
 def test_formatting_helpers():

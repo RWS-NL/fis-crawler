@@ -175,9 +175,12 @@ def convert_markdown_to_html(md_path: Path, html_path: Path | None = None) -> Pa
         else md_path.stem.replace("_", " ").title()
     )
 
-    # Pre-process GitHub-style alerts like > [!NOTE]
+    # Cleanly remove GitHub alert prefixes like > [!NOTE]
     processed_md = re.sub(
-        r">\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*", r"> **:** ", raw_md
+        r"^>\s*\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*\n?",
+        "",
+        raw_md,
+        flags=re.MULTILINE,
     )
 
     body_html = markdown.markdown(

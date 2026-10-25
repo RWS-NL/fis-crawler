@@ -482,7 +482,7 @@ def _aggregate_berths_by_route(berths: gpd.GeoDataFrame, kind: str) -> pd.DataFr
     return res
 
 
-def _aggregate_catchment_by_route(
+def _aggregate_corridor_by_route(
     G: nx.Graph,
     gdf_segments: gpd.GeoDataFrame,
     berths: gpd.GeoDataFrame,
@@ -516,12 +516,12 @@ def _aggregate_catchment_by_route(
         rows.append(
             {
                 "route_id": rid,
-                f"catchment_{kind}_berths": len(b_slice),
-                f"catchment_{kind}_berth_length_m": float(
+                f"corridor_{kind}_berths": len(b_slice),
+                f"corridor_{kind}_berth_length_m": float(
                     b_slice["effective_length_m"].sum()
                 ),
                 **{
-                    f"catchment_{kind}_capacity_ships_{suffix}": float(
+                    f"corridor_{kind}_capacity_ships_{suffix}": float(
                         b_slice[f"capacity_ships_{suffix}"].sum()
                     )
                     for suffix, _ in SHIP_SCENARIOS
@@ -532,10 +532,10 @@ def _aggregate_catchment_by_route(
         return pd.DataFrame(
             columns=[
                 "route_id",
-                f"catchment_{kind}_berths",
-                f"catchment_{kind}_berth_length_m",
+                f"corridor_{kind}_berths",
+                f"corridor_{kind}_berth_length_m",
                 *(
-                    f"catchment_{kind}_capacity_ships_{suffix}"
+                    f"corridor_{kind}_capacity_ships_{suffix}"
                     for suffix, _ in SHIP_SCENARIOS
                 ),
             ]
@@ -543,7 +543,7 @@ def _aggregate_catchment_by_route(
     return pd.DataFrame(rows)
 
 
-def compute_route_carrying_capacity(
+def compute_route_berth_capacity(
     routes: gpd.GeoDataFrame,
     berths: gpd.GeoDataFrame,
     gdf_segments: gpd.GeoDataFrame,
@@ -592,7 +592,7 @@ def compute_route_carrying_capacity(
             0.0,
         )
         df[f"{kind}_meter_nights_yr"] = df[f"{kind}_berth_length_m"] * 365.0
-        df[f"max_{kind}_ship_length_km_yr"] = np.where(
+        df[f"max_{kind}_traffic_volume_km_yr"] = np.where(
             df["expected_overnight_stops"] > 0,
             (df[f"{kind}_berth_length_m"] / 1000.0)
             / df["expected_overnight_stops"]
@@ -609,33 +609,33 @@ def compute_route_carrying_capacity(
             )
 
         if G is not None and "source" in gdf_segments.columns:
-            catch_df = _aggregate_catchment_by_route(
+            catch_df = _aggregate_corridor_by_route(
                 G, gdf_segments, berths, kind, radius_km
             )
             df = df.merge(catch_df, on="route_id", how="left")
         else:
-            df[f"catchment_{kind}_berths"] = df[f"num_{kind}_berths"]
-            df[f"catchment_{kind}_berth_length_m"] = df[f"{kind}_berth_length_m"]
+            df[f"corridor_{kind}_berths"] = df[f"num_{kind}_berths"]
+            df[f"corridor_{kind}_berth_length_m"] = df[f"{kind}_berth_length_m"]
             for suffix, _ in SHIP_SCENARIOS:
-                df[f"catchment_{kind}_capacity_ships_{suffix}"] = df[
+                df[f"corridor_{kind}_capacity_ships_{suffix}"] = df[
                     f"{kind}_capacity_ships_{suffix}"
                 ]
 
-        df[f"catchment_{kind}_berths"] = (
-            df[f"catchment_{kind}_berths"].fillna(0).astype(int)
+        df[f"corridor_{kind}_berths"] = (
+            df[f"corridor_{kind}_berths"].fillna(0).astype(int)
         )
         for col in (
-            f"catchment_{kind}_berth_length_m",
+            f"corridor_{kind}_berth_length_m",
             *(
-                f"catchment_{kind}_capacity_ships_{suffix}"
+                f"corridor_{kind}_capacity_ships_{suffix}"
                 for suffix, _ in SHIP_SCENARIOS
             ),
         ):
             df[col] = df[col].fillna(0.0)
 
-        df[f"catchment_max_{kind}_ship_length_km_yr"] = np.where(
+        df[f"corridor_max_{kind}_traffic_volume_km_yr"] = np.where(
             df["expected_overnight_stops"] > 0,
-            (df[f"catchment_{kind}_berth_length_m"] / 1000.0)
+            (df[f"corridor_{kind}_berth_length_m"] / 1000.0)
             / df["expected_overnight_stops"]
             * 365.0,
             0.0,
@@ -761,14 +761,14 @@ def calculate_report_metrics(
     top_cap_df = (
         gdf_routes[gdf_routes["is_hvwn"]]
         .sort_values(
-            ["max_overnight_ship_length_km_yr", "catchment_overnight_berth_length_m"],
+            ["max_overnight_traffic_volume_km_yr", "corridor_overnight_berth_length_m"],
             ascending=False,
         )
         .head(20)
     )
     zero_local_hvwn_df = (
         gdf_routes[gdf_routes["is_hvwn"] & (gdf_routes["num_overnight_berths"] == 0)]
-        .sort_values("catchment_overnight_berth_length_m", ascending=False)
+        .sort_values("corridor_overnight_berth_length_m", ascending=False)
         .head(15)
     )
 
@@ -808,9 +808,9 @@ def calculate_report_metrics(
         "hvwn_zero_local_count": int(
             (gdf_routes["is_hvwn"] & (gdf_routes["num_overnight_berths"] == 0)).sum()
         ),
-        "hvwn_zero_catchment_count": int(
+        "hvwn_zero_corridor_count": int(
             (
-                gdf_routes["is_hvwn"] & (gdf_routes["catchment_overnight_berths"] == 0)
+                gdf_routes["is_hvwn"] & (gdf_routes["corridor_overnight_berths"] == 0)
             ).sum()
         ),
     }
@@ -884,18 +884,18 @@ def main(export_dir: Path, output_dir: Path) -> None:
         routes, rjs, classified_berths, type_map, expected_parallel_edges=1
     )
     gdf_segments = run_spatial_distance_analysis(G, route_segments)
-    gdf_routes = compute_route_carrying_capacity(
+    gdf_routes = compute_route_berth_capacity(
         routes, classified_berths, gdf_segments, G=G
     )
 
     logger.info("Exporting route compliance and carrying capacity outputs...")
     gdf_hvwn = gdf_routes[gdf_routes["is_hvwn"]].copy()
-    gdf_hvwn.to_parquet(output_dir / "route_carrying_capacity.geoparquet")
+    gdf_hvwn.to_parquet(output_dir / "route_berth_capacity.geoparquet")
     gdf_hvwn.drop(columns=["geometry"], errors="ignore").to_csv(
-        output_dir / "route_carrying_capacity.csv", index=False
+        output_dir / "route_berth_capacity.csv", index=False
     )
-    gdf_hvwn.to_file(output_dir / "route_carrying_capacity.geojson", driver="GeoJSON")
-    gdf_routes.to_parquet(output_dir / "route_carrying_capacity_all.geoparquet")
+    gdf_hvwn.to_file(output_dir / "route_berth_capacity.geojson", driver="GeoJSON")
+    gdf_routes.to_parquet(output_dir / "route_berth_capacity_all.geoparquet")
 
     gdf_segments_hvwn = gdf_segments[gdf_segments["is_hvwn"]].copy()
     gdf_segments_hvwn.to_parquet(output_dir / "route_segments_compliance.geoparquet")
