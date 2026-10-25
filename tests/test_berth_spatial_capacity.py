@@ -314,7 +314,7 @@ class TestBerthSpatialCapacity(unittest.TestCase):
         # Max carrying capacity overnight: (240 / 1000) * (168 / 20) * 365 = 735.84 km/yr
         expected_max_cap = (240.0 / 1000.0) * (168.0 / 20.0) * 365.0
         self.assertAlmostEqual(
-            r["max_capacity_ship_length_km_yr"], expected_max_cap, places=4
+            r["max_overnight_ship_length_km_yr"], expected_max_cap, places=4
         )
         self.assertAlmostEqual(
             r["max_overnight_passages_110m_yr"],

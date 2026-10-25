@@ -95,7 +95,7 @@ def extract_route_points(
 
     if route_id in berth_by_route.groups:
         for _, b in berth_by_route.get_group(route_id).iterrows():
-            raw_km = b.get("route_km", b.get("route_km_begin"))
+            raw_km = b.get("route_km")
             km = float(raw_km) if pd.notna(raw_km) else full_km_begin
             points.append(
                 (

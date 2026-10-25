@@ -4,6 +4,9 @@ Analyzes berth capacity (discretized for 110 m and 135 m vessel scenarios),
 kegel (hazardous goods) berths, and car drop-off facilities against the spatial
 spacing criteria from Richtlijnen Vaarwegen 2020 (RVW 2020 § 6.3-6.6) and the
 Integrale Mobiliteitsanalyse (IMA 2021 Achtergrondrapportage Vaarwegen § 2.3).
+
+Usage:
+    uv run python -m scripts.berth_analysis.analyze_spatial_capacity
 """
 
 from __future__ import annotations
@@ -41,13 +44,13 @@ MAX_CLUSTER_SPAN_KM = 0.5  # Max cluster span along fairway (500 m)
 CAR_DROPOFF_MIN_CAPACITY_SHIPS = 15  # RVW § 6.6 threshold
 
 HVWN_TYPES = ("Hoofdtransportas", "Hoofdvaarweg")
-NETWORK_CATEGORIES = (
-    "Hoofdtransportas",
-    "Hoofdvaarweg",
-    "Overige vaarweg",
-    "Overig",
-    "Niet geclassificeerd / Zee",
-)
+CATEGORY_LABELS = {
+    "Hoofdtransportas": "Hoofdtransportassen (HTA)",
+    "Hoofdvaarweg": "Hoofdvaarwegen (HVW)",
+    "Overige vaarweg": "Overige vaarwegen",
+    "Overig": "Overig",
+    "Niet geclassificeerd / Zee": "Niet geclassificeerd (kust/zee)",
+}
 ID_COLUMNS = ("id", "route_id", "berth_id", "section_junction_id")
 
 
@@ -93,10 +96,7 @@ def load_input_datasets(
 def build_network_classification_map(fc: gpd.GeoDataFrame) -> dict[str, str]:
     """Maps each route_id to its highest fairway network classification."""
     type_map: dict[str, str] = {}
-    for rid, grp in fc.groupby("route_id"):
-        route_key = stringify_id(rid)
-        if route_key is None:
-            continue
+    for route_key, grp in fc.groupby("route_id"):
         types = set(grp["type_description"].dropna().unique())
         for candidate in ("Hoofdtransportas", "Hoofdvaarweg", "Overige vaarweg"):
             if candidate in types:
@@ -143,33 +143,34 @@ def classify_berths(
 ) -> gpd.GeoDataFrame:
     """Classifies berths into overnight, kegel, and car drop-off categories."""
     df = berths.copy()
-    for col in ("id", "route_id"):
-        if col in df.columns:
-            df[col] = df[col].map(stringify_id)
 
-    cardropoff_berth_ids = set(
-        cardropoffs["berth_id"].dropna().map(stringify_id).dropna().unique()
-    )
+    cardropoff_berth_ids = set(cardropoffs["berth_id"].dropna().unique())
     has_car_dropoff_fac = df["facility"].astype(str).str.contains("CAR_DROPOFF")
     df["has_cardropoff"] = df["id"].isin(cardropoff_berth_ids) | has_car_dropoff_fac
 
-    is_fac_overnight = df["facility"].astype(str).str.contains("OVERNIGHT_ACCOMODATION")
-    is_waiting = df["category"].isin(["WAITING_AREA"])
-    is_loading = df["category"].isin(["LOADING_AND_UNLOADING"])
-    is_commercial_cat = df["category"].isin(
-        ["ALL_VESSELS", "PUSH_TOW_VESSELS", "NON_PUSH_TOW_VESSELS"]
-    )
     stay = df["maximum_stay_duration_h"]
     stay_ok = stay.isna() | (stay >= 12.0)
-    is_long_quay = (
-        (df["length"].fillna(0.0) >= 100.0) & (df["category"] == "OTHER") & stay.isna()
-    )
+    not_excl = stay_ok & ~df["category"].isin(["WAITING_AREA", "LOADING_AND_UNLOADING"])
 
+    df["ov_by_facility"] = (
+        df["facility"].astype(str).str.contains("OVERNIGHT_ACCOMODATION") & not_excl
+    )
+    df["ov_by_stay"] = (stay >= 12.0) & not_excl
+    df["ov_by_category"] = (
+        df["category"].isin(["ALL_VESSELS", "PUSH_TOW_VESSELS", "NON_PUSH_TOW_VESSELS"])
+        & not_excl
+    )
+    df["ov_by_long_quay"] = (
+        (df["length"].fillna(0.0) >= 100.0)
+        & (df["category"] == "OTHER")
+        & stay.isna()
+        & not_excl
+    )
     df["is_overnight"] = (
-        (is_fac_overnight | is_commercial_cat | (stay >= 12.0) | is_long_quay)
-        & stay_ok
-        & ~is_waiting
-        & ~is_loading
+        df["ov_by_facility"]
+        | df["ov_by_stay"]
+        | df["ov_by_category"]
+        | df["ov_by_long_quay"]
     )
 
     df["kegel_count"] = [
@@ -284,11 +285,10 @@ def run_spatial_distance_analysis(
 def _aggregate_cluster(rows: list[pd.Series]) -> dict:
     """Aggregates a list of nearby berth rows into a single cluster record."""
     df = pd.DataFrame(rows)
-    km_col = "route_km" if "route_km" in df.columns else "route_km_begin"
     return {
         "route_id": df.iloc[0]["route_id"],
-        "route_km_begin": float(df[km_col].min()),
-        "route_km_end": float(df[km_col].max()),
+        "route_km_begin": float(df["route_km"].min()),
+        "route_km_end": float(df["route_km"].max()),
         "cluster_name": ", ".join(df["name"].dropna().astype(str).unique()[:3]),
         "num_berth_records": len(df),
         "total_capacity_ships_110m": float(df["capacity_ships_110m"].sum()),
@@ -304,16 +304,15 @@ def cluster_berths_and_check_facilities(
 ) -> gpd.GeoDataFrame:
     """Clusters nearby overnight berths by route and evaluates RVW § 6.6 car drop-off compliance."""
     overnight = berths[berths["is_overnight"]].copy()
-    km_col = "route_km" if "route_km" in overnight.columns else "route_km_begin"
 
     clusters: list[dict] = []
     for _, group in overnight.groupby("route_id"):
-        group = group.sort_values(km_col)
+        group = group.sort_values("route_km")
         curr_cluster: list[pd.Series] = []
         cluster_start_km: float | None = None
 
         for _, row in group.iterrows():
-            km = float(row[km_col])
+            km = float(row["route_km"])
             if (
                 cluster_start_km is None
                 or abs(km - cluster_start_km) <= MAX_CLUSTER_SPAN_KM
@@ -379,6 +378,12 @@ def compute_route_carrying_capacity(
         .reset_index()
     )
 
+    df["expected_overnight_stops"] = np.where(
+        df["total_length_km"] > 0,
+        df["total_length_km"] / DAILY_SAILING_DISTANCE_KM,
+        0.0,
+    )
+
     for kind in ("overnight", "kegel"):
         df = df.merge(
             _aggregate_berths_by_route(berths, kind), on="route_id", how="left"
@@ -397,20 +402,7 @@ def compute_route_carrying_capacity(
             0.0,
         )
         df[f"{kind}_meter_nights_yr"] = df[f"{kind}_berth_length_m"] * 365.0
-
-    df["has_cardropoff"] = df["has_cardropoff"].fillna(False).astype(bool)
-
-    df["expected_overnight_stops"] = np.where(
-        df["total_length_km"] > 0,
-        df["total_length_km"] / DAILY_SAILING_DISTANCE_KM,
-        0.0,
-    )
-
-    for kind, target_col in (
-        ("overnight", "max_capacity_ship_length_km_yr"),
-        ("kegel", "max_kegel_ship_length_km_yr"),
-    ):
-        df[target_col] = np.where(
+        df[f"max_{kind}_ship_length_km_yr"] = np.where(
             df["expected_overnight_stops"] > 0,
             (df[f"{kind}_berth_length_m"] / 1000.0)
             / df["expected_overnight_stops"]
@@ -426,6 +418,7 @@ def compute_route_carrying_capacity(
                 0.0,
             )
 
+    df["has_cardropoff"] = df["has_cardropoff"].fillna(False).astype(bool)
     df["is_hvwn"] = df["netwerk_type"].isin(HVWN_TYPES)
     routes_geom = routes.set_index("id")["geometry"]
     df["geometry"] = df["route_id"].map(routes_geom)
@@ -466,13 +459,9 @@ def summarize_segments(
     segments: gpd.GeoDataFrame, label: str, bold: bool = False
 ) -> dict:
     """Summarizes total and compliant lengths/percentages for a subset of route segments."""
-    tot = float(segments["length_km"].sum()) if not segments.empty else 0.0
-    ov = (
-        float(segments["compliant_30km_overnight_km"].sum())
-        if not segments.empty
-        else 0.0
-    )
-    kg = float(segments["compliant_60km_kegel_km"].sum()) if not segments.empty else 0.0
+    tot = float(segments["length_km"].sum())
+    ov = float(segments["compliant_30km_overnight_km"].sum())
+    kg = float(segments["compliant_60km_kegel_km"].sum())
     return {
         "label": label,
         "bold": bold,
@@ -491,22 +480,14 @@ def calculate_report_metrics(
     berths: gpd.GeoDataFrame,
 ) -> dict:
     """Computes summary metrics and table rows for the spatial report."""
-    category_labels = {
-        "Hoofdtransportas": "Hoofdtransportassen (HTA)",
-        "Hoofdvaarweg": "Hoofdvaarwegen (HVW)",
-        "Overige vaarweg": "Overige vaarwegen",
-        "Overig": "Overig",
-        "Niet geclassificeerd / Zee": "Niet geclassificeerd (kust/zee)",
-    }
-
     network_rows = [
         summarize_segments(
             gdf_segments[gdf_segments["netwerk_type"] == "Hoofdtransportas"],
-            category_labels["Hoofdtransportas"],
+            CATEGORY_LABELS["Hoofdtransportas"],
         ),
         summarize_segments(
             gdf_segments[gdf_segments["netwerk_type"] == "Hoofdvaarweg"],
-            category_labels["Hoofdvaarweg"],
+            CATEGORY_LABELS["Hoofdvaarweg"],
         ),
         summarize_segments(
             gdf_segments[gdf_segments["is_hvwn"]],
@@ -517,7 +498,7 @@ def calculate_report_metrics(
     for cat in ("Overige vaarweg", "Overig", "Niet geclassificeerd / Zee"):
         sub = gdf_segments[gdf_segments["netwerk_type"] == cat]
         if not sub.empty or cat != "Overig":
-            network_rows.append(summarize_segments(sub, category_labels[cat]))
+            network_rows.append(summarize_segments(sub, CATEGORY_LABELS[cat]))
 
     cluster_stats: dict[str, int] = {}
     for suffix in ("110m", "135m"):
@@ -556,7 +537,7 @@ def calculate_report_metrics(
 
     top_cap_df = (
         gdf_routes[gdf_routes["is_hvwn"]]
-        .sort_values("max_capacity_ship_length_km_yr", ascending=False)
+        .sort_values("max_overnight_ship_length_km_yr", ascending=False)
         .head(20)
     )
 
@@ -564,43 +545,14 @@ def calculate_report_metrics(
     kg_mask = berths["is_kegel"]
     ov_len_m = float(berths.loc[ov_mask, "effective_length_m"].sum())
 
-    stay = berths["maximum_stay_duration_h"]
-    stay_ok = stay.isna() | (stay >= 12.0)
-    not_excl = stay_ok & ~berths["category"].isin(
-        ["WAITING_AREA", "LOADING_AND_UNLOADING"]
-    )
-    ov_explicit_count = int(
-        (
-            berths["facility"].astype(str).str.contains("OVERNIGHT_ACCOMODATION")
-            & not_excl
-        ).sum()
-    )
-    ov_stay_12h_count = int(((stay >= 12.0) & not_excl).sum())
-    ov_commercial_count = int(
-        (
-            berths["category"].isin(
-                ["ALL_VESSELS", "PUSH_TOW_VESSELS", "NON_PUSH_TOW_VESSELS"]
-            )
-            & not_excl
-        ).sum()
-    )
-    ov_long_quay_count = int(
-        (
-            (berths["length"].fillna(0.0) >= 100.0)
-            & (berths["category"] == "OTHER")
-            & stay.isna()
-            & not_excl
-        ).sum()
-    )
-
     return {
         "network_rows": network_rows,
         "total_berths": len(berths),
         "overnight_berths_count": int(ov_mask.sum()),
-        "ov_explicit_count": ov_explicit_count,
-        "ov_stay_12h_count": ov_stay_12h_count,
-        "ov_commercial_count": ov_commercial_count,
-        "ov_long_quay_count": ov_long_quay_count,
+        "ov_explicit_count": int(berths["ov_by_facility"].sum()),
+        "ov_stay_12h_count": int(berths["ov_by_stay"].sum()),
+        "ov_commercial_count": int(berths["ov_by_category"].sum()),
+        "ov_long_quay_count": int(berths["ov_by_long_quay"].sum()),
         "overnight_kadelengte_m": ov_len_m,
         "overnight_meter_nachten": ov_len_m * 365.0,
         "overnight_ships_110m": float(berths.loc[ov_mask, "capacity_ships_110m"].sum()),

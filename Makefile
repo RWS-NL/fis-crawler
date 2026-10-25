@@ -1,6 +1,6 @@
 .PHONY: all crawl crawl-fis crawl-euris crawl-disk crawl-ivs process-ivs build-graphs merge-graphs schematize validate clean logs-dir download-bivas validate-bivas \
 	schematize-dropins-fis-detailed schematize-dropins-fis-simplified schematize-dropins-euris download-reference \
-	lock-validation-report lock-validation-pdf
+	lock-validation-report lock-validation-pdf berth-spatial-report
 
 # Default target
 all: crawl build-graphs merge-graphs schematize validate
@@ -157,6 +157,10 @@ lock-validation-pdf: output/lock-validation/lock_dimensions_validation_report.md
 		-V fontsize=10pt \
 		-o output/lock-validation/lock_validation_eindrapport.pdf
 	@echo "PDF geschreven naar output/lock-validation/lock_validation_eindrapport.pdf"
+
+# --- Berth spatial capacity analysis ---
+berth-spatial-report:
+	uv run python -m scripts.berth_analysis.analyze_spatial_capacity
 
 # --- Utilities ---
 clean:
