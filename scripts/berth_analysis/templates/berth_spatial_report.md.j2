@@ -3,10 +3,10 @@
 ## 1. Samenvatting Netwerkdekking per Netwerkcategorie
 
 Conform de **Richtlijnen Vaarwegen 2020 (§ 6.3 - 6.4)** en de **Achtergrondrapportage Vaarwegen IMA 2021 (§ 2.3)** gelden de volgende ruimtelijke normen:
-* **Overnachtingshavens**: maximaal **30 km** tussenruimte (elke locatie ligt binnen $\le 15$ km van een ligplaats).
-* **Kegelligplaatsen**: maximaal **60 km** tussenruimte (elke locatie ligt binnen $\le 30$ km van een kegelligplaats).
+* **Overnachtingshavens**: maximaal **30 km** tussenruimte (elke locatie ligt binnen ≤ 15 km van een ligplaats).
+* **Kegelligplaatsen**: maximaal **60 km** tussenruimte (elke locatie ligt binnen ≤ 30 km van een kegelligplaats).
 
-| Netwerkcategorie | Totale lengte (km) | Overnachten $\le 30$ km | Overnachten (%) | Kegel $\le 60$ km | Kegel (%) |
+| Netwerkcategorie | Totale lengte (km) | Overnachten ≤ 30 km | Overnachten (%) | Kegel ≤ 60 km | Kegel (%) |
 |---|---|---|---|---|---|
 {% for row in network_rows %}
 {% if row.bold %}
@@ -25,7 +25,7 @@ In de ruwe FIS-export is de faciliteit `OVERNIGHT_ACCOMODATION` slechts bij een 
 Om het reële aanbod aan overnachtingsplaatsen voor de beroepsvaart te modelleren, wordt een ligplaats als **overnachtingsligplaats** (`is_overnight`) geclassificeerd wanneer aan **ten minste één** van de volgende vier inclusiecriteria wordt voldaan:
 
 1. **Expliciete overnachtingsfaciliteit** (`OVERNIGHT_ACCOMODATION` in `facility`): **{{ ov_explicit_count | fmt_num(0) }} records**;
-2. **Maximale verblijfsduur $\ge 12$ uur** (`maximum_stay_duration_h >= 12.0`): **{{ ov_stay_12h_count | fmt_num(0) }} records**;
+2. **Maximale verblijfsduur ≥ 12 uur** (`maximum_stay_duration_h >= 12.0`): **{{ ov_stay_12h_count | fmt_num(0) }} records**;
 3. **Beroepsvaartcategorie** (`category` in `ALL_VESSELS`, `PUSH_TOW_VESSELS` of `NON_PUSH_TOW_VESSELS`): **{{ ov_commercial_count | fmt_num(0) }} records**;
 4. **Lange overige kade zonder verblijfsduurbeperking** (`category == "OTHER"`, `length >= 100 m` en `maximum_stay_duration_h` onbekend): **{{ ov_long_quay_count | fmt_num(0) }} records**.
 
@@ -60,9 +60,9 @@ Om geen vaste aanname over de vlootopbouw te hoeven doen — en omdat sommige va
 
 ---
 
-## 4. Autoafzetplaatsen Toetsing (RVW § 6.6: $\ge 15$ schepen)
+## 4. Autoafzetplaatsen Toetsing (RVW § 6.6: ≥ 15 schepen)
 
-| Scenario | Grote locaties ($\ge 15$ schepen) | Mét autoafzetplaats | Ontbrekende autoafzetplaats |
+| Scenario | Grote locaties (≥ 15 schepen) | Mét autoafzetplaats | Ontbrekende autoafzetplaats |
 |---|---|---|---|
 | **Scenario 85 m (CEMT IV)** | {{ large_clusters_85m_count }} locaties | {{ cardropoff_ok_85m_count }} locaties | {{ missing_cardrop_85m_count }} locaties |
 | **Scenario 110 m (CEMT Va)** | {{ large_clusters_110m_count }} locaties | {{ cardropoff_ok_110m_count }} locaties | {{ missing_cardrop_110m_count }} locaties |
@@ -94,15 +94,15 @@ Om geen vaste aanname over de vlootopbouw te hoeven doen — en omdat sommige va
 
 > **Corridor-context (RVW 2020 § 6.4.2)**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte en verwachte overnachtingen op het deeltraject ($L_{\text{kade}} \times 365 / \text{verwachte stops}$). Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.
 
-| Code | Routenaam | Categorie | Lengte | Lokale Kade | Lokale Schepen (85/110/135m) | Corridor $\le 15$ km Kade | Corridor Schepen (85/110/135m) | Max. Bedienbare Verkeersintensiteit (km schip/jr) | Dekking Overnacht |
+| Code | Routenaam | Categorie | Lengte | Lokale Kade | Lokale Schepen (85/110/135m) | Corridor ≤ 15 km Kade | Corridor Schepen (85/110/135m) | Max. Bedienbare Verkeersintensiteit (km·schip/jr) | Dekking Overnacht |
 |---|---|---|---|---|---|---|---|---|---|
 {% for r in top_cap %}
-| {{ r.route_code }} | {{ r.route_name }} | {{ r.network_type }} | {{ r.total_length_km | fmt_num(1, " km") }} | {{ r.overnight_berth_length_m | fmt_num(0, " m", True) }} | {{ r.overnight_capacity_ships_85m | fmt_num(0) }} / {{ r.overnight_capacity_ships_110m | fmt_num(0) }} / {{ r.overnight_capacity_ships_135m | fmt_num(0) }} | {{ r.corridor_overnight_berth_length_m | fmt_num(0, " m", True) }} | {{ r.corridor_overnight_capacity_ships_85m | fmt_num(0) }} / {{ r.corridor_overnight_capacity_ships_110m | fmt_num(0) }} / {{ r.corridor_overnight_capacity_ships_135m | fmt_num(0) }} | {{ r.max_overnight_traffic_volume_km_yr | fmt_num(1, " km", True) }} | {{ r.overnight_coverage_pct | fmt_pct }} |
+| {{ r.route_code }} | {{ r.route_name }} | {{ r.network_type }} | {{ r.total_length_km | fmt_num(1, " km") }} | {{ r.overnight_berth_length_m | fmt_num(0, " m", True) }} | {{ r.overnight_capacity_ships_85m | fmt_num(0) }} / {{ r.overnight_capacity_ships_110m | fmt_num(0) }} / {{ r.overnight_capacity_ships_135m | fmt_num(0) }} | {{ r.corridor_overnight_berth_length_m | fmt_num(0, " m", True) }} | {{ r.corridor_overnight_capacity_ships_85m | fmt_num(0) }} / {{ r.corridor_overnight_capacity_ships_110m | fmt_num(0) }} / {{ r.corridor_overnight_capacity_ships_135m | fmt_num(0) }} | {{ r.max_overnight_traffic_volume_km_yr | fmt_num(0, "", True) }} | {{ r.overnight_coverage_pct | fmt_pct }} |
 {% endfor %}
 
 ---
 
-## 7. Outlook: Toetsing aan Verkeersintensiteit en Corridor- / Corridor-capaciteit ($\le 15$ km) (RVW 2020 § 6.4.2)
+## 7. Outlook: Toetsing aan Verkeersintensiteit en Corridorcapaciteit (≤ 15 km) (RVW 2020 § 6.4.2)
 
 ### 7.1 Waarom lokale routecapaciteit (0 op deelroutes) nog geen normtoets is
 In Sectie 6 is de maximale verkeerscapaciteit strikt **lokaal per FIS-route (`route_id`)** berekend. Van de 49 Hoofdvaarwegnet-routes (HTA + HVW) hebben **24 routes een lokale overnachtingskadelengte van 0 m** (waaronder *Beerkanaal* `40230`, *Dordtsche Kil* `10997`, *Kanaal door Zuid-Beveland* `33781` en *Schelde-Rijnverbinding* `44924`), terwijl vrijwel al deze routes wél voor 80%–100% binnen de ruimtelijke 30 km-norm vallen.
@@ -114,7 +114,7 @@ Als de capaciteit per individuele `route_id` direct tegen de scheepvaartintensit
 ### 7.2 Formule voor de normtoets tegen verkeersintensiteit (RVW 2020 § 6.4.2)
 Om te bepalen of de aanwezige capaciteit voldoet aan de daadwerkelijke verkeersintensiteit (uit **IVS90** of **BIVAS**), moeten we per vaarwegcorridor of verzorgingsgebied twee stappen toevoegen:
 
-1. **Corridor-capaciteit ($\le 15$ km) ($C_{\text{gebied}}$) bepalen via de netwerkgraaf**:
+1. **Corridorcapaciteit (≤ 15 km) ($C_{\text{gebied}}$) bepalen via de netwerkgraaf**:
    In plaats van alleen ligplaatsen met dezelfde `route_id` op te tellen, worden via Dijkstra op de routegraaf alle overnachtingsligplaatsen verzameld die binnen een netwerkafstand $r$ liggen vanaf de knopen van de route (of binnen direct aantakkende havenbekkens zonder eigen doorgaande HTA/HVW-functie). Om dubbeltelling tussen naburige hoofdroutes te voorkomen, wordt de capaciteit van elke ligplaats via **Voronoi-toewijzing op de graaf** (of naar rato van het verzorgingsgebied) aan het bijbehorende hoofdvaarwegvak toegerekend.
 
 2. **Normvraag ($D_{\text{norm}}$) berekenen uit de verkeersintensiteit**:
@@ -125,7 +125,7 @@ Om te bepalen of de aanwezige capaciteit voldoet aan de daadwerkelijke verkeersi
 
 ---
 
-### 7.3 uitgewerkt rekenvoorbeeld: `route_id = 40230` (Beerkanaal, code `116a`)
+### 7.3 Uitgewerkt rekenvoorbeeld: `route_id = 40230` (Beerkanaal, code `116a`)
 
 #### Stap A: Huidige resultaat per individuele `route_id` (lokaal op `40230`)
 * **Trajectlengte**: $L = 4{,}279$ km (`Hoofdtransportas`, code `116a`).
@@ -160,22 +160,22 @@ Stel dat we voor het Beerkanaal en de directe Maasvlakte-bekkens toetsen op scha
 
 ---
 
-### 7.4 Berekende Corridor-capaciteit ($\le 15$ km) ($\le 15$ km) voor HVWN-routes zonder lokale ligplaatsen
-In `route_berth_capacity.geoparquet` is de corridor-capaciteit ($\le 15$ km) (`corridor_overnight_*` en `corridor_kegel_*`) nu direct berekend voor alle routes via de netwerkgraaf:
+### 7.4 Berekende Corridorcapaciteit (≤ 15 km) voor HVWN-routes zonder lokale ligplaatsen
+In `route_berth_capacity.geoparquet` is de corridorcapaciteit (≤ 15 km) (`corridor_overnight_*` en `corridor_kegel_*`) nu direct berekend voor alle routes via de netwerkgraaf:
 * Van de **{{ hvwn_total_count }} HVWN-routes** hebben **{{ hvwn_zero_local_count }} routes** geen enkele overnachtingsligplaats op hun eigen `route_id` (`num_overnight_berths == 0`).
-* Zodra we het netwerk-verzorgingsgebied ($\le 15$ km over de vaarweggraaf) meenemen, hebben **alle {{ hvwn_total_count }} HVWN-routes ({{ hvwn_total_count - hvwn_zero_corridor_count }} van de {{ hvwn_total_count }})** bereikbare overnachtingscapaciteit (`hvwn_zero_corridor_count == {{ hvwn_zero_corridor_count }}`).
+* Zodra we het netwerk-verzorgingsgebied (≤ 15 km over de vaarweggraaf) meenemen, hebben **alle {{ hvwn_total_count }} HVWN-routes ({{ hvwn_total_count - hvwn_zero_corridor_count }} van de {{ hvwn_total_count }})** bereikbare overnachtingscapaciteit (`hvwn_zero_corridor_count == {{ hvwn_zero_corridor_count }}`).
 
-Onderstaande tabel toont de berekende corridor-capaciteit ($\le 15$ km) ($\le 15$ km) voor de belangrijkste HVWN-routes die op hun eigen `route_id` op `0 m` stonden:
+Onderstaande tabel toont de berekende corridorcapaciteit (≤ 15 km) voor de belangrijkste HVWN-routes die op hun eigen `route_id` op `0 m` stonden:
 
-| Route ID | Code | Routenaam | Categorie | Lengte | Lokaal op `route_id` | Corridor $\le 15$ km Kade | Corridor Schepen (85m / 110m / 135m) | Max. Verkeersintensiteit Corridor (km schip/jr) | Dekking $\le 30$ km |
+| Route ID | Code | Routenaam | Categorie | Lengte | Lokaal op `route_id` | Corridor ≤ 15 km Kade | Corridor Schepen (85m / 110m / 135m) | Max. Verkeersintensiteit Corridor (km·schip/jr) | Dekking ≤ 30 km |
 |---|---|---|---|---|---|---|---|---|---|
 {% for r in zero_local_hvwn %}
-| {{ r.route_id }} | {{ r.route_code }} | {{ r.route_name }} | {{ r.network_type }} | {{ r.total_length_km | fmt_num(1, " km") }} | 0 m (0) | {{ r.corridor_overnight_berth_length_m | fmt_num(0, " m") }} ({{ r.corridor_overnight_berths }}) | {{ r.corridor_overnight_capacity_ships_85m | fmt_num(0) }} / {{ r.corridor_overnight_capacity_ships_110m | fmt_num(0) }} / {{ r.corridor_overnight_capacity_ships_135m | fmt_num(0) }} | {{ r.corridor_max_overnight_traffic_volume_km_yr | fmt_num(1, " km") }} | {{ r.overnight_coverage_pct | fmt_pct }} |
+| {{ r.route_id }} | {{ r.route_code }} | {{ r.route_name }} | {{ r.network_type }} | {{ r.total_length_km | fmt_num(1, " km") }} | 0 m (0) | {{ r.corridor_overnight_berth_length_m | fmt_num(0, " m") }} ({{ r.corridor_overnight_berths }}) | {{ r.corridor_overnight_capacity_ships_85m | fmt_num(0) }} / {{ r.corridor_overnight_capacity_ships_110m | fmt_num(0) }} / {{ r.corridor_overnight_capacity_ships_135m | fmt_num(0) }} | {{ r.corridor_max_overnight_traffic_volume_km_yr | fmt_num(0, "") }} | {{ r.overnight_coverage_pct | fmt_pct }} |
 {% endfor %}
 
 ---
 
-### 7.5 Verwerking van Autoafzetplaatsen (\le 500 m) en Aantal Breedterijen (`number_of_rows` vs. `width`)
+### 7.5 Verwerking van Autoafzetplaatsen (≤ 500 m) en Aantal Breedterijen (`number_of_rows` vs. `width`)
 
 Uit nadere inspectie van de FIS-export bleken drie registratie-effecten die in de huidige berekening direct zijn gecorrigeerd:
 

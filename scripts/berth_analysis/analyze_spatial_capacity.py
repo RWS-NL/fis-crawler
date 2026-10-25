@@ -580,8 +580,8 @@ def compute_route_berth_capacity(
     gdf_segments: gpd.GeoDataFrame,
     G: nx.Graph | None = None,
 ) -> gpd.GeoDataFrame:
-    """Computes route-level compliance, local and catchment ship capacities, and annual carrying capacity."""
-    logger.info("Computing route-level capacity and maximum carrying capacity...")
+    """Computes route-level compliance, local and corridor ship capacities, and maximum operable traffic volume."""
+    logger.info("Computing route-level berth capacity and maximum operable traffic volume...")
 
     df = (
         gdf_segments.groupby("route_id")

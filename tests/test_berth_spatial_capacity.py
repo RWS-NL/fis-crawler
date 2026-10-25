@@ -527,7 +527,7 @@ def test_compute_route_berth_capacity(berth_capacity_inputs):
     assert r["overnight_coverage_pct"] == 75.0
     assert r["kegel_coverage_pct"] == 100.0
 
-    # Without graph G, catchment capacity falls back to local route capacity
+    # Without graph G, corridor capacity falls back to local route capacity
     assert r["corridor_overnight_berths"] == 1
     assert r["corridor_overnight_berth_length_m"] == 240.0
     assert r["corridor_overnight_capacity_ships_85m"] == 2

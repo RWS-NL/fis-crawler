@@ -1,4 +1,4 @@
-# Ligplaatsen Ruimtelijke Capaciteits- en Draagkrachtanalyse (`berth-analysis`)
+# Ligplaatsen Ruimtelijke Capaciteits- en Netwerkdekkingsanalyse (`berth-analysis`)
 
 Dit document beschrijft de rekenmethodiek, de gebruikte formules (conform **Richtlijnen Vaarwegen 2020**, § 6.3–6.6) en het volledige gegevensschema (alle velden) van de uitvoerbestanden die worden gegenereerd door [`analyze_spatial_capacity.py`](../scripts/berth_analysis/analyze_spatial_capacity.py) en [`route_network_graph.py`](../scripts/berth_analysis/route_network_graph.py).
 
@@ -24,8 +24,8 @@ De analyse genereert de volgende bestanden in `output/berth-analysis/`:
 | `berth_clusters.geojson` | Geclusterde overnachtingslocaties ($\Delta \text{km} \le 0{,}5$ km) met toetsing op aanwezigheid van een autoafzetplaats (RVW 2020 § 6.6) |
 | `route_segments_compliance.geoparquet` (`.geojson`) | Ruimtelijke dekkingsanalyse per routetussenstuk op het **Hoofdvaarwegnet (HVWN)** (Hoofdtransportassen + Hoofdvaarwegen) |
 | `route_segments_compliance_all.geoparquet` | Ruimtelijke dekkingsanalyse per routetussenstuk over **alle** FIS-vaarwegroutes |
-| `route_berth_capacity.geoparquet` (`.csv`, `.geojson`) | Geaggregeerde ligplaatscapaciteit, corridor-capaciteit ($\le 15$ km) en maximale jaarlijkse bedienbare verkeersintensiteit per **HVWN-route** |
-| `route_berth_capacity_all.geoparquet` | Geaggregeerde ligplaatscapaciteit, corridor-capaciteit ($\le 15$ km) en maximale jaarlijkse bedienbare verkeersintensiteit over **alle** gekoppelde FIS-routes |
+| `route_berth_capacity.geoparquet` (`.csv`, `.geojson`) | Geaggregeerde ligplaatscapaciteit, corridorcapaciteit (≤ 15 km) en maximale jaarlijkse bedienbare verkeersintensiteit per **HVWN-route** |
+| `route_berth_capacity_all.geoparquet` | Geaggregeerde ligplaatscapaciteit, corridorcapaciteit (≤ 15 km) en maximale jaarlijkse bedienbare verkeersintensiteit over **alle** gekoppelde FIS-routes |
 | `berth_spatial_report.md` | Samenvattend rapport in Markdown met landelijke tabellen, knelpunten, autoafzetplaatstest en rekenvoorbeelden |
 
 ---
@@ -127,7 +127,7 @@ Voor elk routetussenstuk (edge) $e = (u, v)$ met lengte $L = \text{length\_km}$ 
 
 ---
 
-### 2.6 Verwachte Overnachtingsstops, Draagkracht en Corridor-capaciteit ($\le 15$ km) per Route (RVW 2020 § 6.4.2)
+### 2.6 Verwachte Overnachtingsstops, Bedienbare Verkeersintensiteit en Corridorcapaciteit (≤ 15 km) per Route (RVW 2020 § 6.4.2)
 Voor een vaarwegroute met totale lengte $L_{\text{route}} = \sum L_e$ (`total_length_km`) hanteert RVW 2020 § 6.3–6.4 voor 14-uursvaart (regime A1) een gemiddelde vaartijd van $T_{\text{dag}} = 14\text{ uur/etmaal}$ bij een gemiddelde snelheid van $v_{\text{gem}} = 12\text{ km/u}$. De dagelijkse vaarafstand bedraagt daarmee:
 
 $$D_{\text{dag}} = v_{\text{gem}} \times T_{\text{dag}} = 12 \times 14 = 168{,}0\text{ km/etmaal}$$
@@ -139,21 +139,21 @@ $$D_{\text{dag}} = v_{\text{gem}} \times T_{\text{dag}} = 12 \times 14 = 168{,}0
    $$M_{\text{jaar}} = L_{\text{kade}} \times 365 \quad [\text{m}\cdot\text{nachten / jaar}]$$
 
 3. **Maximale jaarlijkse bedienbare verkeersintensiteit in geaccumuleerde scheepslengte (`max_overnight_traffic_volume_km_yr`)**:
-   $$\text{max\_overnight\_ship\_length\_km\_yr} = \frac{(L_{\text{kade}} / 1000) \times 365}{P_{\text{stop}}} = \frac{(L_{\text{kade}} / 1000) \times 365}{L_{\text{route}} / 168{,}0} \quad [\text{km schip / jaar}]$$
+   $$\text{max\_overnight\_traffic\_volume\_km\_yr} = \frac{(L_{\text{kade}} / 1000) \times 365}{P_{\text{stop}}} = \frac{(L_{\text{kade}} / 1000) \times 365}{L_{\text{route}} / 168{,}0} \quad [\text{km schip / jaar}]$$
 
 4. **Maximale jaarlijkse scheepspassages per scheepslengtescenario (`max_overnight_passages_{85m,110m,135m}_yr`)**:
    $$\text{max\_overnight\_passages\_}\{L_{\text{schip}}\}\_\text{yr} = \frac{C_{\text{route}}(L_{\text{schip}}) \times 365}{P_{\text{stop}}} \quad [\text{passages / jaar}]$$
 
-5. **Corridor-capaciteit ($\le 15$ km) (`corridor_overnight_*` & `corridor_kegel_*`)**:
+5. **Corridorcapaciteit (≤ 15 km) (`corridor_overnight_*` & `corridor_kegel_*`)**:
    Omdat ligplaatsen vaak in direct aantakkende havenbekkens of nevenroutes liggen (met een eigen `route_id`), worden via Dijkstra op de vaarweggraaf $G$ voor elke route $r$ alle unieke ligplaatsen verzameld waarvan de netwerkafstand tot ten minste één knoop van route $r$ kleiner of gelijk is aan $r_{\text{overnacht}} = 15{,}0\text{ km}$ (resp. $r_{\text{kegel}} = 30{,}0\text{ km}$):
 
-   $$\mathcal{B}_{\text{catchment}}(r, R) = \left\{ b \in \mathcal{B} \;\middle|\; \min_{u \in V(r)} d_G(u, v_b) \le R \right\}$$
+   $$\mathcal{B}_{\text{corridor}}(r, R) = \left\{ b \in \mathcal{B} \;\middle|\; \min_{u \in V(r)} d_G(u, v_b) \le R \right\}$$
 
    Waaruit analoog aan de lokale capaciteit worden berekend:
-   * `corridor_overnight_berths` $= |\mathcal{B}_{\text{catchment}}(r, 15\text{ km})|$
-   * `corridor_overnight_berth_length_m` $= \sum_{b \in \mathcal{B}_{\text{catchment}}} L_{\text{eff}}(b)$
-   * `corridor_overnight_capacity_ships_{85m,110m,135m}` $= \sum_{b \in \mathcal{B}_{\text{catchment}}} C_b(L_{\text{schip}})$
-   * `corridor_max_overnight_traffic_volume_km_yr` $= \dfrac{\big(\text{catchment\_overnight\_berth\_length\_m} / 1000\big) \times 365}{P_{\text{stop}}}$
+   * `corridor_overnight_berths` $= |\mathcal{B}_{\text{corridor}}(r, 15\text{ km})|$
+   * `corridor_overnight_berth_length_m` $= \sum_{b \in \mathcal{B}_{\text{corridor}}} L_{\text{eff}}(b)$
+   * `corridor_overnight_capacity_ships_{85m,110m,135m}` $= \sum_{b \in \mathcal{B}_{\text{corridor}}} C_b(L_{\text{schip}})$
+   * `corridor_max_overnight_traffic_volume_km_yr` $= \dfrac{\big(\text{corridor\_overnight\_berth\_length\_m} / 1000\big) \times 365}{P_{\text{stop}}}$
 
 ---
 
@@ -298,7 +298,7 @@ Elk record in deze bestanden vertegenwoordigt een **routetussenstuk (edge)** op 
 ---
 
 ### 3.4 `route_berth_capacity.geoparquet` (`.csv`, `.geojson`) & `route_berth_capacity_all.geoparquet`
-Elk record in deze bestanden vertegenwoordigt één **volledige FIS-vaarwegroute** (`route_id`) met zowel de **lokale ligplaatscapaciteit** (ligplaatsen met exact dezelfde `route_id`), de **ruimtelijke dekkingsgraad**, als de **corridor-capaciteit ($\le 15$ km)** (alle ligplaatsen die over de vaarweggraaf binnen $\le 15\text{ km}$ resp. $\le 30\text{ km}$ vanaf de route bereikbaar zijn).
+Elk record in deze bestanden vertegenwoordigt één **volledige FIS-vaarwegroute** (`route_id`) met zowel de **lokale ligplaatscapaciteit** (ligplaatsen met exact dezelfde `route_id`), de **ruimtelijke dekkingsgraad**, als de **corridorcapaciteit (≤ 15 km)** (alle ligplaatsen die over de vaarweggraaf binnen $\le 15\text{ km}$ resp. $\le 30\text{ km}$ vanaf de route bereikbaar zijn).
 * `route_berth_capacity.geoparquet` bevat de **HVWN-routes** (`is_hvwn == True`).
 * `route_berth_capacity_all.geoparquet` bevat **alle gekoppelde FIS-routes**.
 
@@ -337,7 +337,7 @@ Elk record in deze bestanden vertegenwoordigt één **volledige FIS-vaarwegroute
 | `corridor_overnight_capacity_ships_85m` | `float64` | schepen | Totale scheepscapaciteit binnen het netwerk-verzorgingsgebied ($\le 15\text{ km}$) voor **85 m (CEMT IV)** schepen. |
 | `corridor_overnight_capacity_ships_110m` | `float64` | schepen | Totale scheepscapaciteit binnen het netwerk-verzorgingsgebied ($\le 15\text{ km}$) voor **110 m (CEMT Va)** schepen. |
 | `corridor_overnight_capacity_ships_135m` | `float64` | schepen | Totale scheepscapaciteit binnen het netwerk-verzorgingsgebied ($\le 15\text{ km}$) voor **135 m (CEMT Vb)** schepen. |
-| `corridor_max_overnight_traffic_volume_km_yr` | `float64` | km schip/jr | Maximale jaarlijkse bedienbare verkeersintensiteit op basis van het $\le 15\text{ km}$ verzorgingsgebied: $\dfrac{(\text{catchment\_overnight\_berth\_length\_m} / 1000) \times 365}{\text{expected\_overnight\_stops}}$. |
+| `corridor_max_overnight_traffic_volume_km_yr` | `float64` | km schip/jr | Maximale jaarlijkse bedienbare verkeersintensiteit op basis van het $\le 15\text{ km}$ verzorgingsgebied: $\dfrac{(\text{corridor\_overnight\_berth\_length\_m} / 1000) \times 365}{\text{expected\_overnight\_stops}}$. |
 
 #### C. Kegelligplaatsen — Lokale Capaciteit, Dekking & Verzorgingsgebied ($\le 30$ km straal / 60 km norm)
 
@@ -360,4 +360,4 @@ Elk record in deze bestanden vertegenwoordigt één **volledige FIS-vaarwegroute
 | `corridor_kegel_capacity_ships_85m` | `float64` | schepen | Totale kegel-scheepscapaciteit binnen het netwerk-verzorgingsgebied ($\le 30\text{ km}$) voor **85 m (CEMT IV)** schepen. |
 | `corridor_kegel_capacity_ships_110m` | `float64` | schepen | Totale kegel-scheepscapaciteit binnen het netwerk-verzorgingsgebied ($\le 30\text{ km}$) voor **110 m (CEMT Va)** schepen. |
 | `corridor_kegel_capacity_ships_135m` | `float64` | schepen | Totale kegel-scheepscapaciteit binnen het netwerk-verzorgingsgebied ($\le 30\text{ km}$) voor **135 m (CEMT Vb)** schepen. |
-| `corridor_max_kegel_traffic_volume_km_yr` | `float64` | km schip/jr | Maximale jaarlijkse kegel-bedienbare verkeersintensiteit op basis van het $\le 30\text{ km}$ verzorgingsgebied: $\dfrac{(\text{catchment\_kegel\_berth\_length\_m} / 1000) \times 365}{\text{expected\_overnight\_stops}}$. |
+| `corridor_max_kegel_traffic_volume_km_yr` | `float64` | km schip/jr | Maximale jaarlijkse kegel-bedienbare verkeersintensiteit op basis van het $\le 30\text{ km}$ verzorgingsgebied: $\dfrac{(\text{corridor\_kegel\_berth\_length\_m} / 1000) \times 365}{\text{expected\_overnight\_stops}}$. |
