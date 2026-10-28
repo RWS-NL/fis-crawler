@@ -24,7 +24,7 @@ Methodiek: [berth_spatial_capacity.md](berth_spatial_capacity.md). Eén rij per 
 
 Details van de methode: [berth_spatial_capacity.md](berth_spatial_capacity.md) (§ 4 beschrijft deze koppeling vanuit stap 1). `route_id` is uniek (ook `route_code` is dat in de 49 HVWN-routes, maar `route_id` blijft de sleutel). De routegeometrie staat in EPSG:4326, BIVAS in EPSG:28992: herprojecteer voor de ruimtelijke koppeling.
 
-Voor de toetsing in stap 3 de **aantallen schepen** (`*_capacity_ships_*`) en kadelengtes gebruiken. De kolommen `expected_overnight_stops` en `max_*_yr` bevatten al vaste aannames (`c` = 0, 12 km/u, 14 u) en zijn daarom geen invoer voor stap 3.
+Voor de toetsing in stap 3 de **aantallen schepen** (`*_capacity_ships_*`) en kadelengtes gebruiken. De kolommen `expected_overnight_stops` en `max_*_yr` bevatten al vaste aannames (`f_overnacht` = 1, 12 km/u, 14 u) en zijn daarom geen invoer voor stap 3.
 
 ## Stap 2: intensiteit (te leveren)
 
@@ -89,11 +89,14 @@ gemiddelde reistijd                   = lengte vaarweg / gemiddelde snelheid
 waarbij "aantal schepen" het maatgevend aantal passerende schepen per dag is (95e percentiel). Voor de Rijn gebruikt de RVW (p. 147) `Id` = "schepen per dag die overnachtingsplaatsen vereisen". Toegepast per route in notatie van de RVW:
 
 ```
-Id      = I · P_stop                      schepen per dag die overnachtingsplaatsen vereisen (= NB)
-P_stop  = (L / v) / T · (1 − c)           percentage schepen dat overnacht
+P_stop       = (L / v) / T               percentage schepen dat overnacht (RVW), stap 1: expected_overnight_stops
+f_overnacht  = P_stop,gecorrigeerd / P_stop = 1 − c
+                                         correctiefactor op P_stop voor continuvaart (c = aandeel continuvaart)
+P_stop,gecorrigeerd = f_overnacht · P_stop
+Id           = I · P_stop,gecorrigeerd   schepen per dag die overnachtingsplaatsen vereisen (= NB)
 ```
 
-`I` is het "aantal schepen" uit de RVW en `(L / v) / T` het percentage uit de RVW (reistijd / maximale vaartijd). De factor `(1 − c)`, met `c` = aandeel continuvaart, is **geen onderdeel van de RVW**: het is een aanvulling uit het Corporate uitvoeringskader (p. 19–20, "rekening houden met continuvaart") met waarden uit het Lobith-onderzoek 2013.
+`I` is het "aantal schepen" uit de RVW en `P_stop` het percentage uit de RVW (reistijd / maximale vaartijd). De factor `f_overnacht` is **geen onderdeel van de RVW**: het is een aanvulling uit het Corporate uitvoeringskader (p. 19–20, "rekening houden met continuvaart") met waarden uit het Lobith-onderzoek 2013. Zonder correctie geldt `f_overnacht = 1` en is `Id = I · P_stop`, zoals in stap 1.
 
 Toets: aanbod (stap 1, corridor) ≥ `Id` plaatsen, of ≥ `LO = Id · (LP + s)` meter oeverlengte (RVW p. 146: `LO = NB · (LP + s) · PP/PB`, met `PP/PB` = 1 voor het basisjaar).
 
@@ -104,12 +107,12 @@ Toets: aanbod (stap 1, corridor) ≥ `Id` plaatsen, of ≥ `LO = Id · (LP + s)`
 | `L` | `total_length_km` | FIS | 1 |
 | `v` | 12 km/u (projectaanname; 2 uur ≈ 30 km, dus 15 km/u, volgt uit RVW § 6.3) | RVW 2020 § 6.3 | parameter |
 | `T` | A1 = 14 u, A2 = 18 u, B = 24 u (continuvaart) | Corporate uitvoeringskader ligplaatsen RWS 2011, p. 41 | parameter |
-| `c` (aandeel continuvaart; aanvulling op de RVW) | Aandeel scheepvaart tussen 23.00 en 06.00 uur: 0,18 Waal 2012 (dus `1 − c` = 0,82), 0,20 Duitsland; tankers klasse IV–VI 0,75 | Lobith 2013, p. 10 en 15; Corporate uitvoeringskader p. 19–20 | parameter |
+| `f_overnacht` = `1 − c` (aanvulling op de RVW) | `c` = aandeel scheepvaart tussen 23.00 en 06.00 uur (continuvaart): 0,18 Waal 2012, dus `f_overnacht` = 0,82; Duitsland `c` = 0,20, dus 0,80; tankers klasse IV–VI 0,25 | Lobith 2013, p. 10 en 15; Corporate uitvoeringskader p. 19–20 | parameter |
 | `s` | 5 m (klasse I–IV), 10 m (V en hoger) | RVW 2020 § 6.4.2 | parameter |
 | Schepen naast elkaar | kade twee breed, steiger drie breed | RVW 2020 § 6.4.2, p. 147 | stap 1 |
 | Afmeerlengte | 1,2·L (twee breed of meer), 1,1·L (één breed) | RVW 2020 § 6.2.4 | stap 1 |
 
-`c` kan niet uit BIVAS komen (reizen hebben een vertrektijd, geen tijdstip per arc): bepaal het uit IVS-passages of gebruik de tabelwaarden.
+`f_overnacht` (via `c`) kan niet uit BIVAS komen (reizen hebben een vertrektijd, geen tijdstip per arc): bepaal het uit IVS-passages of gebruik de tabelwaarden.
 
 ## Bronnen
 
