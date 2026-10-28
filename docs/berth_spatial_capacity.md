@@ -181,10 +181,12 @@ D_dag = v_gem * T_dag = 12 * 14 = 168,0 km/etmaal
 
 1. **Verwachte overnachtingsstops per passage (`expected_overnight_stops`)**:
    ```text
-   P_stop = L_route / 168,0   [stops / passage]
+   P_stop = L_route / 168,0                       [percentage schepen dat overnacht, RVW]
+   P_stop,gecorrigeerd = f_overnacht * P_stop     [= expected_overnight_stops]
+   f_overnacht = P_stop,gecorrigeerd / P_stop = 1 - c = 0,82
    ```
 
-   `P_stop` is het "percentage schepen dat overnacht" uit RVW 2020 § 6.4.2 (p. 146): gemiddelde reistijd (`L_route / v_gem`) gedeeld door de maximale vaartijd (`T_dag`). In deze stap wordt geen correctie voor continuvaart toegepast: `f_overnacht = 1`, waarbij `f_overnacht = P_stop,gecorrigeerd / P_stop = 1 - c` en `c` het aandeel continuvaart is (alle passanten overnachten). De correctie met `f_overnacht < 1` en de definitieve waarden voor `v` en `T` worden in stap 3 toegepast. De kolommen die `P_stop` bevatten (`expected_overnight_stops`, `max_*_traffic_volume_km_yr`, `max_*_passages_*_yr`) zijn daarom indicatief en geen invoer voor de toetsing.
+   `P_stop` is het "percentage schepen dat overnacht" uit RVW 2020 § 6.4.2 (p. 146): gemiddelde reistijd (`L_route / v_gem`) gedeeld door de maximale vaartijd (`T_dag`). `f_overnacht` corrigeert dit voor continuvaart en is **geen onderdeel van de RVW**: `c` is het aandeel continuvaart (scheepvaart tussen 23.00 en 06.00 uur), 18% op de Waal in 2012 (RWS WVL, *Toekomstige Ligplaatsbehoefte Overnachtingshaven Lobith 2013*, p. 10), dus `f_overnacht = 0,82`. De kolom `expected_overnight_stops` bevat `P_stop,gecorrigeerd`; alle `max_*`-kolommen hieronder gebruiken die waarde. De parameters `f_overnacht`, `sailing_speed_kmh` (12 km/u, projectaanname) en `sailing_hours_per_day` (14 u) staan als kolommen in de uitvoer, zodat stap 3 met dezelfde waarden rekent.
 
 2. **Jaarlijkse kademeter-nachten (`overnight_meter_nights_yr` / `kegel_meter_nights_yr`)**:
    ```text
@@ -373,7 +375,10 @@ Elk record in dit bestand vertegenwoordigt één **volledige FIS-vaarwegroute** 
 | `network_type` | `str` | - | Vaarwegnetwerkcategorie: `Hoofdtransportas`, `Hoofdvaarweg`, `Overige vaarweg`, `Overig` of `Niet geclassificeerd / Zee`. |
 | `is_hvwn` | `bool` | - | `True` als `network_type in ("Hoofdtransportas", "Hoofdvaarweg")`. |
 | `total_length_km` | `float64` | km | Totale routelengte `L_route = sum length_km` van alle segmenten op de route. |
-| `expected_overnight_stops` | `float64` | stops/passage | Verwachte overnachtingsfractie `P_stop = L_route / 168,0` bij 14-uursvaart à 12 km/u (zie § 2.6). |
+| `expected_overnight_stops` | `float64` | stops/passage | Verwachte overnachtingsfractie `P_stop,gecorrigeerd = f_overnacht * L_route / 168,0` bij 14-uursvaart à 12 km/u (zie § 2.6). |
+| `f_overnacht` | `float64` | - | Aandeel passanten dat een overnachtingsplaats nodig heeft: `1 - aandeel continuvaart` = 0,82 (zelfde waarde op alle routes). |
+| `sailing_speed_kmh` | `float64` | km/u | Gemiddelde vaarsnelheid `v` in de berekening van `P_stop` (12 km/u, projectaanname). |
+| `sailing_hours_per_day` | `float64` | uur | Maximale vaartijd per etmaal `T` in de berekening van `P_stop` (14 u, exploitatievorm A1). |
 | `geometry` | `geometry` | - | Lijngeometrie (`LineString` / `MultiLineString`) van de gehele route in `EPSG:4326`. |
 
 #### B. Reguliere Overnachtingsligplaatsen — Lokale Capaciteit, Dekking & Verzorgingsgebied (`<= 15` km)
@@ -433,9 +438,9 @@ Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot 
 | :--- | :--- |
 | Sleutel | `route_id` (string, uniek). Gebruik niet `route_code`: die is niet in alle FIS-routes uniek. |
 | Niveau | Eén rij per FIS-vaarwegroute. Aanbod is lokaal (`overnight_*`, `kegel_*`) en per corridor ≤ 15 km resp. ≤ 30 km (`corridor_overnight_*`, `corridor_kegel_*`). |
-| Lengte | `total_length_km` (km): de lengte `L` in de formule voor `P_stop` in stap 3. |
+| Lengte | `total_length_km` (km): de lengte `L` in de formule voor `P_stop`. |
 | Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen. |
-| Niet gebruiken voor de toetsing | `expected_overnight_stops` en `max_*_yr` (bevatten `f_overnacht = 1`, 12 km/u, 14 u; zie § 2.6). |
+| Percentage dat overnacht | `expected_overnight_stops` = `P_stop,gecorrigeerd` (inclusief `f_overnacht` = 0,82, 12 km/u, 14 u). Stap 3 gebruikt deze kolom en de kolommen `f_overnacht`, `sailing_speed_kmh`, `sailing_hours_per_day`, zodat vraag en aanbod met dezelfde parameters zijn berekend: `Id = passages_eq_day_p95 * expected_overnight_stops`. |
 | Formaat | Ruimtelijk bestand: `route_berth_capacity.geoparquet` is de interface (de `.csv` bevat geen geometrie en is geen invoer voor de volgende stappen). |
 | Koppelen | Primair op `route_id`, terugval ruimtelijk op de routegeometrie. Daarom blijven zowel `route_id` als de geometrie in alle uitvoerbestanden van de stappen behouden en ongewijzigd (niet vereenvoudigd). |
 | Geometrie | Eén `LineString` per route in **EPSG:4326**. BIVAS en de rest van het project werken in EPSG:28992 (`PROJECTED_CRS`): stap 2 moet herprojecteren voor ruimtelijke koppeling. |

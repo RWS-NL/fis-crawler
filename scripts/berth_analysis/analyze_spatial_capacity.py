@@ -37,12 +37,20 @@ SHIP_SCENARIOS = (
     ("135m", SHIP_LENGTH_135_M),
 )
 
-# RVW 2020 § 6.3 p. 144 (~12 km/h network average) & Binnenvaartwet A1 (14h/day)
+# A1 exploitation mode: at most 14 h sailing per 24 h (Binnenvaartregeling art. 23.10, see
+# Corporate uitvoeringskader ligplaatsen RWS 2011, p. 41). The 12 km/h average speed is a
+# project assumption (RVW 2020 § 6.3: ~2 h sailing = ~30 km, i.e. 15 km/h).
 NORMAL_DAY_SAILING_HOURS = 14.0
 AVERAGE_SAILING_SPEED_KMH = 12.0
 DAILY_SAILING_DISTANCE_KM = (
     NORMAL_DAY_SAILING_HOURS * AVERAGE_SAILING_SPEED_KMH
 )  # 168.0 km
+
+# Share of passing ships that needs an overnight berth: 1 - share of continuous sailing
+# (23:00-06:00). 18% on the Waal in 2012 (RWS WVL, Toekomstige Ligplaatsbehoefte
+# Overnachtingshaven Lobith 2013, p. 10); not part of RVW 2020.
+CONTINUOUS_SAILING_SHARE = 0.18
+FRACTION_OVERNIGHT = 1.0 - CONTINUOUS_SAILING_SHARE  # 0.82
 
 OVERNIGHT_RADIUS_KM = 15.0  # Max 30 km spacing between overnight ports
 KEGEL_RADIUS_KM = 30.0  # Max 60 km spacing between kegel berths
@@ -208,10 +216,7 @@ def classify_berths(
 
     name_lower = df.get("name", pd.Series("", index=df.index)).fillna("").str.lower()
     note_lower = (
-        df.get("note", pd.Series("", index=df.index))
-        .fillna("")
-        .astype(str)
-        .str.lower()
+        df.get("note", pd.Series("", index=df.index)).fillna("").astype(str).str.lower()
     )
     route_id_str = df.get("route_id", pd.Series("", index=df.index)).astype(str)
 
@@ -638,11 +643,16 @@ def compute_route_berth_capacity(
         .reset_index()
     )
 
+    # P_stop = f_overnacht * (L / v) / T: RVW 2020 § 6.4.2 percentage of ships that
+    # overnights (travel time / maximum sailing time), corrected for continuous sailing.
     df["expected_overnight_stops"] = np.where(
         df["total_length_km"] > 0,
-        df["total_length_km"] / DAILY_SAILING_DISTANCE_KM,
+        FRACTION_OVERNIGHT * df["total_length_km"] / DAILY_SAILING_DISTANCE_KM,
         0.0,
     )
+    df["f_overnacht"] = FRACTION_OVERNIGHT
+    df["sailing_speed_kmh"] = AVERAGE_SAILING_SPEED_KMH
+    df["sailing_hours_per_day"] = NORMAL_DAY_SAILING_HOURS
 
     kind_radii = {
         "overnight": OVERNIGHT_RADIUS_KM,

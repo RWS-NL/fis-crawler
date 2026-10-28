@@ -6,6 +6,7 @@ from shapely.geometry import LineString, Point
 
 from scripts.berth_analysis.analyze_spatial_capacity import (
     DAILY_SAILING_DISTANCE_KM,
+    FRACTION_OVERNIGHT,
     build_network_classification_map,
     calc_berth_ship_slots,
     calc_segment_compliant_length,
@@ -580,8 +581,9 @@ def test_compute_route_berth_capacity(berth_capacity_inputs):
     r = gdf_routes.iloc[0]
     assert r["is_hvwn"]
 
-    # Expected overnight stops = 20 / 168 (unrounded during computation)
-    expected_p_stop = 20.0 / DAILY_SAILING_DISTANCE_KM
+    # Expected overnight stops = f_overnacht * 20 / 168 (unrounded during computation)
+    expected_p_stop = FRACTION_OVERNIGHT * 20.0 / DAILY_SAILING_DISTANCE_KM
+    assert r["f_overnacht"] == pytest.approx(0.82)
     assert r["expected_overnight_stops"] == pytest.approx(expected_p_stop, abs=1e-6)
 
     # Overnight length & capacity
@@ -590,22 +592,24 @@ def test_compute_route_berth_capacity(berth_capacity_inputs):
     assert r["overnight_capacity_ships_110m"] == 2
     assert r["overnight_capacity_ships_135m"] == 1
 
-    # Max carrying capacity overnight: (240 / 1000) * (168 / 20) * 365 = 735.84 km/yr
-    expected_max_cap = (240.0 / 1000.0) * (168.0 / 20.0) * 365.0
+    # Max carrying capacity overnight: (240 / 1000) * 365 / P_stop, with P_stop = 0.82 * 20 / 168
+    expected_max_cap = (240.0 / 1000.0) * (168.0 / (FRACTION_OVERNIGHT * 20.0)) * 365.0
     assert r["max_overnight_traffic_volume_km_yr"] == pytest.approx(
         expected_max_cap, abs=1e-4
     )
     assert r["max_overnight_passages_110m_yr"] == pytest.approx(
-        2 * (168.0 / 20.0) * 365.0, abs=1e-4
+        2 * (168.0 / (FRACTION_OVERNIGHT * 20.0)) * 365.0, abs=1e-4
     )
     assert r["max_overnight_passages_135m_yr"] == pytest.approx(
-        1 * (168.0 / 20.0) * 365.0, abs=1e-4
+        1 * (168.0 / (FRACTION_OVERNIGHT * 20.0)) * 365.0, abs=1e-4
     )
 
     # Kegel length & capacity
     assert r["kegel_berth_length_m"] == 120.0
     assert r["kegel_meter_nights_yr"] == 120.0 * 365.0
-    expected_max_kegel = (120.0 / 1000.0) * (168.0 / 20.0) * 365.0
+    expected_max_kegel = (
+        (120.0 / 1000.0) * (168.0 / (FRACTION_OVERNIGHT * 20.0)) * 365.0
+    )
     assert r["max_kegel_traffic_volume_km_yr"] == pytest.approx(
         expected_max_kegel, abs=1e-4
     )
