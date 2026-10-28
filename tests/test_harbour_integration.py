@@ -2,7 +2,9 @@ import unittest
 import networkx as nx
 import pandas as pd
 import geopandas as gpd
+import pyproj
 from shapely.geometry import Point, LineString
+from shapely.ops import transform
 from fis import settings
 from fis.graph.enrich_fis import integrate_harbours
 
@@ -265,6 +267,29 @@ class TestHarbourIntegration(unittest.TestCase):
         access_len = G_enriched.edges["harbour_7", conn_id]["length_m"]
         self.assertAlmostEqual(
             access_len, settings.HARBOUR_MIN_ACCESS_LENGTH_M, delta=0.1
+        )
+        self._assert_beside_fairway(G_enriched, h_data["geometry"])
+
+    def test_integrate_harbour_on_axis_near_start_is_moved_beside_fairway(self):
+        # On-axis harbour ~0.5 m inside the section snaps to junction 100; it must be
+        # moved off the fairway, not 10 m further along the axis.
+        G, datasets = self._single_section_graph(Point(5.0000073, 52.0))
+        G_enriched = integrate_harbours(G, datasets)
+
+        self.assertTrue(G_enriched.has_edge(100, 200))
+        self.assertEqual(list(G_enriched.neighbors("harbour_7")), [100])
+        self._assert_beside_fairway(
+            G_enriched, G_enriched.nodes["harbour_7"]["geometry"]
+        )
+
+    def _assert_beside_fairway(self, G, harbour_geom):
+        to_rd = pyproj.Transformer.from_crs(
+            "EPSG:4326", settings.PROJECTED_CRS, always_xy=True
+        ).transform
+        line_rd = transform(to_rd, LineString([Point(5.0, 52.0), Point(5.02, 52.0)]))
+        self.assertGreater(
+            line_rd.distance(transform(to_rd, harbour_geom)),
+            settings.HARBOUR_MIN_ACCESS_LENGTH_M - 0.5,
         )
 
 

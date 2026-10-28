@@ -573,22 +573,58 @@ def _harbour_leaf_position(
     """Position (RD) of a harbour node at least HARBOUR_MIN_ACCESS_LENGTH_M from its connection.
 
     A harbour is a leaf beside the fairway, not a point on it. A harbour closer than the
-    minimum is moved away from the connection node, in the direction of the source point,
-    or perpendicular to the fairway (left of its drawing direction) when the source point
-    lies exactly on the connection node.
+    minimum is moved perpendicular to the fairway at the connection node, to the side of
+    the source point (left of the drawing direction when the source lies on the axis).
+    Moving towards the source point instead could move it along the axis, onto the
+    fairway, e.g. when it snapped to a junction from just inside the section.
     """
     min_len = settings.HARBOUR_MIN_ACCESS_LENGTH_M
     dx, dy = harbour_rd.x - conn_rd.x, harbour_rd.y - conn_rd.y
-    dist = (dx**2 + dy**2) ** 0.5
-    if dist >= min_len:
+    if (dx**2 + dy**2) ** 0.5 >= min_len:
         return harbour_rd
-    if dist == 0.0:
-        t = line_rd.project(conn_rd)
-        a = line_rd.interpolate(max(0.0, t - 1.0))
-        b = line_rd.interpolate(min(line_rd.length, t + 1.0))
-        dx, dy = -(b.y - a.y), b.x - a.x
-        dist = (dx**2 + dy**2) ** 0.5
-    return Point(conn_rd.x + dx / dist * min_len, conn_rd.y + dy / dist * min_len)
+    t = line_rd.project(conn_rd)
+    a = line_rd.interpolate(max(0.0, t - 1.0))
+    b = line_rd.interpolate(min(line_rd.length, t + 1.0))
+    px, py = -(b.y - a.y), b.x - a.x
+    norm = (px**2 + py**2) ** 0.5
+    side = -1.0 if px * dx + py * dy < 0 else 1.0
+    return Point(
+        conn_rd.x + side * px / norm * min_len,
+        conn_rd.y + side * py / norm * min_len,
+    )
+
+
+def _splice_harbour_cuts(
+    graph: nx.Graph,
+    u,
+    v,
+    line_rd: LineString,
+    cuts: list[StructureCut],
+    edge_attrs: dict,
+    project_to_4326,
+    geod: Geod,
+) -> None:
+    """Replace edge (u, v) by the segments between its harbour connection cuts."""
+    if not cuts:
+        return
+
+    segments = FairwaySplicer(line_rd).splice(cuts)
+    if len(segments) != len(cuts) + 1:
+        raise ValueError(
+            f"Splicing harbours into edge ({u}, {v}) gave {len(segments)} "
+            f"segments for {len(cuts)} cuts; the fairway would be disconnected."
+        )
+
+    graph.remove_edge(u, v)
+
+    for seg in segments:
+        seg_geom_4326 = transform(project_to_4326, seg.geometry)
+        su = u if seg.source_structure_id is None else seg.source_structure_id
+        sv = v if seg.target_structure_id is None else seg.target_structure_id
+        attrs = edge_attrs.copy()
+        attrs["geometry"] = seg_geom_4326
+        attrs["length_m"] = geod.geometry_length(seg_geom_4326)
+        graph.add_edge(su, sv, **attrs)
 
 
 def integrate_harbours(
@@ -766,25 +802,9 @@ def integrate_harbours(
             if cl["conn_id"] not in (u, v)
         ]
 
-        if cuts:
-            splicer = FairwaySplicer(line_rd)
-            segments = splicer.splice(cuts)
-            if len(segments) != len(cuts) + 1:
-                raise ValueError(
-                    f"Splicing harbours into edge ({u}, {v}) gave {len(segments)} "
-                    f"segments for {len(cuts)} cuts; the fairway would be disconnected."
-                )
-
-            graph.remove_edge(u, v)
-
-            for seg in segments:
-                seg_geom_4326 = transform(project_to_4326, seg.geometry)
-                su = u if seg.source_structure_id is None else seg.source_structure_id
-                sv = v if seg.target_structure_id is None else seg.target_structure_id
-                attrs = edge_attrs.copy()
-                attrs["geometry"] = seg_geom_4326
-                attrs["length_m"] = geod.geometry_length(seg_geom_4326)
-                graph.add_edge(su, sv, **attrs)
+        _splice_harbour_cuts(
+            graph, u, v, line_rd, cuts, edge_attrs, project_to_4326, geod
+        )
 
         for cl in clusters:
             conn_id = cl["conn_id"]
