@@ -20,6 +20,8 @@ Methodiek: [berth_spatial_capacity.md](berth_spatial_capacity.md). Eén rij per 
 | Ligplaatsen corridor ≤ 15 km | `corridor_overnight_berth_length_m`, `corridor_overnight_capacity_ships_{85m,110m,135m}` | m, schepen | corridor rond de route |
 | Kegelligplaatsen | `kegel_*`, `corridor_kegel_*` (idem) | m, schepen | route / corridor |
 
+Details van de methode: [berth_spatial_capacity.md](berth_spatial_capacity.md) (§ 4 beschrijft deze koppeling vanuit stap 1). `route_id` is uniek; `route_code` is in `route_berth_capacity_all` niet uniek en is geen sleutel. De routegeometrie staat in EPSG:4326, BIVAS in EPSG:28992: herprojecteer voor de ruimtelijke koppeling.
+
 Voor de toetsing in stap 3 de **aantallen schepen** (`*_capacity_ships_*`) en kadelengtes gebruiken. De kolommen `expected_overnight_stops` en `max_*_yr` bevatten al vaste aannames (`f_overnacht` = 1, 12 km/u, 14 u) en zijn daarom geen invoer voor stap 3.
 
 ## Stap 2: intensiteit (te leveren)

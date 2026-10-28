@@ -2,6 +2,9 @@
 
 Dit document beschrijft de rekenmethodiek, de gebruikte formules (conform **Richtlijnen Vaarwegen 2020**, § 6.3–6.6) en het volledige gegevensschema (alle velden) van de uitvoerbestanden die worden gegenereerd door [`analyze_spatial_capacity.py`](../scripts/berth_analysis/analyze_spatial_capacity.py) en [`route_network_graph.py`](../scripts/berth_analysis/route_network_graph.py).
 
+
+> **Stap 1 van 3.** Dit document beschrijft de eerste stap van de toetsing van ligplaatsen aan verkeersintensiteit: de **capaciteitsberekening** (aanbod per route). Stap 2 (intensiteit uit BIVAS op dezelfde routes) en stap 3 (toetsing aan RVW 2020 § 6.4.2) staan in [bivas_intensiteit_projectie.md](bivas_intensiteit_projectie.md). De koppeling tussen de stappen loopt uitsluitend via de bestanden `route_berth_capacity*` en de sleutel `route_id`, zie [§ 4](#4-koppeling-met-stap-2-en-3-interface).
+
 ---
 
 ## 1. Overzicht en Uitvoerbestanden
@@ -135,12 +138,14 @@ Voor elk routetussenstuk (edge) $e = (u, v)$ met lengte $L = \text{length\_km}$ 
 ---
 
 ### 2.6 Verwachte Overnachtingsstops, Bedienbare Verkeersintensiteit en Corridorcapaciteit (≤ 15 km) per Route (RVW 2020 § 6.4.2)
-Voor een vaarwegroute met totale lengte $L_{\text{route}} = \sum L_e$ (`total_length_km`) hanteert RVW 2020 § 6.3–6.4 voor 14-uursvaart (regime A1) een gemiddelde vaartijd van $T_{\text{dag}} = 14\text{ uur/etmaal}$ bij een gemiddelde snelheid van $v_{\text{gem}} = 12\text{ km/u}$. De dagelijkse vaarafstand bedraagt daarmee:
+Voor een vaarwegroute met totale lengte $L_{\text{route}} = \sum L_e$ (`total_length_km`) wordt gerekend met een vaartijd van $T_{\text{dag}} = 14\text{ uur/etmaal}$ (exploitatievorm A1: ten hoogste 14 uur varen per 24 uur; Binnenvaartregeling art. 23.10, zie Corporate uitvoeringskader ligplaatsen RWS 2011, p. 41) bij een gemiddelde snelheid van $v_{\text{gem}} = 12\text{ km/u}$ (projectaanname; RVW 2020 § 6.3 geeft circa 30 km per 2 uur varen, dus 15 km/u). De dagelijkse vaarafstand bedraagt daarmee:
 
 $$D_{\text{dag}} = v_{\text{gem}} \times T_{\text{dag}} = 12 \times 14 = 168{,}0\text{ km/etmaal}$$
 
 1. **Verwachte overnachtingsstops per passage (`expected_overnight_stops`)**:
    $$P_{\text{stop}} = \frac{L_{\text{route}}}{168{,}0} \quad [\text{stops / passage}]$$
+
+   In deze stap geldt $f_{\text{overnacht}} = 1$ (alle passanten overnachten). Het aandeel continuvaart ($f_{\text{overnacht}} = 1 - \text{aandeel continuvaart}$) en de definitieve waarden voor $v$ en $T$ worden in stap 3 toegepast. De kolommen die $P_{\text{stop}}$ bevatten (`expected_overnight_stops`, `max_*_traffic_volume_km_yr`, `max_*_passages_*_yr`) zijn daarom indicatief en geen invoer voor de toetsing.
 
 2. **Jaarlijkse kademeter-nachten (`overnight_meter_nights_yr` / `kegel_meter_nights_yr`)**:
    $$M_{\text{jaar}} = L_{\text{kade}} \times 365 \quad [\text{m}\cdot\text{nachten / jaar}]$$
@@ -371,3 +376,21 @@ Elk record in deze bestanden vertegenwoordigt één **volledige FIS-vaarwegroute
 | `corridor_kegel_capacity_ships_110m` | `float64` | schepen | Totale kegel-scheepscapaciteit binnen het netwerk-verzorgingsgebied ($\le 30\text{ km}$) voor **110 m (CEMT Va)** schepen. |
 | `corridor_kegel_capacity_ships_135m` | `float64` | schepen | Totale kegel-scheepscapaciteit binnen het netwerk-verzorgingsgebied ($\le 30\text{ km}$) voor **135 m (CEMT Vb)** schepen. |
 | `corridor_max_kegel_traffic_volume_km_yr` | `float64` | km schip/jr | Maximale jaarlijkse kegel-bedienbare verkeersintensiteit op basis van het $\le 30\text{ km}$ verzorgingsgebied: $\dfrac{(\text{corridor\_kegel\_berth\_length\_m} / 1000) \times 365}{\text{expected\_overnight\_stops}}$. |
+
+---
+
+## 4. Koppeling met stap 2 en 3 (interface)
+
+Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` (HVWN, 49 routes) of `route_berth_capacity_all.geoparquet` (alle 2.068 routes).
+
+| Aspect | Afspraak |
+| :--- | :--- |
+| Sleutel | `route_id` (string, uniek in beide bestanden). `route_code` is in `route_berth_capacity_all` **niet** uniek en niet geschikt als sleutel. |
+| Niveau | Eén rij per FIS-vaarwegroute. Aanbod is lokaal (`overnight_*`, `kegel_*`) en per corridor ≤ 15 km resp. ≤ 30 km (`corridor_overnight_*`, `corridor_kegel_*`). |
+| Lengte | `total_length_km` (km): de lengte $L$ in de formule voor $P_{\text{stop}}$ in stap 3. |
+| Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen. |
+| Niet gebruiken voor de toetsing | `expected_overnight_stops` en `max_*_yr` (bevatten $f_{\text{overnacht}} = 1$, 12 km/u, 14 u; zie § 2.6). |
+| Geometrie | Eén `LineString` per route in **EPSG:4326**. BIVAS en de rest van het project werken in EPSG:28992 (`PROJECTED_CRS`): stap 2 moet herprojecteren voor ruimtelijke koppeling. |
+| Routes zonder BIVAS-data | Blijven in stap 3 staan met onbekende intensiteit (niet nul). |
+
+De uitvoer van stap 2 (`output/bivas-intensity/`) gebruikt dezelfde `route_id`, `route_code`, `total_length_km` en dezelfde routeselectie (`is_hvwn`), zodat stap 3 een directe join op `route_id` kan doen.
