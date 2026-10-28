@@ -13,6 +13,15 @@ Bestand `output/berth-analysis/route_berth_capacity.geoparquet`: één rij per F
 | `total_length_km` | Lengte van de route (km) |
 | `geometry` | `LineString` in EPSG:4326 |
 
+Daarnaast krijg je twee **ruwe FIS-bestanden**, ongewijzigd uit de FIS-export (FIS-kolomnamen, alle 2.068 routes; gebruik alleen de routes uit `route_berth_capacity.geoparquet`), in dezelfde map `output/berth-analysis/`:
+
+| Bestand | Rijen | Belangrijke kolommen |
+|---|---|---|
+| `route.geoparquet` | 2.068 routes (`LineString`, EPSG:4326) | `Id` (= `route_id`), `Code`, `VinCode`, `Name`, `RouteKmBegin`, `RouteKmEnd`, `geometry` |
+| `routejunction.geoparquet` | 6.438 punten op routes (`Point`, EPSG:4326) | `RouteId` (= `route_id`), `RouteKmBegin`, `RouteKmEnd`, `SectionJunctionId`, `geometry` |
+
+Gebruik ze om kilometers op de route te koppelen aan locaties: de routekilometrering (`RouteKmBegin`/`RouteKmEnd`) is het FIS-equivalent van `StartKilometer`/`EndKilometer` bij BIVAS (§ 3, stap 1).
+
 BIVAS en de rest van het project werken in EPSG:28992: herproject voor ruimtelijke bewerkingen. In je uitvoer blijven `route_id` en de routegeometrie uit stap 1 **ongewijzigd** (zelfde CRS, niet vereenvoudigd).
 
 ## 2. Invoer vanuit BIVAS

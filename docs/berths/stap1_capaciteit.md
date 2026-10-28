@@ -19,16 +19,17 @@ uv run python -m scripts.berth_analysis.analyze_spatial_capacity \
   --output-dir output/berth-analysis
 ```
 
-De toetsing beperkt zich tot het **Hoofdvaarwegennet**: Hoofdtransportassen en Hoofdvaarwegen (`is_hvwn`). Het script schrijft daarnaast nog `route_berth_capacity_all.geoparquet` en `route_segments_compliance_all.geoparquet` (alle routes); die worden nergens gebruikt en vervallen.
+De toetsing beperkt zich tot het **Hoofdvaarwegennet**: Hoofdtransportassen en Hoofdvaarwegen (`is_hvwn`).
 
 De analyse genereert de volgende bestanden in `output/berth-analysis/`:
 
 | Bestand | Inhoud |
 | :--- | :--- |
 | `berths_analyzed.geoparquet` | Alle FIS-ligplaatsen verrijkt met classificatievlaggen, kegelstatus, rij-afleiding uit `width` en scheepscapaciteit (85m / 110m / 135m) |
-| `berth_clusters.geojson` | Geclusterde overnachtingslocaties (`Delta km <= 0,5` km) met toetsing op aanwezigheid van een autoafzetplaats (RVW 2020 § 6.6) |
-| `route_segments_compliance.geoparquet` (`.geojson`) | Ruimtelijke dekkingsanalyse per routetussenstuk op het **Hoofdvaarwegnet (HVWN)** (Hoofdtransportassen + Hoofdvaarwegen) |
-| `route_berth_capacity.geoparquet` (`.csv`, `.geojson`) | Geaggregeerde ligplaatscapaciteit, corridorcapaciteit (≤ 15 km) en maximale jaarlijkse bedienbare verkeersintensiteit per **HVWN-route** |
+| `berth_clusters.geoparquet` | Geclusterde overnachtingslocaties (`Delta km <= 0,5` km) met toetsing op aanwezigheid van een autoafzetplaats (RVW 2020 § 6.6) |
+| `route_segments_compliance.geoparquet` | Ruimtelijke dekkingsanalyse per routetussenstuk op het **Hoofdvaarwegnet (HVWN)** (Hoofdtransportassen + Hoofdvaarwegen) |
+| `route_berth_capacity.geoparquet` | Geaggregeerde ligplaatscapaciteit, corridorcapaciteit (≤ 15 km) en maximale jaarlijkse bedienbare verkeersintensiteit per **HVWN-route** |
+| `route.geoparquet`, `routejunction.geoparquet` | **Ruwe FIS-bestanden**, ongewijzigd gekopieerd uit `output/fis-export/` (FIS-kolomnamen, alle 2.068 routes). Meegeleverd als invoer voor stap 2 (kilometrering van de routes) |
 | `berth_spatial_report.md` | Samenvattend rapport in Markdown met landelijke tabellen, knelpunten, autoafzetplaatstest en rekenvoorbeelden |
 
 ---
@@ -125,7 +126,7 @@ capacity_ships_{L_schip} = floor((L + s) / (L_schip + s)) * N_rijen
 ---
 
 ### 2.4 Clustering van Overnachtingslocaties en Autoafzetplaatstest (RVW 2020 § 6.6)
-Overnachtingsligplaatsen op dezelfde `route_id` die binnen `Delta km <= 0,5 km` (500 m) van het startpunt van een cluster liggen, worden samengevoegd tot één samengestelde overnachtingslocatie (`berth_clusters.geojson`).
+Overnachtingsligplaatsen op dezelfde `route_id` die binnen `Delta km <= 0,5 km` (500 m) van het startpunt van een cluster liggen, worden samengevoegd tot één samengestelde overnachtingslocatie (`berth_clusters.geoparquet`).
 
 **Ruimtelijke koppeling van autoafzetplaatsen (`has_cardropoff` op clusterniveau)**:
 Omdat autoafzetsteigers in FIS vaak als apart kortverblijf-record (`maximum_stay_duration_h = 1.0` u, `category = "OTHER"`) naast de overnachtingssteigers staan geregistreerd, beschikt een cluster over een autoafzetplaats wanneer:
@@ -307,7 +308,7 @@ D_dag = v_gem * T_dag = 12 * 14 = 168,0 km/etmaal
 
 ---
 
-### 3.2 `berth_clusters.geojson`
+### 3.2 `berth_clusters.geoparquet`
 Dit bestand bevat de geclusterde overnachtingslocaties (overnachtingsligplaatsen op dezelfde `route_id` binnen `Delta km <= 0,5 km`):
 
 | Veldnaam | Type | Eenheid | Formule / Toelichting |
@@ -362,7 +363,7 @@ Elk record in dit bestand vertegenwoordigt een **routetussenstuk (edge)** op de 
 
 ---
 
-### 3.4 `route_berth_capacity.geoparquet` (`.csv`, `.geojson`)
+### 3.4 `route_berth_capacity.geoparquet`
 Elk record in dit bestand vertegenwoordigt één **volledige FIS-vaarwegroute** (`route_id`) met zowel de **lokale ligplaatscapaciteit** (ligplaatsen met exact dezelfde `route_id`), de **ruimtelijke dekkingsgraad**, als de **corridorcapaciteit (≤ 15 km)** (alle ligplaatsen die over de vaarweggraaf binnen `<= 15 km` resp. `<= 30 km` vanaf de route bereikbaar zijn).
 
 * `route_berth_capacity.geoparquet` bevat de **HVWN-routes** (`is_hvwn == True`).
@@ -434,7 +435,7 @@ Elk record in dit bestand vertegenwoordigt één **volledige FIS-vaarwegroute** 
 
 ## 4. Oplevering aan stap 2 en 3 (interface)
 
-Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot het **Hoofdvaarwegennet**: de 49 routes met `network_type` Hoofdtransportas of Hoofdvaarweg (`is_hvwn`). `route_berth_capacity_all.geoparquet` (alle routes) is hiervoor niet nodig.
+Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot het **Hoofdvaarwegennet**: de 49 routes met `network_type` Hoofdtransportas of Hoofdvaarweg (`is_hvwn`).
 
 | Aspect | Afspraak |
 | :--- | :--- |
@@ -443,7 +444,8 @@ Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot 
 | Lengte | `total_length_km` (km): de lengte `L` in de formule voor `P_stop`. |
 | Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen. |
 | Percentage dat overnacht | `expected_overnight_stops` = `P_stop,gecorrigeerd` (inclusief `f_overnacht` = 0,82, 12 km/u, 14 u). Stap 3 gebruikt deze kolom en de kolommen `f_overnacht`, `sailing_speed_kmh`, `sailing_hours_per_day`, zodat vraag en aanbod met dezelfde parameters zijn berekend: `Id = passages_eq_day_p95 * expected_overnight_stops`. |
-| Formaat | Ruimtelijk bestand: `route_berth_capacity.geoparquet` is de interface (de `.csv` bevat geen geometrie en is geen invoer voor de volgende stappen). |
+| Ruwe routebestanden | `route.geoparquet` en `routejunction.geoparquet` worden ongewijzigd meegeleverd (stap 2 gebruikt ze voor de kilometrering). Ze bevatten alle FIS-routes; stap 2 beperkt zich tot de `route_id`'s in `route_berth_capacity.geoparquet`. De sleutel in de ruwe bestanden is `Id` (route) resp. `RouteId` (routejunction), gelijk aan `route_id` (als string). |
+| Formaat | Ruimtelijk bestand: `route_berth_capacity.geoparquet` is de interface (alle uitvoer is GeoParquet; er zijn geen CSV- of GeoJSON-bestanden). |
 | Koppelen | Primair op `route_id`, terugval ruimtelijk op de routegeometrie. Daarom blijven zowel `route_id` als de geometrie in alle uitvoerbestanden van de stappen behouden en ongewijzigd (niet vereenvoudigd). |
 | Geometrie | Eén `LineString` per route in **EPSG:4326**. BIVAS en de rest van het project werken in EPSG:28992 (`PROJECTED_CRS`): stap 2 moet herprojecteren voor ruimtelijke koppeling. |
 | HVWN-routes zonder BIVAS-data | Blijven in stap 3 staan met onbekende intensiteit (niet nul). |

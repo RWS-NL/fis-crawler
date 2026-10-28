@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 import click
@@ -69,6 +70,7 @@ ANCHORAGE_SWING_DIAMETER_M = (
     300.0  # Min swinging corridor diameter (m) for open-water anchorages (PIANC WG 121)
 )
 
+RAW_DELIVERY_FILES = ("route.geoparquet", "routejunction.geoparquet")
 HVWN_TYPES = ("Hoofdtransportas", "Hoofdvaarweg")
 NETWORK_CATEGORIES = {
     "Hoofdtransportas": "Hoofdtransportassen (HTA)",
@@ -963,7 +965,7 @@ def main(export_dir: Path, output_dir: Path) -> None:
 
     gdf_clusters = cluster_berths_and_check_facilities(classified_berths, cardropoffs)
     if not gdf_clusters.empty:
-        gdf_clusters.to_file(output_dir / "berth_clusters.geojson", driver="GeoJSON")
+        gdf_clusters.to_parquet(output_dir / "berth_clusters.geoparquet")
 
     G, route_segments = build_route_network_graph(
         routes, rjs, classified_berths, type_map, expected_parallel_edges=1
@@ -976,18 +978,13 @@ def main(export_dir: Path, output_dir: Path) -> None:
     logger.info("Exporting route compliance and carrying capacity outputs...")
     gdf_hvwn = gdf_routes[gdf_routes["is_hvwn"]].copy()
     gdf_hvwn.to_parquet(output_dir / "route_berth_capacity.geoparquet")
-    gdf_hvwn.drop(columns=["geometry"], errors="ignore").to_csv(
-        output_dir / "route_berth_capacity.csv", index=False
-    )
-    gdf_hvwn.to_file(output_dir / "route_berth_capacity.geojson", driver="GeoJSON")
-    gdf_routes.to_parquet(output_dir / "route_berth_capacity_all.geoparquet")
+
+    # Raw FIS route files, delivered unchanged as input for the intensity step.
+    for name in RAW_DELIVERY_FILES:
+        shutil.copy2(export_dir / name, output_dir / name)
 
     gdf_segments_hvwn = gdf_segments[gdf_segments["is_hvwn"]].copy()
     gdf_segments_hvwn.to_parquet(output_dir / "route_segments_compliance.geoparquet")
-    gdf_segments_hvwn.to_file(
-        output_dir / "route_segments_compliance.geojson", driver="GeoJSON"
-    )
-    gdf_segments.to_parquet(output_dir / "route_segments_compliance_all.geoparquet")
 
     generate_markdown_summary(
         gdf_segments,
