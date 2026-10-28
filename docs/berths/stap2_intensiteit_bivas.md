@@ -68,7 +68,7 @@ Uitsplitsing: per scenario, per richting (`total`, `up`, `down`) en per scheepsk
 | Bestand | Niveau / rijen | Kolommen |
 |---|---|---|
 | `route_intensity.geoparquet` | route x scenario x richting x scheepsklasse | `route_id`, `route_code`, `route_length_km`, `scenario_id`, `year`, `direction`, `ship_class`, alle grootheden uit § 3, `geometry` |
-| `route_intensity_daily.parquet` | route x scenario x datum x richting x scheepsklasse, alle dagen van het jaar incl. dagen met 0 (tabel zonder geometrie) | `route_id`, `scenario_id`, `date`, `direction`, `ship_class`, `trips`, `trips_length_km`, `passages_eq`, `ship_length_km` |
+| `route_intensity_daily.geoparquet` | route x scenario x datum x richting x scheepsklasse, alle dagen van het jaar incl. dagen met 0 | `route_id`, `scenario_id`, `date`, `direction`, `ship_class`, `trips`, `trips_length_km`, `passages_eq`, `ship_length_km`, `geometry` |
 | `arc_route_mapping.geoparquet` | BIVAS-arc | `arc_id`, `route_id` (leeg als niet gekoppeld), `trajectcode`, `match_method` (`code_km`, `spatial`, `none`), `km_overlap`, `length_m`, `geometry` |
 | `route_coverage.geoparquet` | route | `route_id`, `n_arcs`, `bivas_length_km`, `route_length_km`, `length_ratio`, aandeel per `match_method`, `geometry` |
 
