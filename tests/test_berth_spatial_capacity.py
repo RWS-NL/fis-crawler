@@ -331,6 +331,7 @@ def test_width_fallback_rows_and_spatial_cardropoff_clustering():
                 "signalling": None,
                 "length": 700.0,
                 "width": 36.0,
+                "shoreline_category": "PIER",
                 "number_of_rows": None,
                 "maximal_ship_length": 135.0,
                 "geometry": Point(5.5500, 51.8900),
@@ -357,7 +358,7 @@ def test_width_fallback_rows_and_spatial_cardropoff_clustering():
         columns=["id", "berth_id", "name", "geometry"], crs="EPSG:4326"
     )
     df = classify_and_calculate_capacity(berths, cardropoffs)
-    # b1 has width=36.0 and number_of_rows=None -> floor(36.0 / 11.4) = 3 rows
+    # b1 is a pier (steiger) with width=36.0 and number_of_rows=None -> floor(36.0 / 11.4) = 3 rows
     assert df.loc[df["id"] == "b1", "effective_rows"].iloc[0] == 3.0
     assert df.loc[df["id"] == "b1", "effective_length_m"].iloc[0] == 2100.0
     # 700m @ 110m -> floor(710/120) = 5 per row * 3 rows = 15 ships (>= 15 threshold)
@@ -422,6 +423,22 @@ def test_anchorage_swing_diameter_and_max_quay_rows():
                 "maximal_ship_length": None,
                 "geometry": Point(4.5, 51.8),
             },
+            {
+                "id": "pier_wide",
+                "route_id": "100",
+                "route_km": 2.5,
+                "name": "Brede steiger havenbekken",
+                "facility": ["OVERNIGHT_ACCOMODATION"],
+                "category": "ALL_VESSELS",
+                "maximum_stay_duration_h": 72.0,
+                "signalling": None,
+                "length": 300.0,
+                "width": 80.0,
+                "shoreline_category": "PIER",
+                "number_of_rows": None,
+                "maximal_ship_length": None,
+                "geometry": Point(4.55, 51.85),
+            },
         ],
         crs="EPSG:4326",
     )
@@ -442,9 +459,12 @@ def test_anchorage_swing_diameter_and_max_quay_rows():
     # floor((400 + 10) / 120) = 3 ships (matches empirical 4-month AIS timex!)
     assert df.loc[df["id"] == "anc2", "capacity_ships_110m"].iloc[0] == 3.0
 
-    # quay_wide: 80m wide quay -> width / 11.4 = 7 rows, capped at MAX_QUAY_ROWS = 3.0
-    assert df.loc[df["id"] == "quay_wide", "effective_rows"].iloc[0] == 3.0
-    assert df.loc[df["id"] == "quay_wide", "effective_length_m"].iloc[0] == 900.0
+    # quay_wide: 80m wide quay -> width / 11.4 = 7 rows, capped at MAX_QUAY_ROWS = 2.0
+    assert df.loc[df["id"] == "quay_wide", "effective_rows"].iloc[0] == 2.0
+    assert df.loc[df["id"] == "quay_wide", "effective_length_m"].iloc[0] == 600.0
+    # pier_wide: same dimensions at a pier (steiger) -> capped at MAX_PIER_ROWS = 3.0
+    assert df.loc[df["id"] == "pier_wide", "effective_rows"].iloc[0] == 3.0
+    assert df.loc[df["id"] == "pier_wide", "effective_length_m"].iloc[0] == 900.0
 
 
 def test_recreation_and_yacht_lock_exclusion():

@@ -67,7 +67,9 @@ CAR_DROPOFF_SEARCH_RADIUS_M = (
 SHIP_WIDTH_M = (
     11.4  # Standard CEMT Va/Vb reference ship width (m) for width-to-rows fallback
 )
-MAX_QUAY_ROWS = 3.0  # Max abreast rows; RVW 2020 § 6.4.2 p. 147: quay 2, jetty 3 (3 applied to both)
+# RVW 2020 § 6.4.2 p. 147: along a bank or quay at most two abreast, at jetties at most three
+MAX_QUAY_ROWS = 2.0
+MAX_PIER_ROWS = 3.0  # berths with shoreline_category == "PIER" (steiger)
 ANCHORAGE_SWING_DIAMETER_M = (
     300.0  # Min swinging corridor diameter (m) for open-water anchorages (PIANC WG 121)
 )
@@ -321,10 +323,22 @@ def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         | (category_upper == "ANCHORAGE")
     )
 
-    # For standard quays/jetties: derive rows from width, capped at MAX_QUAY_ROWS (RVW § 6.4.2, p. 147)
-    quay_width_rows = np.clip(np.floor(width / SHIP_WIDTH_M), 1.0, MAX_QUAY_ROWS).where(
-        width > 0, 1.0
+    # Quays/jetties: derive rows from width, capped at two abreast along a quay and three
+    # at a jetty (RVW 2020 § 6.4.2, p. 147). Berths without a known shoreline type
+    # (FIS ShorelineCategory is mostly empty) are treated as quay.
+    shoreline_upper = (
+        df.get("shoreline_category", pd.Series("", index=df.index))
+        .fillna("")
+        .astype(str)
+        .str.upper()
     )
+    max_rows = pd.Series(
+        np.where(shoreline_upper == "PIER", MAX_PIER_ROWS, MAX_QUAY_ROWS),
+        index=df.index,
+    )
+    quay_width_rows = np.minimum(
+        np.maximum(1.0, np.floor(width / SHIP_WIDTH_M)), max_rows
+    ).where(width > 0, 1.0)
 
     # For open-water anchorages: vessels swing freely on bow anchors and do not moor abreast.
     # Rows represent independent swinging corridors along the fairway corridor (~300 m per file),

@@ -5,7 +5,7 @@ De toetsing van het ligplaatsaanbod aan de verkeersintensiteit bestaat uit drie 
 | Stap | Document | Doet | Uitvoer |
 |---|---|---|---|
 | 1. Capaciteit | [stap1_capaciteit.md](stap1_capaciteit.md) | Ligplaatsaanbod per route berekenen uit FIS | `output/berth-analysis/route_berth_capacity.geoparquet` |
-| 2. Intensiteit | [stap2_intensiteit_bivas.md](stap2_intensiteit_bivas.md) | BIVAS-verkeer op dezelfde routes projecteren (zelfstandig uit te voeren) | `output/bivas-intensity/*.geoparquet` |
+| 2. Intensiteit | [stap2_intensiteit_bivas.md](stap2_intensiteit_bivas.md) | BIVAS-database projecteren op het FIS-routenetwerk (onafhankelijk van stap 1) | `output/bivas-intensity/*.geoparquet` |
 | 3. Toetsing | [stap3_toetsing.md](stap3_toetsing.md) | Stap 1 en 2 koppelen en vraag tegen aanbod leggen | `output/berth-assessment/*.geoparquet` |
 
 **Opgeleverde map** `output/berth-analysis/` (uitvoer van stap 1, wordt als geheel overgedragen):

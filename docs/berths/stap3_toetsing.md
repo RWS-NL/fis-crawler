@@ -7,13 +7,14 @@ Voegt de uitvoer van stap 1 ([stap1_capaciteit.md](stap1_capaciteit.md)) en stap
 | Bron | Bestand | Gebruikt |
 |---|---|---|
 | Stap 1 | `output/berth-analysis/route_berth_capacity.geoparquet` | `route_id`, `total_length_km`, `expected_overnight_stops`, `f_overnacht`, `sailing_speed_kmh`, `sailing_hours_per_day`, `overnight_*` en `corridor_overnight_*` (kadelengte, `*_capacity_ships_{85m,110m,135m}`), kegel-equivalenten, `geometry` |
-| Stap 2 | `output/bivas-intensity/route_intensity.geoparquet` | `route_id`, `scenario_id`, `direction`, `ship_class`, `passages_eq_day_p95`, `mean_ship_length_m`, `geometry` |
+| Stap 2 | `output/bivas-intensity/route_intensity.geoparquet` | `route_id`, `scenario_id`, `direction`, `ship_class`, `route_length_km`, `passages_eq_day_p95`, `mean_ship_length_m`, `passages_eq_yr`, `ship_length_km_yr`, `trips_yr`, `trips_length_km_yr`, `geometry` |
 
 ## 2. Koppelen van stap 1 en 2
 
 1. **Primair op id:** join op `route_id` (string, exact).
 2. **Terugval ruimtelijk** (routes waar de id niet matcht, bijvoorbeeld na een nieuwe FIS-export met andere ids): herproject beide bestanden naar EPSG:28992 (`PROJECTED_CRS`) en koppel de routegeometrieen met een buffer van 50 m (zoals `scripts/bivas/compare_networks.py`); wijs toe aan de route met de grootste overlappende lengte. Beoordeel afwijkende lengteverhoudingen handmatig.
-3. Leg per route vast hoe gekoppeld is (`join_method`: `id` of `spatial`) en rapporteer routes zonder koppeling apart. Routes zonder BIVAS-data (nu 13 van de 49) krijgen "onbekend", niet nul.
+3. **Controle:** vergelijk `route_length_km` (stap 2, uit de routegeometrie) met `total_length_km` (stap 1, som van de routesegmenten); beoordeel afwijkende verhoudingen handmatig. Stap 3 beperkt zich tot de routes in `route_berth_capacity.geoparquet` (49 routes op het Hoofdvaarwegennet); stap 2 bevat alle routes met BIVAS-arcs.
+4. Leg per route vast hoe gekoppeld is (`join_method`: `id` of `spatial`) en rapporteer routes zonder koppeling apart. Routes zonder BIVAS-data (nu 13 van de 49) krijgen "onbekend", niet nul.
 
 ## 3. Norm en formule
 
@@ -40,7 +41,7 @@ Meters oeverlengte:   LO = Id * (LP + s)           (RVW p. 146: LO = NB * (LP + 
 
 | Parameter | Waarde | Bron | Uit stap |
 |---|---|---|---|
-| `I` (RVW: "aantal schepen") | `passages_eq_day_p95` | RVW 2020 § 6.4.2, p. 146 | 2 |
+| `I` (RVW: "aantal schepen") | `passages_eq_day_p95` voor richting `total` en scheepsklasse `all`: het 95e percentiel van de dagelijkse afstandsgewogen passages (zie stap 2, § 3); niet verder omrekenen | RVW 2020 § 6.4.2, p. 145-146 | 2 |
 | `LP` | `mean_ship_length_m` | - | 2 |
 | `L` | `total_length_km` | FIS | 1 |
 | `P_stop,gecorrigeerd` | `expected_overnight_stops` | RVW 2020 § 6.4.2, p. 146, met `f_overnacht` | 1 |
@@ -49,6 +50,8 @@ Meters oeverlengte:   LO = Id * (LP + s)           (RVW p. 146: LO = NB * (LP + 
 | `f_overnacht` = `1 - c` | c = aandeel scheepvaart tussen 23.00 en 06.00 uur: 0,18 Waal 2012, dus 0,82; Duitsland c = 0,20; tankers klasse IV-VI 0,25 | Lobith 2013, p. 10 en 15; Corporate uitvoeringskader p. 19-20 | 1 (`f_overnacht` = 0,82) |
 | `s` | 5 m (klasse I-IV), 10 m (V en hoger) | RVW 2020 § 6.4.2, p. 146 | parameter |
 | `C_gebied` | `corridor_overnight_capacity_ships_{85m,110m,135m}` (schepen) of `corridor_overnight_berth_length_m` (m) | stap 1 | 1 |
+
+**Jaarvergelijking als controle:** de kolom `corridor_max_overnight_traffic_volume_km_yr` (stap 1, km schip per jaar) is het jaarequivalent van de capaciteit en is te vergelijken met `ship_length_km_yr` uit stap 2 (afstandsgewogen trips x scheepslengte, dezelfde eenheid). Dit gebruikt het jaargemiddelde in plaats van het 95e percentiel en is daarom een indicatie, geen RVW-toets.
 
 Het nachtaandeel (continuvaart) kan niet uit BIVAS komen (reizen hebben een vertrektijd, geen tijdstip per arc): bepaal het uit IVS-passages of gebruik de tabelwaarden.
 

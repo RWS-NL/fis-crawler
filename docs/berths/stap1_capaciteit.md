@@ -87,11 +87,12 @@ In FIS is `number_of_rows` slechts bij ~4% van de overnachtingsligplaatsen expli
 
 Het aantal effectieve rijen wordt gedifferentieerd naar type ligplaats:
 
-1. **Standaard kades en afmeersteigers**: Wanneer `number_of_rows` ontbreekt (`NaN`) of `<= 0` is, wordt het aantal breedterijen afgeleid uit `width` op basis van de standaard CEMT Va/Vb scheepsbreedte `B_schip = 11,40 m`, begrensd op maximaal 3 rijen. **Afwijking van de RVW:** RVW 2020 § 6.4.2 (p. 147) noemt voor een oever of kade ten hoogste twee breed en voor een steiger hooguit drie breed; het model past 3 toe op zowel kades als steigers, omdat FIS ze niet onderscheidt. Voor kades kan het aantal rijen daardoor te hoog uitvallen (open punt):
+1. **Kades en steigers**: Wanneer `number_of_rows` ontbreekt (`NaN`) of `<= 0` is, wordt het aantal breedterijen afgeleid uit `width` op basis van de standaard CEMT Va/Vb scheepsbreedte `B_schip = 11,40 m`. Conform **RVW 2020 § 6.4.2** (p. 147) liggen schepen langs een oever of kade ten hoogste twee breed en bij een steiger hooguit drie breed. Een steiger is een ligplaats met `shoreline_category == "PIER"` (FIS `ShorelineCategory`, bij 298 ligplaatsen ingevuld); alle overige ligplaatsen, ook die zonder bekend type, worden als kade behandeld. Expliciet geregistreerde waarden van `number_of_rows` blijven ongewijzigd:
    ```text
-   N_rijen_kade = number_of_rows                                als number_of_rows > 0
-                = min(3, max(1, floor(width / 11,40)))          als number_of_rows ontbreekt en width > 0
-                = 1                                             anders
+   N_rijen_kade = number_of_rows                                         als number_of_rows > 0
+                = min(R_max, max(1, floor(width / 11,40)))               als number_of_rows ontbreekt en width > 0
+                = 1                                                      anders
+   R_max        = 3 voor een steiger (shoreline_category = PIER), anders 2
    ```
 
 2. **Open-water ankerplaatsen en reeden** (`name` bevat `"anker"` of `"reede"`, of `category == "ANCHORAGE"`):
@@ -240,7 +241,7 @@ D_dag = v_gem * T_dag = 12 * 14 = 168,0 km/etmaal
 | `is_overnight` | `bool` | - | Eindclassificatie overnachtingsligplaats: `ov_by_facility \| ov_by_stay \| ov_by_category \| ov_by_long_quay`. |
 | `kegel_count` | `int64` | kegels | Aantal toegestane ADN-kegels (`0`, `1` of `2`) afgeleid uit `signalling` en `name`. |
 | `is_kegel` | `bool` | - | Eindclassificatie kegelligplaats: `kegel_count > 0`. |
-| `effective_rows` | `float64` | rijen | Effectief aantal scheepsrijen naast elkaar: `number_of_rows` indien `> 0`. Voor ankerplaatsen/reeden: afgeleid uit zwaaidiameter `max(1, floor(width / 300.0))` (= 1,0 file). Voor kades/steigers: afgeleid uit `min(3, max(1, floor(width / 11.4)))` (RVW § 6.4.2, p. 147; model past 3 breed toe op kades en steigers), anders `1.0`. |
+| `effective_rows` | `float64` | rijen | Effectief aantal scheepsrijen naast elkaar: `number_of_rows` indien `> 0`. Voor ankerplaatsen/reeden: afgeleid uit zwaaidiameter `max(1, floor(width / 300.0))` (= 1,0 file). Voor kades/steigers: afgeleid uit `min(R_max, max(1, floor(width / 11.4)))` met `R_max` = 3 voor een steiger (`PIER`) en 2 voor een kade (RVW § 6.4.2, p. 147), anders `1.0`. |
 | `effective_length_m` | `float64` | m | Totale effectieve afmeerlengte: `length * effective_rows`. |
 | `capacity_ships_85m` | `float64` | schepen | Aantal schepen van **85 m (CEMT IV)** dat gelijktijdig kan afmeren: `floor((length + 5) / 90) * effective_rows` (indien toegestaan door `maximal_ship_length`). |
 | `capacity_ships_110m` | `float64` | schepen | Aantal schepen van **110 m (CEMT Va)** dat gelijktijdig kan afmeren: `floor((length + 10) / 120) * effective_rows` (indien toegestaan door `maximal_ship_length`). |
@@ -436,19 +437,19 @@ Elk record in dit bestand vertegenwoordigt één **volledige FIS-vaarwegroute** 
 
 ## 4. Oplevering aan stap 2 en 3 (interface)
 
-Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot het **Hoofdvaarwegennet**: de 49 routes met `network_type` Hoofdtransportas of Hoofdvaarweg (`is_hvwn`).
+Stap 3 koppelt de intensiteit uit stap 2 aan `route_berth_capacity.geoparquet` en beperkt zich tot het **Hoofdvaarwegennet**: de 49 routes met `network_type` Hoofdtransportas of Hoofdvaarweg (`is_hvwn`). Stap 2 is onafhankelijk van dit bestand: die projecteert BIVAS op het FIS-routenetwerk (ruwe bestanden `route` en `routejunction`).
 
 | Aspect | Afspraak |
 | :--- | :--- |
 | Sleutel | `route_id` (string, uniek). Gebruik niet `route_code`: die is niet in alle FIS-routes uniek. |
 | Niveau | Eén rij per FIS-vaarwegroute. Aanbod is lokaal (`overnight_*`, `kegel_*`) en per corridor ≤ 15 km resp. ≤ 30 km (`corridor_overnight_*`, `corridor_kegel_*`). |
 | Lengte | `total_length_km` (km): de lengte `L` in de formule voor `P_stop`. |
-| Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen. |
+| Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen; de koppeling van secties aan dit bestand gebeurt in stap 3. |
 | Percentage dat overnacht | `expected_overnight_stops` = `P_stop,gecorrigeerd` (inclusief `f_overnacht` = 0,82, 12 km/u, 14 u). Stap 3 gebruikt deze kolom en de kolommen `f_overnacht`, `sailing_speed_kmh`, `sailing_hours_per_day`, zodat vraag en aanbod met dezelfde parameters zijn berekend: `Id = passages_eq_day_p95 * expected_overnight_stops`. |
-| Ruwe bestanden | De map `output/berth-analysis/raw/` bevat `route`, `routejunction`, `berth`, `cardropoff`, `fairwayclassification` (bepaalt het netwerktype: Hoofdtransportas, Hoofdvaarweg, ...) ongewijzigd uit de FIS-export. `schema.toml` is de kolomnaamtoewijzing (FIS-naam naar snake_case, `[identifiers]` die naar tekst worden omgezet) die stap 1 op deze bestanden toepast; met dat bestand zijn de kolomnamen in de uitvoer terug te voeren op de FIS-kolommen. De bestanden bevatten alle FIS-routes; stap 2 beperkt zich tot de `route_id`'s in `route_berth_capacity.geoparquet`. De sleutel is `Id` (route) resp. `RouteId` (alle overige bestanden), gelijk aan `route_id` (als string). |
+| Ruwe bestanden | De map `output/berth-analysis/raw/` bevat `route`, `routejunction`, `berth`, `cardropoff`, `fairwayclassification` (bepaalt het netwerktype: Hoofdtransportas, Hoofdvaarweg, ...) ongewijzigd uit de FIS-export. `route` en `routejunction` zijn ook de invoer voor stap 2 (die ze ook uit `output/fis-export/` kan halen). `schema.toml` is de kolomnaamtoewijzing (FIS-naam naar snake_case) die stap 1 op deze bestanden toepast. De bestanden bevatten alle FIS-routes; de toetsing beperkt zich tot de `route_id`'s in `route_berth_capacity.geoparquet`. De sleutel is `Id` (route) resp. `RouteId` (overige bestanden), gelijk aan `route_id` (als string). |
 | Formaat | Ruimtelijk bestand: `route_berth_capacity.geoparquet` is de interface (alle uitvoer is GeoParquet; er zijn geen CSV- of GeoJSON-bestanden). |
-| Koppelen | Primair op `route_id`, terugval ruimtelijk op de routegeometrie. Daarom blijven zowel `route_id` als de geometrie in alle uitvoerbestanden van de stappen behouden en ongewijzigd (niet vereenvoudigd). |
-| Geometrie | Eén `LineString` per route in **EPSG:4326**. BIVAS en de rest van het project werken in EPSG:28992 (`PROJECTED_CRS`): stap 2 moet herprojecteren voor ruimtelijke koppeling. |
+| Koppelen | Primair op `route_id`, terugval ruimtelijk op de geometrie. Daarom blijven ids en geometrie in alle uitvoerbestanden van de stappen behouden en ongewijzigd (niet vereenvoudigd). |
+| Geometrie | Eén `LineString` per route in **EPSG:4326**. BIVAS en de rest van het project werken in EPSG:28992 (`PROJECTED_CRS`): herproject voor ruimtelijke koppeling. |
 | HVWN-routes zonder BIVAS-data | Blijven in stap 3 staan met onbekende intensiteit (niet nul). |
 
-De uitvoer van stap 2 (`output/bivas-intensity/`) gebruikt dezelfde `route_id`, `route_code`, `total_length_km` en dezelfde routeselectie (`is_hvwn`), zodat stap 3 een directe join op `route_id` kan doen.
+De uitvoer van stap 2 (`output/bivas-intensity/`) gebruikt dezelfde `route_id` (= `Id` in het ruwe routebestand), waarmee stap 3 de intensiteit op `route_id` aan dit bestand koppelt.
