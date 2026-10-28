@@ -212,9 +212,9 @@ D_dag = v_gem * T_dag = 12 * 14 = 168,0 km/etmaal
    Waaruit analoog aan de lokale capaciteit worden berekend:
 
    * `corridor_overnight_berths` `= |B_corridor(r, 15 km)|`
-   * `corridor_overnight_berth_length_m` `= sum_{b in B_corridor} L_eff(b)`
-   * `corridor_overnight_capacity_ships_{85m,110m,135m}` `= sum_{b in B_corridor} C_b(L_schip)`
-   * `corridor_max_overnight_traffic_volume_km_yr` `= dfrac{(corridor_overnight_berth_length_m / 1000) * 365}{P_stop}`
+   * `corridor_overnight_berth_length_m` `= sum[b in B_corridor] L_eff(b)`
+   * `corridor_overnight_capacity_ships_{85m,110m,135m}` `= sum[b in B_corridor] C_b(L_schip)`
+   * `corridor_max_overnight_traffic_volume_km_yr` `= (corridor_overnight_berth_length_m / 1000) * 365 / P_stop`
 
 ---
 
