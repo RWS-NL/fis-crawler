@@ -6,13 +6,13 @@ De toetsing van ligplaatsen aan de verkeersintensiteit bestaat uit drie onafhank
 
 | Stap | Doet | Invoer | Uitvoer |
 |---|---|---|---|
-| 1. Capaciteit | Ligplaatsaanbod per route berekenen | FIS-export (`berth`, `route`, …) | `output/berth-analysis/route_berth_capacity.*` (bestaat) |
+| 1. Capaciteit | Ligplaatsaanbod per route berekenen | FIS-export (`berth`, `route`, …) | `output/berth-analysis/route_berth_capacity.geoparquet` (ruimtelijk, bestaat) |
 | 2. Intensiteit | BIVAS-verkeer op dezelfde routes projecteren | BIVAS-database en -rekenresultaat, FIS-routes | `output/bivas-intensity/*` (hieronder gespecificeerd) |
 | 3. Toetsing | Vraag (RVW-formule) tegen aanbod leggen | uitvoer stap 1 en 2 | eigen rapport |
 
 ## Stap 1: capaciteit (bestaand)
 
-Methodiek: [berth_spatial_capacity.md](berth_spatial_capacity.md). Eén rij per route, de 49 HVWN-routes in `route_berth_capacity.*`. Het bestand `route_berth_capacity_all.geoparquet` (alle routes) valt buiten deze toetsing.
+Methodiek: [berth_spatial_capacity.md](berth_spatial_capacity.md). Eén rij per route, de 49 HVWN-routes in `route_berth_capacity.geoparquet`. De uitvoer van stap 1 is een **ruimtelijk bestand** (GeoParquet, route-`LineString` in EPSG:4326); alleen dat bestand is de koppeling met stap 2 en 3. Een CSV (zonder geometrie) is geen invoer. Het bestand `route_berth_capacity_all.geoparquet` (alle routes) valt buiten deze toetsing.
 
 | Grootheid | Kolom | Eenheid | Niveau |
 |---|---|---|---|
@@ -58,10 +58,12 @@ Een reis die een route (deels) bevaart levert een **bijdrage** `f = bevaren afst
 
 | Bestand | Niveau / rijen | Kolommen |
 |---|---|---|
-| `route_intensity.parquet` (+ `.csv`) | route × scenario × richting × scheepsklasse | `route_id`, `route_code`, `scenario_id`, `year`, `direction` (`total`, `up`, `down`), `ship_class` (`all`, `85m`, `110m`, `135m`), alle grootheden uit de tabel hierboven |
+| `route_intensity.geoparquet` | route × scenario × richting × scheepsklasse | `route_id`, `route_code`, `scenario_id`, `year`, `direction` (`total`, `up`, `down`), `ship_class` (`all`, `85m`, `110m`, `135m`), alle grootheden uit de tabel hierboven |
 | `route_intensity_daily.parquet` | route × scenario × datum | `route_id`, `scenario_id`, `date`, `passages_eq`, `trips` (voor controle van het 95e percentiel) |
-| `arc_route_mapping.parquet` | BIVAS-arc | `arc_id`, `route_id` (leeg als niet gekoppeld), `trajectcode`, `match_method` (`code_km`, `spatial`, `none`), `km_overlap`, `length_m` |
-| `route_coverage.csv` | route | `route_id`, `n_arcs`, `bivas_length_km`, `fis_length_km`, `length_ratio`, aandeel per `match_method` |
+| `arc_route_mapping.geoparquet` | BIVAS-arc | `arc_id`, `route_id` (leeg als niet gekoppeld), `trajectcode`, `match_method` (`code_km`, `spatial`, `none`), `km_overlap`, `length_m` |
+| `route_coverage.geoparquet` | route | `route_id`, `n_arcs`, `bivas_length_km`, `fis_length_km`, `length_ratio`, aandeel per `match_method` |
+
+Alle bestanden met een rij per route of arc zijn ruimtelijk (GeoParquet met de routegeometrie uit stap 1, EPSG:4326; `arc_route_mapping` met de arcgeometrie). Alleen `route_intensity_daily.parquet` is een tabel zonder geometrie (tijdreeks, koppeling via `route_id`).
 
 Scheepsklassen: schepen worden ingedeeld bij de dichtstbijzijnde van 85, 110 en 135 m (grenzen 97,5 en 122,5 m), gelijk aan de scenario's in stap 1; `all` bevat alle schepen. De sleutels `route_id` en de routes (inclusief `is_hvwn`) zijn identiek aan stap 1, zodat stap 3 een directe join op `route_id` kan doen.
 
