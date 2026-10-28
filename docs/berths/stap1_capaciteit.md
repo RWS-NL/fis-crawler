@@ -3,7 +3,7 @@
 Dit document beschrijft de rekenmethodiek, de gebruikte formules (conform **Richtlijnen Vaarwegen 2020**, § 6.3–6.6) en het volledige gegevensschema (alle velden) van de uitvoerbestanden die worden gegenereerd door [`analyze_spatial_capacity.py`](../scripts/berth_analysis/analyze_spatial_capacity.py) en [`route_network_graph.py`](../scripts/berth_analysis/route_network_graph.py).
 
 
-> **Stap 1 van 3.** Dit document beschrijft de eerste stap van de toetsing van ligplaatsen aan verkeersintensiteit: de **capaciteitsberekening** (aanbod per route). Stap 2 (intensiteit uit BIVAS op dezelfde routes) en stap 3 (toetsing aan RVW 2020 § 6.4.2) staan in [bivas_intensiteit_projectie.md](bivas_intensiteit_projectie.md). De koppeling tussen de stappen loopt uitsluitend via de bestanden `route_berth_capacity*` en de sleutel `route_id`, zie [§ 4](#4-koppeling-met-stap-2-en-3-interface).
+> **Stap 1 van 3** (overzicht: [README.md](README.md)). Dit document beschrijft de **capaciteitsberekening** (aanbod per route) en is klaar om aan stap 2 ([stap2_intensiteit_bivas.md](stap2_intensiteit_bivas.md)) en stap 3 ([stap3_toetsing.md](stap3_toetsing.md)) over te dragen. De koppeling loopt uitsluitend via `route_berth_capacity.geoparquet` en de sleutel `route_id`, zie [§ 4](#4-oplevering-aan-stap-2-en-3-interface).
 
 ---
 
@@ -85,7 +85,7 @@ In FIS is `number_of_rows` slechts bij ~4% van de overnachtingsligplaatsen expli
 
 Het aantal effectieve rijen wordt gedifferentieerd naar type ligplaats:
 
-1. **Standaard kades en afmeersteigers**: Wanneer `number_of_rows` ontbreekt (`NaN`) of `<= 0` is, wordt het aantal breedterijen afgeleid uit `width` op basis van de standaard CEMT Va/Vb scheepsbreedte `B_schip = 11,40 m`, begrensd op maximaal 3 rijen conform **RVW 2020 § 6.4.2** en **BPR art. 7.05** (enkel, dubbel of 3-dik afmeren):
+1. **Standaard kades en afmeersteigers**: Wanneer `number_of_rows` ontbreekt (`NaN`) of `<= 0` is, wordt het aantal breedterijen afgeleid uit `width` op basis van de standaard CEMT Va/Vb scheepsbreedte `B_schip = 11,40 m`, begrensd op maximaal 3 rijen. **Afwijking van de RVW:** RVW 2020 § 6.4.2 (p. 147) noemt voor een oever of kade ten hoogste twee breed en voor een steiger hooguit drie breed; het model past 3 toe op zowel kades als steigers, omdat FIS ze niet onderscheidt. Voor kades kan het aantal rijen daardoor te hoog uitvallen (open punt):
    ```text
    N_rijen_kade = number_of_rows                                als number_of_rows > 0
                 = min(3, max(1, floor(width / 11,40)))          als number_of_rows ontbreekt en width > 0
@@ -106,13 +106,15 @@ L_eff = L * N_rijen   [m]
 ```
 
 #### Discrete scheepscapaciteit per scheepslengtescenario (85 m, 110 m, 135 m)
-Conform **RVW 2020 § 6.4.2** (p. 146, onderlinge lengte-afstand `s = 10,0 m` tussen afgemeerde schepen) passen op een kade van lengte `L` per rij `floor( (L + s) / (L_schip + s) )` schepen achter elkaar, mits de ligplaats het betreffende schip toestaat (`maximal_ship_length` is `NaN` of `>= L_schip`):
+Conform **RVW 2020 § 6.4.2** (p. 146, onderlinge afstand `s` tussen afgemeerde schepen) passen op een kade van lengte `L` per rij `floor( (L + s) / (L_schip + s) )` schepen achter elkaar, mits de ligplaats het betreffende schip toestaat (`maximal_ship_length` is `NaN` of `>= L_schip`):
 
 | Scenario | CEMT-klasse | Maatgevend schip | Scheepslengte `L_schip` | Tussenruimte `s` | Formule per rij |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`capacity_ships_85m`** | Klasse IV | Johann Welker | 85,0 m | 10,0 m | `floor( (L + 10) / 95 )` |
 | **`capacity_ships_110m`** | Klasse Va | Groot Rijnschip | 110,0 m | 10,0 m | `floor( (L + 10) / 120 )` |
 | **`capacity_ships_135m`** | Klasse Vb | Verlengd Groot Rijnschip | 135,0 m | 10,0 m | `floor( (L + 10) / 145 )` |
+
+**Afwijking van de RVW:** de RVW noemt `s` = 5 m voor klasse I-IV en 10 m voor klasse V en hoger. Het model gebruikt `s` = 10 m voor alle scenario's, ook voor 85 m (klasse IV); dat geeft voor dat scenario een iets lagere capaciteit dan met 5 m.
 
 ```text
 capacity_ships_{L_schip} = floor((L + s) / (L_schip + s)) * N_rijen
@@ -236,7 +238,7 @@ D_dag = v_gem * T_dag = 12 * 14 = 168,0 km/etmaal
 | `is_overnight` | `bool` | - | Eindclassificatie overnachtingsligplaats: `ov_by_facility \| ov_by_stay \| ov_by_category \| ov_by_long_quay`. |
 | `kegel_count` | `int64` | kegels | Aantal toegestane ADN-kegels (`0`, `1` of `2`) afgeleid uit `signalling` en `name`. |
 | `is_kegel` | `bool` | - | Eindclassificatie kegelligplaats: `kegel_count > 0`. |
-| `effective_rows` | `float64` | rijen | Effectief aantal scheepsrijen naast elkaar: `number_of_rows` indien `> 0`. Voor ankerplaatsen/reeden: afgeleid uit zwaaidiameter `max(1, floor(width / 300.0))` (= 1,0 file). Voor kades/steigers: afgeleid uit `min(3, max(1, floor(width / 11.4)))` (RVW § 6.4.2 / BPR art. 7.05), anders `1.0`. |
+| `effective_rows` | `float64` | rijen | Effectief aantal scheepsrijen naast elkaar: `number_of_rows` indien `> 0`. Voor ankerplaatsen/reeden: afgeleid uit zwaaidiameter `max(1, floor(width / 300.0))` (= 1,0 file). Voor kades/steigers: afgeleid uit `min(3, max(1, floor(width / 11.4)))` (RVW § 6.4.2, p. 147; model past 3 breed toe op kades en steigers), anders `1.0`. |
 | `effective_length_m` | `float64` | m | Totale effectieve afmeerlengte: `length * effective_rows`. |
 | `capacity_ships_85m` | `float64` | schepen | Aantal schepen van **85 m (CEMT IV)** dat gelijktijdig kan afmeren: `floor((length + 10) / 95) * effective_rows` (indien toegestaan door `maximal_ship_length`). |
 | `capacity_ships_110m` | `float64` | schepen | Aantal schepen van **110 m (CEMT Va)** dat gelijktijdig kan afmeren: `floor((length + 10) / 120) * effective_rows` (indien toegestaan door `maximal_ship_length`). |
@@ -430,7 +432,7 @@ Elk record in dit bestand vertegenwoordigt één **volledige FIS-vaarwegroute** 
 
 ---
 
-## 4. Koppeling met stap 2 en 3 (interface)
+## 4. Oplevering aan stap 2 en 3 (interface)
 
 Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot het **Hoofdvaarwegennet**: de 49 routes met `network_type` Hoofdtransportas of Hoofdvaarweg (`is_hvwn`). `route_berth_capacity_all.geoparquet` (alle routes) is hiervoor niet nodig.
 

@@ -30,7 +30,9 @@ logger = logging.getLogger(__name__)
 SHIP_LENGTH_85_M = 85.0  # CEMT IV Johann Welker
 SHIP_LENGTH_110_M = 110.0  # CEMT Va Groot Rijnschip
 SHIP_LENGTH_135_M = 135.0  # CEMT Vb Verlengd Groot Rijnschip
-CLEARANCE_SPACING_M = 10.0  # RVW 2020 p. 146 longitudinal spacing s
+CLEARANCE_SPACING_M = (
+    10.0  # RVW 2020 p. 146 spacing s: 5 m (class I-IV), 10 m (V+); 10 m used throughout
+)
 SHIP_SCENARIOS = (
     ("85m", SHIP_LENGTH_85_M),
     ("110m", SHIP_LENGTH_110_M),
@@ -50,7 +52,7 @@ DAILY_SAILING_DISTANCE_KM = (
 # (23:00-06:00). 18% on the Waal in 2012 (RWS WVL, Toekomstige Ligplaatsbehoefte
 # Overnachtingshaven Lobith 2013, p. 10); not part of RVW 2020.
 CONTINUOUS_SAILING_SHARE = 0.18
-FRACTION_OVERNIGHT = 1.0 - CONTINUOUS_SAILING_SHARE  # 0.82
+FRACTION_OVERNIGHT = round(1.0 - CONTINUOUS_SAILING_SHARE, 2)  # 0.82
 
 OVERNIGHT_RADIUS_KM = 15.0  # Max 30 km spacing between overnight ports
 KEGEL_RADIUS_KM = 30.0  # Max 60 km spacing between kegel berths
@@ -62,9 +64,7 @@ CAR_DROPOFF_SEARCH_RADIUS_M = (
 SHIP_WIDTH_M = (
     11.4  # Standard CEMT Va/Vb reference ship width (m) for width-to-rows fallback
 )
-MAX_QUAY_ROWS = (
-    3.0  # Max abreast mooring rows for quays/jetties (RVW § 6.4.2 / BPR Art. 7.05)
-)
+MAX_QUAY_ROWS = 3.0  # Max abreast rows; RVW 2020 § 6.4.2 p. 147: quay 2, jetty 3 (3 applied to both)
 ANCHORAGE_SWING_DIAMETER_M = (
     300.0  # Min swinging corridor diameter (m) for open-water anchorages (PIANC WG 121)
 )
@@ -293,7 +293,7 @@ def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         | (category_upper == "ANCHORAGE")
     )
 
-    # For standard quays/jetties: derive rows from width, capped at MAX_QUAY_ROWS (RVW § 6.4.2 / BPR art. 7.05)
+    # For standard quays/jetties: derive rows from width, capped at MAX_QUAY_ROWS (RVW § 6.4.2, p. 147)
     quay_width_rows = np.clip(np.floor(width / SHIP_WIDTH_M), 1.0, MAX_QUAY_ROWS).where(
         width > 0, 1.0
     )

@@ -43,11 +43,11 @@ Tezamen (rekening houdend met overlap tussen de vier inclusiecriteria) resulteer
 
 ## 3. Ligplaatscapaciteit en Gevoeligheid Scheepslengte (85 m, 110 m vs. 135 m)
 
-Om geen vaste aanname over de vlootopbouw te hoeven doen — en omdat sommige vaarwegen of kades niet toegankelijk zijn voor klasse V — wordt het fysieke kade-aanbod gediscretiseerd naar drie referentiescenario's (met onderlinge tussenruimte $s = 10$ m conform RVW 2020 p. 146):
+Om geen vaste aanname over de vlootopbouw te hoeven doen — en omdat sommige vaarwegen of kades niet toegankelijk zijn voor klasse V — wordt het fysieke kade-aanbod gediscretiseerd naar drie referentiescenario's (met onderlinge tussenruimte `s = 10` m conform RVW 2020 p. 146):
 
-1. **Scenario 85 m (CEMT IV, Johann Welker)**: aantal schepen uitgaand van $85$ m scheepslengte op ligplaatsen waar `maximal_ship_length` onbeperkt of $\ge 85$ m is.
-2. **Scenario 110 m (CEMT Va, Groot Rijnschip)**: aantal schepen uitgaand van $110$ m op ligplaatsen waar `maximal_ship_length` onbeperkt of $\ge 110$ m is.
-3. **Scenario 135 m (CEMT Vb, Verlengd Groot Rijnschip)**: aantal schepen uitgaand van $135$ m op ligplaatsen waar `maximal_ship_length` onbeperkt of $\ge 135$ m is.
+1. **Scenario 85 m (CEMT IV, Johann Welker)**: aantal schepen uitgaand van 85 m scheepslengte op ligplaatsen waar `maximal_ship_length` onbeperkt of `>= 85` m is.
+2. **Scenario 110 m (CEMT Va, Groot Rijnschip)**: aantal schepen uitgaand van 110 m op ligplaatsen waar `maximal_ship_length` onbeperkt of `>= 110` m is.
+3. **Scenario 135 m (CEMT Vb, Verlengd Groot Rijnschip)**: aantal schepen uitgaand van 135 m op ligplaatsen waar `maximal_ship_length` onbeperkt of `>= 135` m is.
 
 ### Landelijk Aanbod en Capaciteit per Scheepsklasse
 
@@ -94,7 +94,7 @@ Om geen vaste aanname over de vlootopbouw te hoeven doen — en omdat sommige va
 
 ## 6. Maximale Verkeerscapaciteit per Route (RVW 2020 § 6.4.2)
 
-> **Corridor-context (RVW 2020 § 6.4.2)**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte en verwachte overnachtingen op het deeltraject ($L_{\text{kade}} \times 365 / \text{verwachte stops}$). Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.
+> **Corridor-context (RVW 2020 § 6.4.2)**: Schepen benutten ligplaatsen over route- en beheergrenzen heen. De hier getoonde waarden zijn **indicatief per route berekend** op basis van de lokale kadelengte en verwachte overnachtingen op het deeltraject (`L_kade * 365 / verwachte stops`). Bij kortere vaarwegvakken met een grote overnachtingshaven bedient die capaciteit in de praktijk de gehele aansluitende vaarwegcorridor.
 
 | Code | Routenaam | Categorie | Lengte | Lokale Kade | Lokale Schepen (85/110/135m) | Corridor ≤ 15 km Kade | Corridor Schepen (85/110/135m) | Max. Bedienbare Verkeersintensiteit (km·schip/jr) | Dekking Overnacht |
 |---|---|---|---|---|---|---|---|---|---|
@@ -109,22 +109,22 @@ Om geen vaste aanname over de vlootopbouw te hoeven doen — en omdat sommige va
 ### 7.1 Waarom lokale routecapaciteit (0 op deelroutes) nog geen normtoets is
 In Sectie 6 is de maximale verkeerscapaciteit strikt **lokaal per FIS-route (`route_id`)** berekend. Van de 49 Hoofdvaarwegnet-routes (HTA + HVW) hebben **24 routes een lokale overnachtingskadelengte van 0 m** (waaronder *Beerkanaal* `40230`, *Dordtsche Kil* `10997`, *Kanaal door Zuid-Beveland* `33781` en *Schelde-Rijnverbinding* `44924`), terwijl vrijwel al deze routes wél voor 80%–100% binnen de ruimtelijke 30 km-norm vallen.
 
-Als de capaciteit per individuele `route_id` direct tegen de scheepvaartintensiteit $I$ getoetst zou worden, zou elke route met `overnight_berth_length_m == 0` per definitie niet voldoen zodra er scheepvaartverkeer overheen vaart ($I > 0$). In de praktijk komt dit door twee redenen:
+Als de capaciteit per individuele `route_id` direct tegen de scheepvaartintensiteit `I` getoetst zou worden, zou elke route met `overnight_berth_length_m == 0` per definitie niet voldoen zodra er scheepvaartverkeer overheen vaart (`I > 0`). In de praktijk komt dit door twee redenen:
 
 1. **Zijhavens zijn aparte routes in FIS**: Op bijvoorbeeld het *Beerkanaal* (`route_id = 40230`) liggen de ligplaatsen niet in de doorgaande vaargeul, maar in de direct aantakkende havenbekkens (*Mississippihaven*, *Europahaven*, *Amazonehaven*, *6e Petroleumhaven*, *Calandkanaal*, *Hartelkanaal*), die elk een eigen `route_id` hebben.
-2. **Corridor-logica van RVW 2020 § 6.4.2**: De Richtlijnen Vaarwegen 2020 berekenen de benodigde overnachtingscapaciteit op **corridor- / verzorgingsgebiedsniveau** (met richtafstand $\Delta L \approx 20\text{--}30$ km tussen opeenvolgende overnachtingshavens, oftewel verzorgingsstraal $r = 15$ km).
+2. **Corridor-logica van RVW 2020 § 6.4.2**: De Richtlijnen Vaarwegen 2020 berekenen de benodigde overnachtingscapaciteit op **corridor- / verzorgingsgebiedsniveau** (met richtafstand `Delta L ~ 20--30` km tussen opeenvolgende overnachtingshavens, oftewel verzorgingsstraal `r = 15` km).
 
-### 7.2 Formule voor de normtoets tegen verkeersintensiteit (RVW 2020 § 6.4.2)
-Om te bepalen of de aanwezige capaciteit voldoet aan de daadwerkelijke verkeersintensiteit (uit **IVS90** of **BIVAS**), moeten we per vaarwegcorridor of verzorgingsgebied twee stappen toevoegen:
+### 7.2 Toetsing aan verkeersintensiteit (RVW 2020 § 6.4.2)
+De toetsing aan de verkeersintensiteit valt buiten deze analyse. Stap 2 bepaalt de intensiteit uit BIVAS per route (`docs/berths/stap2_intensiteit_bivas.md`), stap 3 voegt vraag en aanbod samen (`docs/berths/stap3_toetsing.md`). Voor de vergelijking geldt de kansmethode uit RVW 2020 § 6.4.2 (p. 146), toegepast met dezelfde parameters als in deze analyse:
 
-1. **Corridorcapaciteit (≤ 15 km) ($C_{\text{gebied}}$) bepalen via de netwerkgraaf**:
-   In plaats van alleen ligplaatsen met dezelfde `route_id` op te tellen, worden via Dijkstra op de routegraaf alle overnachtingsligplaatsen verzameld die binnen een netwerkafstand $r$ liggen vanaf de knopen van de route (of binnen direct aantakkende havenbekkens zonder eigen doorgaande HTA/HVW-functie). Om dubbeltelling tussen naburige hoofdroutes te voorkomen, wordt de capaciteit van elke ligplaats via **Voronoi-toewijzing op de graaf** (of naar rato van het verzorgingsgebied) aan het bijbehorende hoofdvaarwegvak toegerekend.
+```text
+P_stop              = (L / v) / T                 percentage schepen dat overnacht (RVW)
+P_stop,gecorrigeerd = f_overnacht * P_stop        kolom expected_overnight_stops
+Id                  = I * P_stop,gecorrigeerd     schepen per dag die overnachtingsplaatsen vereisen
+Toets:                C_gebied >= Id
+```
 
-2. **Normvraag ($D_{\text{norm}}$) berekenen uit de verkeersintensiteit**:
-   Conform RVW 2020 § 6.4.2 (p. 145) hangt het aandeel schepen dat op een traject van lengte $L_{\text{traject}}$ overnacht af van het vaarregime (A1: 14 uur/dag, A2: 18 uur/dag, B: 24 uur/dag continuvaart, die niet overnacht):
-   $$P_{\text{stop}} = f_{\text{overnacht}} \cdot \frac{L_{\text{traject}}}{v_{\text{gem}} \cdot T_{\text{vaartijd}}} = f_{\text{overnacht}} \cdot \frac{L_{\text{traject}}}{168\text{ km}}$$
-   Met de maatgevende etmaalintensiteit $I_{\text{maatgevend}}$ (schepen/etmaal op een drukke werkdag, of jaarintensiteit $I_{\text{jaar}} / 365$ met piekfactor $f_{\text{piek}} \approx 1{,}2\text{--}1{,}3$) en een normatieve maximale bezettingsgraad $\eta_{\text{norm}} \approx 0{,}80$ volgt de vereiste gelijktijdige ligplaatscapaciteit:
-   $$D_{\text{norm}} = \frac{I_{\text{maatgevend}} \cdot P_{\text{stop}}}{\eta_{\text{norm}}} \quad \text{[vereiste scheepsplaatsen]} \qquad \text{Toets:} \quad C_{\text{gebied}} \ge D_{\text{norm}}$$
+Hierin is `I` het maatgevend aantal passerende schepen per dag (95e percentiel), `C_gebied` de corridorcapaciteit (≤ 15 km) uit deze analyse, `v` = 12 km/u (projectaanname), `T` = 14 uur (exploitatievorm A1) en `f_overnacht` = 0,82 (18% continuvaart op de Waal in 2012, Lobith-onderzoek 2013). `f_overnacht` is een aanvulling op de RVW.
 
 ---
 
@@ -132,9 +132,9 @@ Om te bepalen of de aanwezige capaciteit voldoet aan de daadwerkelijke verkeersi
 
 #### Stap A: Huidige resultaat per individuele `route_id` (lokaal op `40230`)
 
-* **Trajectlengte**: $L = 4{,}279$ km (`Hoofdtransportas`, code `116a`).
-* **Verwachte overnachtingsfractie op het traject zelf** (bij 100% A1-vaart): $P_{\text{stop}} = 4{,}279 / 168{,}0 = 0{,}02547$ ($2{,}55\%$ van de passanten overnacht op dit trajectdeel).
-* **Lokale capaciteit op `route_id = 40230`**: $0$ m kade $\rightarrow$ **0 schepen** (bedienbare verkeersintensiteit $= 0$ schepen/jaar). Op route-ID-niveau lijkt het Beerkanaal dus 0% bedienbare verkeersintensiteit te hebben.
+* **Trajectlengte**: `L = 4,279` km (`Hoofdtransportas`, code `116a`).
+* **Verwachte overnachtingsfractie op het traject zelf**: P_stop,gecorrigeerd = 0,82 × 4,279 / 168,0 = 0,02089 (2,09% van de passanten overnacht op dit trajectdeel).
+* **Lokale capaciteit op `route_id = 40230`**: 0 m kade `->` **0 schepen** (bedienbare verkeersintensiteit `= 0` schepen/jaar). Op route-ID-niveau lijkt het Beerkanaal dus 0% bedienbare verkeersintensiteit te hebben.
 
 #### Stap B: Capaciteit in de direct aantakkende zijhavens en binnen bereik op de netwerkgraaf
 Wanneer we vanuit de knopen van het Beerkanaal (`40230`) over de netwerkgraaf zoeken naar overnachtingsligplaatsen in de direct aantakkende bekkenroutes en de omliggende corridor, vinden we:
@@ -143,24 +143,20 @@ Wanneer we vanuit de knopen van het Beerkanaal (`40230`) over de netwerkgraaf zo
 |---|---|---|---|---|---|
 | **1. Alleen `route_id = 40230` (lokaal)** | 0 | 0 m | **0 schepen** | **0 schepen** | **0 schepen** |
 | **2. Direct aantakkende zijbekkens van `40230`** *(Mississippihaven, Europahaven, Amazonehaven, 6e Petroleumhaven, Tennesseehaven)* | 21 | 9.153 m | **75 schepen** | **62 schepen** | **47 schepen** |
-| **3. Netwerkstraal $\le 5$ km** *(incl. Hartelhaven, Beneluxhaven, Elbehaven, Yangtzehaven en directe aansluiting Caland-/Hartelkanaal)* | 51 | 26.994 m | **224 schepen** | **186 schepen** | **135 schepen** |
-| **4. Volledig RVW-verzorgingsgebied $\le 15$ km** *(gehele Maasvlakte / Europoort / Rozenburg cluster)* | 107 | 59.627 m | **522 schepen** | **415 schepen** | **317 schepen** |
+| **3. Netwerkstraal `<= 5` km** *(incl. Hartelhaven, Beneluxhaven, Elbehaven, Yangtzehaven en directe aansluiting Caland-/Hartelkanaal)* | 51 | 26.994 m | **224 schepen** | **186 schepen** | **135 schepen** |
+| **4. Volledig RVW-verzorgingsgebied `<= 15` km** *(gehele Maasvlakte / Europoort / Rozenburg cluster)* | 107 | 59.627 m | **522 schepen** | **415 schepen** | **317 schepen** |
 
 #### Stap C: Voorbeeldtoetsing aan de verkeersintensiteit op het Beerkanaal
-Stel dat we voor het Beerkanaal en de directe Maasvlakte-bekkens toetsen op schaalniveau 2 (alleen de **direct aantakkende zijbekkens van het Beerkanaal**: $9.153$ m effectieve kadelengte incl. breedterijen, oftewel **75 schepen @ 85 m**, **62 schepen @ 110 m** en **47 schepen @ 135 m**):
+Illustratie op schaalniveau 2 (alleen de **direct aantakkende zijbekkens van het Beerkanaal**: 9.153 m effectieve kadelengte, oftewel **75 schepen @ 85 m**, **62 schepen @ 110 m** en **47 schepen @ 135 m**) met P_stop,gecorrigeerd = 0,02089:
 
-1. **Maximale jaarlijkse verkeersintensiteit (bedienbare verkeersintensiteit) op basis van de zijbekkens**:
-   Met $P_{\text{stop}} = 0{,}02547$ stops per passage en $\eta_{\text{norm}} = 0{,}80$ maximale bezettingsgraad kan het Beerkanaal met alleen zijn eigen zijbekkens de volgende verkeersintensiteit dragen:
+1. **Omgekeerd: maximaal aantal passerende schepen per dag dat de zijbekkens kunnen bedienen** (I = C / P_stop,gecorrigeerd):
+   * **Scenario 85 m (75 plaatsen)**: 75 / 0,02089 = 3.591 passages per dag;
+   * **Scenario 110 m (62 plaatsen)**: 62 / 0,02089 = 2.969 passages per dag;
+   * **Scenario 135 m (47 plaatsen)**: 47 / 0,02089 = 2.250 passages per dag.
 
-   * **Scenario 85 m (75 plaatsen)**: $\frac{75 \times 0{,}80}{0{,}02547} = \mathbf{2.356\text{ overnachtingsplichtige passages/etmaal}}$ ($\approx 859.800$ passages/jaar);
-   * **Scenario 110 m (62 plaatsen)**: $\frac{62 \times 0{,}80}{0{,}02547} = \mathbf{1.947\text{ overnachtingsplichtige passages/etmaal}}$ ($\approx 710.800$ passages/jaar);
-   * **Scenario 135 m (47 plaatsen)**: $\frac{47 \times 0{,}80}{0{,}02547} = \mathbf{1.476\text{ overnachtingsplichtige passages/etmaal}}$ ($\approx 538.800$ passages/jaar).
-
-2. **Omgekeerde toets bij een gegeven verkeersintensiteit (bijv. $I = 40.000$ binnenvaartpassages/jaar $\approx 110$ schepen/etmaal)**:
-
-   * Stel dat $60\%$ van de vloot in A1/A2-regime vaart ($f_{\text{overnacht}} = 0{,}60$) en dat een schip in het havengebied gemiddeld een corridorlengte van $\Delta L = 20$ km aflegt ($P_{\text{stop, corridor}} = 0{,}60 \times 20 / 168 = 0{,}0714$);
-   * **Normvraag per nacht**: $D_{\text{norm}} = (110 \times 0{,}0714) / 0{,}80 = \mathbf{9{,}8 \approx 10\text{ scheepsplaatsen}}$;
-   * **Toetsresultaat**: Met **75 plaatsen (85 m)**, **62 plaatsen (110 m)** en **47 plaatsen (135 m)** in de direct aantakkende zijbekkens van het Beerkanaal is $C_{\text{gebied}} \ge D_{\text{norm}}$ in alle drie de scheepslengtescenario's (**Voldoet**).
+2. **Toets bij een aangenomen intensiteit** (fictief: I = 110 schepen per dag, 95e percentiel):
+   * **Normvraag**: Id = 110 × 0,02089 = 2,3, afgerond 3 overnachtingsplaatsen;
+   * **Toetsresultaat**: met 75, 62 en 47 plaatsen in de zijbekkens is C_gebied >= Id in alle drie de scheepslengtescenario's (**voldoet**). De werkelijke intensiteit komt uit stap 2 (BIVAS).
 
 ---
 
@@ -193,7 +189,7 @@ In `cluster_berths_and_check_facilities` worden nu alle ligplaatsen met `has_car
 #### B. Afleiding van het aantal breedterijen (`effective_rows`) voor kades en ankergebieden
 Van de 821 overnachtingsligplaatsen is `number_of_rows` slechts bij **35 records (4%)** ingevuld, terwijl `width` bij **799 records (97%)** wél is ingevuld. In grote RWS-overnachtingshavens zoals **IJzendoorn** en **Haaften** staan de steigers geregistreerd met `length = 135.0` m, `number_of_rows = NaN`, en **`width = 35.0` tot `40.0` m** (geschikt voor 3 schepen van 11,40 m breed naast elkaar).
 
-* **Kades en steigers**: Wanneer `number_of_rows` niet is ingevuld, wordt `effective_rows` berekend als $\min(3, \max(1, \lfloor \text{width} / 11{,}40 \rfloor))$ conform **RVW 2020 § 6.4.2** en **BPR art. 7.05** (maximaal 3 schepen langszij afgemeerd). Hierdoor komen onder meer **IJzendoorn** (32 schepen @ 110 m), **Haaften** (26 schepen @ 110 m), **Beneden-Merwede** (24 schepen @ 110 m), **Werkendam** (24 schepen @ 110 m), **Maashaven** (25 schepen @ 110 m), **Amsterdam IJ-dok** (21 schepen @ 110 m), **Weurt** (16 schepen @ 110 m) en **Terneuzen Goessekade** (15 schepen @ 110 m) boven de drempel van $\ge 15$ schepen én slagen zij voor de autoafzetplaatstest (Sectie 4).
+* **Kades en steigers**: Wanneer `number_of_rows` niet is ingevuld, wordt `effective_rows` berekend als `min(3, max(1, floor( width / 11,40 )))` volgens **RVW 2020 § 6.4.2** (p. 147: kade ten hoogste twee breed, steiger hooguit drie breed; het model past 3 toe op beide). Hierdoor komen onder meer **IJzendoorn** (32 schepen @ 110 m), **Haaften** (26 schepen @ 110 m), **Beneden-Merwede** (24 schepen @ 110 m), **Werkendam** (24 schepen @ 110 m), **Maashaven** (25 schepen @ 110 m), **Amsterdam IJ-dok** (21 schepen @ 110 m), **Weurt** (16 schepen @ 110 m) en **Terneuzen Goessekade** (15 schepen @ 110 m) boven de drempel van `>= 15` schepen én slagen zij voor de autoafzetplaatstest (Sectie 4).
 * **Open-water ankerplaatsen en reeden** (*Westerschelde*, *Hollandsch Diep*, *Oosterschelde*, *Krammer*, *Waddenzee*): Schepen liggen solitair achter hun boeganker en zwaaien vrij rond onder invloed van wind en getijdestroom (draaicirkels van AIS-transponders). De breedte van de polygoon (200 tot 450 m) representeert de nautische zwaairuimte van één file schepen (*D*<sub>zwaai</sub> ≈ 300 m conform **PIANC WG 121**), waardoor `effective_rows` = 1,0. Dit voorkomt onrealistische vermenigvuldigingen (zoals 28 rijen schepen en 44,8 km kadelengte bij Terneuzen).
 
 #### C. Resterende grote locaties zonder autoafzetplaats
