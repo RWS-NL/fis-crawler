@@ -78,6 +78,7 @@ RAW_DELIVERY_FILES = (
     "routejunction.geoparquet",
     "berth.geoparquet",
     "cardropoff.geoparquet",
+    "fairwayclassification.geoparquet",
 )
 HVWN_TYPES = ("Hoofdtransportas", "Hoofdvaarweg")
 NETWORK_CATEGORIES = {

@@ -17,7 +17,7 @@ output/berth-analysis/
   berths_analyzed.geoparquet
   berth_clusters.geoparquet
   berth_spatial_report.md / .html     rapport
-  raw/                                ruwe FIS-bestanden: route, routejunction, berth, cardropoff
+  raw/                                ruwe FIS-bestanden: route, routejunction, berth, cardropoff, fairwayclassification
   docs/                               deze documenten, als .md en gerenderd .html
 ```
 
