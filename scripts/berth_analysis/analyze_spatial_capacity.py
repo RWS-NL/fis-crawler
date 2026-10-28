@@ -71,6 +71,7 @@ ANCHORAGE_SWING_DIAMETER_M = (
 )
 
 RAW_DELIVERY_DIR = "raw"
+RAW_CONFIG_FILE = Path(__file__).resolve().parents[2] / "config" / "schema.toml"
 DOCS_DELIVERY_DIR = "docs"
 DOCS_SOURCE_DIR = Path(__file__).resolve().parents[2] / "docs" / "berths"
 RAW_DELIVERY_FILES = (
@@ -1014,6 +1015,8 @@ def main(export_dir: Path, output_dir: Path) -> None:
     raw_dir.mkdir(exist_ok=True)
     for name in RAW_DELIVERY_FILES:
         shutil.copy2(export_dir / name, raw_dir / name)
+    # Column mapping (FIS name -> snake_case) that the analysis applies to the raw files
+    shutil.copy2(RAW_CONFIG_FILE, raw_dir / RAW_CONFIG_FILE.name)
 
     deliver_documentation(output_dir)
 
