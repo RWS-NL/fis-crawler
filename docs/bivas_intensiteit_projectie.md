@@ -65,9 +65,18 @@ Een reis die een route (deels) bevaart levert een **bijdrage** `f = bevaren afst
 
 Alle bestanden met een rij per route of arc zijn ruimtelijk (GeoParquet met de routegeometrie uit stap 1, EPSG:4326; `arc_route_mapping` met de arcgeometrie). Alleen `route_intensity_daily.parquet` is een tabel zonder geometrie (tijdreeks, koppeling via `route_id`).
 
+**Behoud van geometrie en id:** stap 2 neemt de routegeometrie uit stap 1 ongewijzigd over (zelfde `LineString`, zelfde CRS, niet vereenvoudigd) en behoudt `route_id`. Zo kan stap 3 de uitvoer van stap 1 en 2 opnieuw koppelen, ook als de ene stap later opnieuw is gedraaid.
+
 Scheepsklassen: schepen worden ingedeeld bij de dichtstbijzijnde van 85, 110 en 135 m (grenzen 97,5 en 122,5 m), gelijk aan de scenario's in stap 1; `all` bevat alle schepen. De sleutels `route_id` en de routes (inclusief `is_hvwn`) zijn identiek aan stap 1, zodat stap 3 een directe join op `route_id` kan doen.
 
 ## Stap 3: toetsing
+
+### Koppelen van stap 1 en 2
+
+1. **Primair op id:** join op `route_id` (string, exact).
+2. **Terugval ruimtelijk** (voor routes waar de id niet matcht, bijvoorbeeld na een nieuwe FIS-export met andere ids): herproject beide bestanden naar EPSG:28992 (`PROJECTED_CRS`) en koppel de routegeometrieën. Gebruik een buffer van 50 m (zoals `scripts/bivas/compare_networks.py`) en wijs toe aan de route met de grootste overlappende lengte. Beoordeel afwijkende lengteverhoudingen handmatig.
+3. Leg per route vast hoe gekoppeld is (`join_method`: `id` of `spatial`) en rapporteer routes zonder koppeling apart.
+
 
 Norm: **Richtlijnen Vaarwegen 2020, § 6.4.2** (p. 145–147), kansmethode voor gebieden met weinig ligplaatsen:
 

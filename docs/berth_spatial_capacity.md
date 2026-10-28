@@ -391,6 +391,7 @@ Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot 
 | Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen. |
 | Niet gebruiken voor de toetsing | `expected_overnight_stops` en `max_*_yr` (bevatten $f_{\text{overnacht}} = 1$, 12 km/u, 14 u; zie § 2.6). |
 | Formaat | Ruimtelijk bestand: `route_berth_capacity.geoparquet` is de interface (de `.csv` bevat geen geometrie en is geen invoer voor de volgende stappen). |
+| Koppelen | Primair op `route_id`, terugval ruimtelijk op de routegeometrie. Daarom blijven zowel `route_id` als de geometrie in alle uitvoerbestanden van de stappen behouden en ongewijzigd (niet vereenvoudigd). |
 | Geometrie | Eén `LineString` per route in **EPSG:4326**. BIVAS en de rest van het project werken in EPSG:28992 (`PROJECTED_CRS`): stap 2 moet herprojecteren voor ruimtelijke koppeling. |
 | HVWN-routes zonder BIVAS-data | Blijven in stap 3 staan met onbekende intensiteit (niet nul). |
 
