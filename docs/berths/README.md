@@ -8,6 +8,19 @@ De toetsing van het ligplaatsaanbod aan de verkeersintensiteit bestaat uit drie 
 | 2. Intensiteit | [stap2_intensiteit_bivas.md](stap2_intensiteit_bivas.md) | BIVAS-verkeer op dezelfde routes projecteren (zelfstandig uit te voeren) | `output/bivas-intensity/*.geoparquet` |
 | 3. Toetsing | [stap3_toetsing.md](stap3_toetsing.md) | Stap 1 en 2 koppelen en vraag tegen aanbod leggen | `output/berth-assessment/*.geoparquet` |
 
+**Opgeleverde map** `output/berth-analysis/` (uitvoer van stap 1, wordt als geheel overgedragen):
+
+```text
+output/berth-analysis/
+  route_berth_capacity.geoparquet     interface naar stap 2 en 3 (49 HVWN-routes)
+  route_segments_compliance.geoparquet
+  berths_analyzed.geoparquet
+  berth_clusters.geoparquet
+  berth_spatial_report.md / .html     rapport
+  raw/                                ruwe FIS-bestanden: route, routejunction, berth, cardropoff
+  docs/                               deze documenten, als .md en gerenderd .html
+```
+
 **Afspraken die voor alle stappen gelden**
 
 - **Reikwijdte:** alleen het Hoofdvaarwegennet: de 49 FIS-routes met `network_type` Hoofdtransportas of Hoofdvaarweg (`is_hvwn`).

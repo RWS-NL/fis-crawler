@@ -13,12 +13,14 @@ Bestand `output/berth-analysis/route_berth_capacity.geoparquet`: één rij per F
 | `total_length_km` | Lengte van de route (km) |
 | `geometry` | `LineString` in EPSG:4326 |
 
-Daarnaast krijg je twee **ruwe FIS-bestanden**, ongewijzigd uit de FIS-export (FIS-kolomnamen, alle 2.068 routes; gebruik alleen de routes uit `route_berth_capacity.geoparquet`), in dezelfde map `output/berth-analysis/`:
+Daarnaast krijg je de **ruwe FIS-bestanden**, ongewijzigd uit de FIS-export (FIS-kolomnamen; gebruik alleen de routes uit `route_berth_capacity.geoparquet`), in de submap `output/berth-analysis/raw/`:
 
 | Bestand | Rijen | Belangrijke kolommen |
 |---|---|---|
 | `route.geoparquet` | 2.068 routes (`LineString`, EPSG:4326) | `Id` (= `route_id`), `Code`, `VinCode`, `Name`, `RouteKmBegin`, `RouteKmEnd`, `geometry` |
 | `routejunction.geoparquet` | 6.438 punten op routes (`Point`, EPSG:4326) | `RouteId` (= `route_id`), `RouteKmBegin`, `RouteKmEnd`, `SectionJunctionId`, `geometry` |
+| `berth.geoparquet` | 7.883 ligplaatsen (`Point` of `Polygon`, EPSG:4326) | `Id`, `RouteId` (= `route_id`), `RouteKmBegin`, `RouteKmEnd`, `geometry` |
+| `cardropoff.geoparquet` | 150 autoafzetplaatsen (`Point` of `Polygon`, EPSG:4326) | `Id`, `RouteId` (= `route_id`), `RouteKmBegin`, `RouteKmEnd`, `geometry` |
 
 Gebruik ze om kilometers op de route te koppelen aan locaties: de routekilometrering (`RouteKmBegin`/`RouteKmEnd`) is het FIS-equivalent van `StartKilometer`/`EndKilometer` bij BIVAS (§ 3, stap 1).
 

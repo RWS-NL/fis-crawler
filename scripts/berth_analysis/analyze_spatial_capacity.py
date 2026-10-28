@@ -70,7 +70,15 @@ ANCHORAGE_SWING_DIAMETER_M = (
     300.0  # Min swinging corridor diameter (m) for open-water anchorages (PIANC WG 121)
 )
 
-RAW_DELIVERY_FILES = ("route.geoparquet", "routejunction.geoparquet")
+RAW_DELIVERY_DIR = "raw"
+DOCS_DELIVERY_DIR = "docs"
+DOCS_SOURCE_DIR = Path(__file__).resolve().parents[2] / "docs" / "berths"
+RAW_DELIVERY_FILES = (
+    "route.geoparquet",
+    "routejunction.geoparquet",
+    "berth.geoparquet",
+    "cardropoff.geoparquet",
+)
 HVWN_TYPES = ("Hoofdtransportas", "Hoofdvaarweg")
 NETWORK_CATEGORIES = {
     "Hoofdtransportas": "Hoofdtransportassen (HTA)",
@@ -935,6 +943,26 @@ def generate_markdown_summary(
         logger.warning("Could not render HTML report: %s", e)
 
 
+def deliver_documentation(output_dir: Path) -> None:
+    """Copies the method documents (docs/berths) with a rendered HTML version."""
+    from scripts.render_reports_html import convert_markdown_to_html
+
+    docs_out = output_dir / DOCS_DELIVERY_DIR
+    docs_out.mkdir(exist_ok=True)
+    for md_path in sorted(DOCS_SOURCE_DIR.glob("*.md")):
+        md_out = docs_out / md_path.name
+        shutil.copy2(md_path, md_out)
+        html_out = convert_markdown_to_html(md_out)
+        # Links between the delivered documents should open the rendered versions
+        html_out.write_text(
+            html_out.read_text(encoding="utf-8")
+            .replace('.md"', '.html"')
+            .replace(".md#", ".html#"),
+            encoding="utf-8",
+        )
+    logger.info("Documentation delivered to %s", docs_out)
+
+
 @click.command()
 @click.option(
     "--export-dir",
@@ -979,9 +1007,13 @@ def main(export_dir: Path, output_dir: Path) -> None:
     gdf_hvwn = gdf_routes[gdf_routes["is_hvwn"]].copy()
     gdf_hvwn.to_parquet(output_dir / "route_berth_capacity.geoparquet")
 
-    # Raw FIS route files, delivered unchanged as input for the intensity step.
+    # Raw FIS input files, delivered unchanged as input for the intensity step.
+    raw_dir = output_dir / RAW_DELIVERY_DIR
+    raw_dir.mkdir(exist_ok=True)
     for name in RAW_DELIVERY_FILES:
-        shutil.copy2(export_dir / name, output_dir / name)
+        shutil.copy2(export_dir / name, raw_dir / name)
+
+    deliver_documentation(output_dir)
 
     gdf_segments_hvwn = gdf_segments[gdf_segments["is_hvwn"]].copy()
     gdf_segments_hvwn.to_parquet(output_dir / "route_segments_compliance.geoparquet")
