@@ -15,7 +15,7 @@ Gebruik `Id` van de route als sleutel; `Code` is niet in alle routes uniek. De r
 
 **BIVAS-database**
 
-- Netwerk: `reference/Bivas.5.10.1.sqlite`, `BranchSetId = 337`, `CountryCode = 'NL'` (9.023 arcs). Een arc heeft via `arc_vin_trajectory_connection` een `TrajectCode` (bv. `116a`) en `StartKilometer`/`EndKilometer`; lengte in `arcs.Length__m`.
+- Netwerk: een BIVAS-database (SQLite) met het Nederlandse netwerk. De versie ligt niet vast; de beschrijving is getest op een database van versie 5.10.1 (`reference/Bivas.5.10.1.sqlite`, `BranchSetId = 337`, `CountryCode = 'NL'`, 9.023 arcs). Geef het pad van de database en de te gebruiken `BranchSetId` als parameter mee en controleer bij een andere versie of de tabellen en kolommen hieronder bestaan. Een arc heeft via `arc_vin_trajectory_connection` een `TrajectCode` (bv. `116a`) en `StartKilometer`/`EndKilometer`; lengte in `arcs.Length__m`.
 - Rekenresultaat van het gekozen scenario: per reis de gevolgde arcs, datum/tijd, richting en scheepslengte. De repo-database bevat alleen herkomst en bestemming per reis (`trips`), geen belasting per arc; die moet uit een BIVAS-run komen. Leg scenario (`scenarios.ID`) en jaar vast.
 
 Reikwijdte: projecteer op alle routes waarvoor BIVAS-arcs bestaan. Het beperken tot het Hoofdvaarwegennet (49 routes) gebeurt in stap 3, bij het koppelen aan het ligplaatsaanbod.
