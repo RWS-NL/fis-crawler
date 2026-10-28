@@ -112,11 +112,11 @@ Conform **RVW 2020 § 6.4.2** (p. 146, onderlinge afstand `s` tussen afgemeerde 
 
 | Scenario | CEMT-klasse | Maatgevend schip | Scheepslengte `L_schip` | Tussenruimte `s` | Formule per rij |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`capacity_ships_85m`** | Klasse IV | Johann Welker | 85,0 m | 10,0 m | `floor( (L + 10) / 95 )` |
+| **`capacity_ships_85m`** | Klasse IV | Johann Welker | 85,0 m | 5,0 m | `floor( (L + 5) / 90 )` |
 | **`capacity_ships_110m`** | Klasse Va | Groot Rijnschip | 110,0 m | 10,0 m | `floor( (L + 10) / 120 )` |
 | **`capacity_ships_135m`** | Klasse Vb | Verlengd Groot Rijnschip | 135,0 m | 10,0 m | `floor( (L + 10) / 145 )` |
 
-**Afwijking van de RVW:** de RVW noemt `s` = 5 m voor klasse I-IV en 10 m voor klasse V en hoger. Het model gebruikt `s` = 10 m voor alle scenario's, ook voor 85 m (klasse IV); dat geeft voor dat scenario een iets lagere capaciteit dan met 5 m.
+De tussenruimte `s` volgt RVW 2020 § 6.4.2 (p. 146): 5 m voor klasse I tot en met IV (het 85 m-scenario) en 10 m voor klasse V en hoger (de scenario's van 110 en 135 m).
 
 ```text
 capacity_ships_{L_schip} = floor((L + s) / (L_schip + s)) * N_rijen
@@ -242,7 +242,7 @@ D_dag = v_gem * T_dag = 12 * 14 = 168,0 km/etmaal
 | `is_kegel` | `bool` | - | Eindclassificatie kegelligplaats: `kegel_count > 0`. |
 | `effective_rows` | `float64` | rijen | Effectief aantal scheepsrijen naast elkaar: `number_of_rows` indien `> 0`. Voor ankerplaatsen/reeden: afgeleid uit zwaaidiameter `max(1, floor(width / 300.0))` (= 1,0 file). Voor kades/steigers: afgeleid uit `min(3, max(1, floor(width / 11.4)))` (RVW § 6.4.2, p. 147; model past 3 breed toe op kades en steigers), anders `1.0`. |
 | `effective_length_m` | `float64` | m | Totale effectieve afmeerlengte: `length * effective_rows`. |
-| `capacity_ships_85m` | `float64` | schepen | Aantal schepen van **85 m (CEMT IV)** dat gelijktijdig kan afmeren: `floor((length + 10) / 95) * effective_rows` (indien toegestaan door `maximal_ship_length`). |
+| `capacity_ships_85m` | `float64` | schepen | Aantal schepen van **85 m (CEMT IV)** dat gelijktijdig kan afmeren: `floor((length + 5) / 90) * effective_rows` (indien toegestaan door `maximal_ship_length`). |
 | `capacity_ships_110m` | `float64` | schepen | Aantal schepen van **110 m (CEMT Va)** dat gelijktijdig kan afmeren: `floor((length + 10) / 120) * effective_rows` (indien toegestaan door `maximal_ship_length`). |
 | `capacity_ships_135m` | `float64` | schepen | Aantal schepen van **135 m (CEMT Vb)** dat gelijktijdig kan afmeren: `floor((length + 10) / 145) * effective_rows` (indien toegestaan door `maximal_ship_length`). |
 

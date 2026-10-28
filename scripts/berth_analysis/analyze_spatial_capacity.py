@@ -31,9 +31,11 @@ logger = logging.getLogger(__name__)
 SHIP_LENGTH_85_M = 85.0  # CEMT IV Johann Welker
 SHIP_LENGTH_110_M = 110.0  # CEMT Va Groot Rijnschip
 SHIP_LENGTH_135_M = 135.0  # CEMT Vb Verlengd Groot Rijnschip
-CLEARANCE_SPACING_M = (
-    10.0  # RVW 2020 p. 146 spacing s: 5 m (class I-IV), 10 m (V+); 10 m used throughout
-)
+# RVW 2020 § 6.4.2 p. 146: distance s to the next ship is 5 m for class I-IV and 10 m for
+# class V and higher (class IV ships are at most 85 m long).
+CLEARANCE_SPACING_CLASS_I_IV_M = 5.0
+CLEARANCE_SPACING_CLASS_V_M = 10.0
+CLASS_IV_MAX_SHIP_LENGTH_M = 85.0
 SHIP_SCENARIOS = (
     ("85m", SHIP_LENGTH_85_M),
     ("110m", SHIP_LENGTH_110_M),
@@ -81,6 +83,7 @@ RAW_DELIVERY_FILES = (
     "cardropoff.geoparquet",
     "fairwayclassification.geoparquet",
 )
+EXAMPLE_ROUTE_ID = "40230"  # Beerkanaal, used in the worked example of the report
 HVWN_TYPES = ("Hoofdtransportas", "Hoofdvaarweg")
 NETWORK_CATEGORIES = {
     "Hoofdtransportas": "Hoofdtransportassen (HTA)",
@@ -163,14 +166,27 @@ def determine_kegels(
     return 0
 
 
+def clearance_spacing_m(ship_length_m: float) -> float:
+    """Distance s to the next ship (RVW 2020 § 6.4.2, p. 146): 5 m up to class IV, else 10 m."""
+    if ship_length_m <= CLASS_IV_MAX_SHIP_LENGTH_M:
+        return CLEARANCE_SPACING_CLASS_I_IV_M
+    return CLEARANCE_SPACING_CLASS_V_M
+
+
 def calc_berth_ship_slots(
     length: pd.Series,
     rows: pd.Series,
     max_ship_length: pd.Series,
     ship_length_m: float,
-    spacing_m: float = CLEARANCE_SPACING_M,
+    spacing_m: float | None = None,
 ) -> pd.Series:
-    """Computes discrete ship slots for a reference ship length where allowed by maximal_ship_length."""
+    """Computes discrete ship slots for a reference ship length where allowed by maximal_ship_length.
+
+    The distance s to the next ship follows RVW 2020 § 6.4.2 (see `clearance_spacing_m`)
+    unless `spacing_m` is given.
+    """
+    if spacing_m is None:
+        spacing_m = clearance_spacing_m(ship_length_m)
     allowed = max_ship_length.isna() | (max_ship_length >= ship_length_m)
     slots = np.floor((length + spacing_m) / (ship_length_m + spacing_m)) * rows
     ship_slots = pd.Series(
@@ -759,6 +775,14 @@ def fmt_num(
     return f"{fval:,.{decimals}f}{unit}"
 
 
+def fmt_nl(val: float | int | None, decimals: int = 0) -> str:
+    """Formats a number with Dutch separators (thousands '.', decimal ',')."""
+    if val is None or pd.isna(val) or np.isinf(val):
+        return "-"
+    text = f"{float(val):,.{decimals}f}"
+    return text.replace(",", "_").replace(".", ",").replace("_", ".")
+
+
 def fmt_pct(val: float | None) -> str:
     """Formats a percentage with 1 decimal place, returning '-' when missing."""
     if val is None or pd.isna(val) or np.isinf(val):
@@ -789,6 +813,14 @@ def summarize_segments(
         "kg_km": kg,
         "kg_pct": (kg / tot * 100.0) if tot > 0 else 0.0,
     }
+
+
+def get_example_route(gdf_routes: gpd.GeoDataFrame) -> dict:
+    """Returns the row of the worked-example route (Beerkanaal) for the report."""
+    rows = gdf_routes[gdf_routes["route_id"] == EXAMPLE_ROUTE_ID]
+    if rows.empty:
+        raise ValueError(f"Example route {EXAMPLE_ROUTE_ID} not found in route output")
+    return rows.drop(columns=["geometry"], errors="ignore").iloc[0].to_dict()
 
 
 def calculate_report_metrics(
@@ -899,6 +931,7 @@ def calculate_report_metrics(
         "zero_local_hvwn": zero_local_hvwn_df.drop(
             columns=["geometry"], errors="ignore"
         ).to_dict(orient="records"),
+        "example_route": get_example_route(gdf_routes),
         "hvwn_total_count": int(gdf_routes["is_hvwn"].sum()),
         "hvwn_zero_local_count": int(
             (gdf_routes["is_hvwn"] & (gdf_routes["num_overnight_berths"] == 0)).sum()
@@ -927,6 +960,7 @@ def generate_markdown_summary(
         lstrip_blocks=True,
     )
     env.filters["fmt_num"] = fmt_num
+    env.filters["fmt_nl"] = fmt_nl
     env.filters["fmt_pct"] = fmt_pct
     env.filters["fmt_dist"] = fmt_dist
 

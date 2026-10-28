@@ -311,8 +311,8 @@ def test_classify_and_calculate_capacity(sample_berths_and_cardropoffs):
 
     assert df.loc[df["id"] == "4", "is_overnight"].iloc[0]
     assert df.loc[df["id"] == "4", "effective_length_m"].iloc[0] == 450.0
-    # 450m restricted to max 110m ships -> 4 ships at 85m, 3 ships at 110m, 0 ships at 135m
-    assert df.loc[df["id"] == "4", "capacity_ships_85m"].iloc[0] == 4
+    # 450m restricted to max 110m ships -> 5 ships at 85m (s = 5 m), 3 ships at 110m (s = 10 m), 0 ships at 135m
+    assert df.loc[df["id"] == "4", "capacity_ships_85m"].iloc[0] == 5
     assert df.loc[df["id"] == "4", "capacity_ships_110m"].iloc[0] == 3
     assert df.loc[df["id"] == "4", "capacity_ships_135m"].iloc[0] == 0
 

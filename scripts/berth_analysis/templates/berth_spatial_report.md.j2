@@ -107,7 +107,7 @@ Om geen vaste aanname over de vlootopbouw te hoeven doen — en omdat sommige va
 ## 7. Outlook: Toetsing aan Verkeersintensiteit en Corridorcapaciteit (≤ 15 km) (RVW 2020 § 6.4.2)
 
 ### 7.1 Waarom lokale routecapaciteit (0 op deelroutes) nog geen normtoets is
-In Sectie 6 is de maximale verkeerscapaciteit strikt **lokaal per FIS-route (`route_id`)** berekend. Van de 49 Hoofdvaarwegnet-routes (HTA + HVW) hebben **24 routes een lokale overnachtingskadelengte van 0 m** (waaronder *Beerkanaal* `40230`, *Dordtsche Kil* `10997`, *Kanaal door Zuid-Beveland* `33781` en *Schelde-Rijnverbinding* `44924`), terwijl vrijwel al deze routes wél voor 80%–100% binnen de ruimtelijke 30 km-norm vallen.
+In Sectie 6 is de maximale verkeerscapaciteit strikt **lokaal per FIS-route (`route_id`)** berekend. Van de {{ hvwn_total_count }} Hoofdvaarwegnet-routes (HTA + HVW) hebben **{{ hvwn_zero_local_count }} routes een lokale overnachtingskadelengte van 0 m** (waaronder *Beerkanaal* `40230`, *Dordtsche Kil* `10997`, *Kanaal door Zuid-Beveland* `33781` en *Schelde-Rijnverbinding* `44924`), terwijl vrijwel al deze routes wél voor 80%–100% binnen de ruimtelijke 30 km-norm vallen.
 
 Als de capaciteit per individuele `route_id` direct tegen de scheepvaartintensiteit `I` getoetst zou worden, zou elke route met `overnight_berth_length_m == 0` per definitie niet voldoen zodra er scheepvaartverkeer overheen vaart (`I > 0`). In de praktijk komt dit door twee redenen:
 
@@ -128,35 +128,33 @@ Hierin is `I` het maatgevend aantal passerende schepen per dag (95e percentiel),
 
 ---
 
-### 7.3 Uitgewerkt rekenvoorbeeld: `route_id = 40230` (Beerkanaal, code `116a`)
+### 7.3 Uitgewerkt rekenvoorbeeld: `route_id = {{ example_route.route_id }}` ({{ example_route.route_name }}, code `{{ example_route.route_code }}`)
 
-#### Stap A: Huidige resultaat per individuele `route_id` (lokaal op `40230`)
+#### Stap A: Resultaat per individuele `route_id` (lokaal)
 
-* **Trajectlengte**: `L = 4,279` km (`Hoofdtransportas`, code `116a`).
-* **Verwachte overnachtingsfractie op het traject zelf**: P_stop,gecorrigeerd = 0,82 × 4,279 / 168,0 = 0,02089 (2,09% van de passanten overnacht op dit trajectdeel).
-* **Lokale capaciteit op `route_id = 40230`**: 0 m kade `->` **0 schepen** (bedienbare verkeersintensiteit `= 0` schepen/jaar). Op route-ID-niveau lijkt het Beerkanaal dus 0% bedienbare verkeersintensiteit te hebben.
+* **Trajectlengte**: `L = {{ example_route.total_length_km | fmt_nl(3) }}` km (`{{ example_route.network_type }}`).
+* **Verwachte overnachtingsfractie op het traject zelf**: P_stop,gecorrigeerd = {{ example_route.f_overnacht | fmt_nl(2) }} × {{ example_route.total_length_km | fmt_nl(3) }} / {{ (example_route.sailing_speed_kmh * example_route.sailing_hours_per_day) | fmt_nl(1) }} = {{ example_route.expected_overnight_stops | fmt_nl(5) }} ({{ (example_route.expected_overnight_stops * 100) | fmt_nl(2) }}% van de passanten overnacht op dit trajectdeel).
+* **Lokale capaciteit**: {{ example_route.overnight_berth_length_m | fmt_nl(0) }} m kade `->` **{{ example_route.overnight_capacity_ships_85m | fmt_nl(0) }} schepen**. Op route-ID-niveau lijkt deze route dus geen ligplaatscapaciteit te hebben.
 
-#### Stap B: Capaciteit in de direct aantakkende zijhavens en binnen bereik op de netwerkgraaf
-Wanneer we vanuit de knopen van het Beerkanaal (`40230`) over de netwerkgraaf zoeken naar overnachtingsligplaatsen in de direct aantakkende bekkenroutes en de omliggende corridor, vinden we:
+#### Stap B: Capaciteit binnen bereik op de netwerkgraaf (corridor)
 
-| Schaalniveau rond Beerkanaal (`40230`) | Aantal ligplaatsen | Effectieve kadelengte (m) | Capaciteit 85 m (IV) | Capaciteit 110 m (Va) | Capaciteit 135 m (Vb) |
+| Schaalniveau | Aantal ligplaatsen | Effectieve kadelengte (m) | Capaciteit 85 m (IV) | Capaciteit 110 m (Va) | Capaciteit 135 m (Vb) |
 |---|---|---|---|---|---|
-| **1. Alleen `route_id = 40230` (lokaal)** | 0 | 0 m | **0 schepen** | **0 schepen** | **0 schepen** |
-| **2. Direct aantakkende zijbekkens van `40230`** *(Mississippihaven, Europahaven, Amazonehaven, 6e Petroleumhaven, Tennesseehaven)* | 21 | 9.153 m | **75 schepen** | **62 schepen** | **47 schepen** |
-| **3. Netwerkstraal `<= 5` km** *(incl. Hartelhaven, Beneluxhaven, Elbehaven, Yangtzehaven en directe aansluiting Caland-/Hartelkanaal)* | 51 | 26.994 m | **224 schepen** | **186 schepen** | **135 schepen** |
-| **4. Volledig RVW-verzorgingsgebied `<= 15` km** *(gehele Maasvlakte / Europoort / Rozenburg cluster)* | 107 | 59.627 m | **522 schepen** | **415 schepen** | **317 schepen** |
+| **1. Alleen `route_id = {{ example_route.route_id }}` (lokaal)** | {{ example_route.num_overnight_berths | fmt_nl(0) }} | {{ example_route.overnight_berth_length_m | fmt_nl(0) }} m | **{{ example_route.overnight_capacity_ships_85m | fmt_nl(0) }} schepen** | **{{ example_route.overnight_capacity_ships_110m | fmt_nl(0) }} schepen** | **{{ example_route.overnight_capacity_ships_135m | fmt_nl(0) }} schepen** |
+| **2. Netwerk-verzorgingsgebied `<= 15` km (corridor)** | {{ example_route.corridor_overnight_berths | fmt_nl(0) }} | {{ example_route.corridor_overnight_berth_length_m | fmt_nl(0) }} m | **{{ example_route.corridor_overnight_capacity_ships_85m | fmt_nl(0) }} schepen** | **{{ example_route.corridor_overnight_capacity_ships_110m | fmt_nl(0) }} schepen** | **{{ example_route.corridor_overnight_capacity_ships_135m | fmt_nl(0) }} schepen** |
 
-#### Stap C: Voorbeeldtoetsing aan de verkeersintensiteit op het Beerkanaal
-Illustratie op schaalniveau 2 (alleen de **direct aantakkende zijbekkens van het Beerkanaal**: 9.153 m effectieve kadelengte, oftewel **75 schepen @ 85 m**, **62 schepen @ 110 m** en **47 schepen @ 135 m**) met P_stop,gecorrigeerd = 0,02089:
+#### Stap C: Voorbeeldtoetsing aan de verkeersintensiteit
 
-1. **Omgekeerd: maximaal aantal passerende schepen per dag dat de zijbekkens kunnen bedienen** (I = C / P_stop,gecorrigeerd):
-   * **Scenario 85 m (75 plaatsen)**: 75 / 0,02089 = 3.591 passages per dag;
-   * **Scenario 110 m (62 plaatsen)**: 62 / 0,02089 = 2.969 passages per dag;
-   * **Scenario 135 m (47 plaatsen)**: 47 / 0,02089 = 2.250 passages per dag.
+Illustratie op de corridor (`<= 15` km) met P_stop,gecorrigeerd = {{ example_route.expected_overnight_stops | fmt_nl(5) }}:
+
+1. **Omgekeerd: maximaal aantal passerende schepen per dag dat de corridor kan bedienen** (I = C / P_stop,gecorrigeerd):
+   * **Scenario 85 m ({{ example_route.corridor_overnight_capacity_ships_85m | fmt_nl(0) }} plaatsen)**: {{ (example_route.corridor_overnight_capacity_ships_85m / example_route.expected_overnight_stops) | fmt_nl(0) }} passages per dag;
+   * **Scenario 110 m ({{ example_route.corridor_overnight_capacity_ships_110m | fmt_nl(0) }} plaatsen)**: {{ (example_route.corridor_overnight_capacity_ships_110m / example_route.expected_overnight_stops) | fmt_nl(0) }} passages per dag;
+   * **Scenario 135 m ({{ example_route.corridor_overnight_capacity_ships_135m | fmt_nl(0) }} plaatsen)**: {{ (example_route.corridor_overnight_capacity_ships_135m / example_route.expected_overnight_stops) | fmt_nl(0) }} passages per dag.
 
 2. **Toets bij een aangenomen intensiteit** (fictief: I = 110 schepen per dag, 95e percentiel):
-   * **Normvraag**: Id = 110 × 0,02089 = 2,3, afgerond 3 overnachtingsplaatsen;
-   * **Toetsresultaat**: met 75, 62 en 47 plaatsen in de zijbekkens is C_gebied >= Id in alle drie de scheepslengtescenario's (**voldoet**). De werkelijke intensiteit komt uit stap 2 (BIVAS).
+   * **Normvraag**: Id = 110 × {{ example_route.expected_overnight_stops | fmt_nl(5) }} = {{ (110 * example_route.expected_overnight_stops) | fmt_nl(1) }} overnachtingsplaatsen;
+   * **Toetsresultaat**: met {{ example_route.corridor_overnight_capacity_ships_85m | fmt_nl(0) }}, {{ example_route.corridor_overnight_capacity_ships_110m | fmt_nl(0) }} en {{ example_route.corridor_overnight_capacity_ships_135m | fmt_nl(0) }} plaatsen in de corridor is C_gebied {% if example_route.corridor_overnight_capacity_ships_135m >= 110 * example_route.expected_overnight_stops %}>={% else %}<{% endif %} Id in alle drie de scheepslengtescenario's. De werkelijke intensiteit komt uit stap 2 (BIVAS).
 
 ---
 
