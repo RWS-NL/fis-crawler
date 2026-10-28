@@ -6,6 +6,7 @@ from shapely.geometry import LineString, Point
 
 from scripts.berth_analysis.analyze_spatial_capacity import (
     DAILY_SAILING_DISTANCE_KM,
+    FRACTION_OVERNIGHT,
     build_network_classification_map,
     calc_berth_ship_slots,
     calc_segment_compliant_length,
@@ -310,8 +311,8 @@ def test_classify_and_calculate_capacity(sample_berths_and_cardropoffs):
 
     assert df.loc[df["id"] == "4", "is_overnight"].iloc[0]
     assert df.loc[df["id"] == "4", "effective_length_m"].iloc[0] == 450.0
-    # 450m restricted to max 110m ships -> 4 ships at 85m, 3 ships at 110m, 0 ships at 135m
-    assert df.loc[df["id"] == "4", "capacity_ships_85m"].iloc[0] == 4
+    # 450m restricted to max 110m ships -> 5 ships at 85m (s = 5 m), 3 ships at 110m (s = 10 m), 0 ships at 135m
+    assert df.loc[df["id"] == "4", "capacity_ships_85m"].iloc[0] == 5
     assert df.loc[df["id"] == "4", "capacity_ships_110m"].iloc[0] == 3
     assert df.loc[df["id"] == "4", "capacity_ships_135m"].iloc[0] == 0
 
@@ -330,6 +331,7 @@ def test_width_fallback_rows_and_spatial_cardropoff_clustering():
                 "signalling": None,
                 "length": 700.0,
                 "width": 36.0,
+                "shoreline_category": "PIER",
                 "number_of_rows": None,
                 "maximal_ship_length": 135.0,
                 "geometry": Point(5.5500, 51.8900),
@@ -356,7 +358,7 @@ def test_width_fallback_rows_and_spatial_cardropoff_clustering():
         columns=["id", "berth_id", "name", "geometry"], crs="EPSG:4326"
     )
     df = classify_and_calculate_capacity(berths, cardropoffs)
-    # b1 has width=36.0 and number_of_rows=None -> floor(36.0 / 11.4) = 3 rows
+    # b1 is a pier (steiger) with width=36.0 and number_of_rows=None -> floor(36.0 / 11.4) = 3 rows
     assert df.loc[df["id"] == "b1", "effective_rows"].iloc[0] == 3.0
     assert df.loc[df["id"] == "b1", "effective_length_m"].iloc[0] == 2100.0
     # 700m @ 110m -> floor(710/120) = 5 per row * 3 rows = 15 ships (>= 15 threshold)
@@ -421,6 +423,22 @@ def test_anchorage_swing_diameter_and_max_quay_rows():
                 "maximal_ship_length": None,
                 "geometry": Point(4.5, 51.8),
             },
+            {
+                "id": "pier_wide",
+                "route_id": "100",
+                "route_km": 2.5,
+                "name": "Brede steiger havenbekken",
+                "facility": ["OVERNIGHT_ACCOMODATION"],
+                "category": "ALL_VESSELS",
+                "maximum_stay_duration_h": 72.0,
+                "signalling": None,
+                "length": 300.0,
+                "width": 80.0,
+                "shoreline_category": "PIER",
+                "number_of_rows": None,
+                "maximal_ship_length": None,
+                "geometry": Point(4.55, 51.85),
+            },
         ],
         crs="EPSG:4326",
     )
@@ -441,9 +459,12 @@ def test_anchorage_swing_diameter_and_max_quay_rows():
     # floor((400 + 10) / 120) = 3 ships (matches empirical 4-month AIS timex!)
     assert df.loc[df["id"] == "anc2", "capacity_ships_110m"].iloc[0] == 3.0
 
-    # quay_wide: 80m wide quay -> width / 11.4 = 7 rows, capped at MAX_QUAY_ROWS = 3.0
-    assert df.loc[df["id"] == "quay_wide", "effective_rows"].iloc[0] == 3.0
-    assert df.loc[df["id"] == "quay_wide", "effective_length_m"].iloc[0] == 900.0
+    # quay_wide: 80m wide quay -> width / 11.4 = 7 rows, capped at MAX_QUAY_ROWS = 2.0
+    assert df.loc[df["id"] == "quay_wide", "effective_rows"].iloc[0] == 2.0
+    assert df.loc[df["id"] == "quay_wide", "effective_length_m"].iloc[0] == 600.0
+    # pier_wide: same dimensions at a pier (steiger) -> capped at MAX_PIER_ROWS = 3.0
+    assert df.loc[df["id"] == "pier_wide", "effective_rows"].iloc[0] == 3.0
+    assert df.loc[df["id"] == "pier_wide", "effective_length_m"].iloc[0] == 900.0
 
 
 def test_recreation_and_yacht_lock_exclusion():
@@ -580,8 +601,9 @@ def test_compute_route_berth_capacity(berth_capacity_inputs):
     r = gdf_routes.iloc[0]
     assert r["is_hvwn"]
 
-    # Expected overnight stops = 20 / 168 (unrounded during computation)
-    expected_p_stop = 20.0 / DAILY_SAILING_DISTANCE_KM
+    # Expected overnight stops = f_overnacht * 20 / 168 (unrounded during computation)
+    expected_p_stop = FRACTION_OVERNIGHT * 20.0 / DAILY_SAILING_DISTANCE_KM
+    assert r["f_overnacht"] == pytest.approx(0.82)
     assert r["expected_overnight_stops"] == pytest.approx(expected_p_stop, abs=1e-6)
 
     # Overnight length & capacity
@@ -590,22 +612,24 @@ def test_compute_route_berth_capacity(berth_capacity_inputs):
     assert r["overnight_capacity_ships_110m"] == 2
     assert r["overnight_capacity_ships_135m"] == 1
 
-    # Max carrying capacity overnight: (240 / 1000) * (168 / 20) * 365 = 735.84 km/yr
-    expected_max_cap = (240.0 / 1000.0) * (168.0 / 20.0) * 365.0
+    # Max carrying capacity overnight: (240 / 1000) * 365 / P_stop, with P_stop = 0.82 * 20 / 168
+    expected_max_cap = (240.0 / 1000.0) * (168.0 / (FRACTION_OVERNIGHT * 20.0)) * 365.0
     assert r["max_overnight_traffic_volume_km_yr"] == pytest.approx(
         expected_max_cap, abs=1e-4
     )
     assert r["max_overnight_passages_110m_yr"] == pytest.approx(
-        2 * (168.0 / 20.0) * 365.0, abs=1e-4
+        2 * (168.0 / (FRACTION_OVERNIGHT * 20.0)) * 365.0, abs=1e-4
     )
     assert r["max_overnight_passages_135m_yr"] == pytest.approx(
-        1 * (168.0 / 20.0) * 365.0, abs=1e-4
+        1 * (168.0 / (FRACTION_OVERNIGHT * 20.0)) * 365.0, abs=1e-4
     )
 
     # Kegel length & capacity
     assert r["kegel_berth_length_m"] == 120.0
     assert r["kegel_meter_nights_yr"] == 120.0 * 365.0
-    expected_max_kegel = (120.0 / 1000.0) * (168.0 / 20.0) * 365.0
+    expected_max_kegel = (
+        (120.0 / 1000.0) * (168.0 / (FRACTION_OVERNIGHT * 20.0)) * 365.0
+    )
     assert r["max_kegel_traffic_volume_km_yr"] == pytest.approx(
         expected_max_kegel, abs=1e-4
     )
