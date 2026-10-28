@@ -383,7 +383,7 @@ Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot 
 
 | Aspect | Afspraak |
 | :--- | :--- |
-| Sleutel | `route_id` (string, uniek). `route_id` is de sleutel; `route_code` is niet in alle FIS-routes uniek. |
+| Sleutel | `route_id` (string, uniek). Gebruik niet `route_code`: die is niet in alle FIS-routes uniek. |
 | Niveau | Eén rij per FIS-vaarwegroute. Aanbod is lokaal (`overnight_*`, `kegel_*`) en per corridor ≤ 15 km resp. ≤ 30 km (`corridor_overnight_*`, `corridor_kegel_*`). |
 | Lengte | `total_length_km` (km): de lengte $L$ in de formule voor $P_{\text{stop}}$ in stap 3. |
 | Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen. |
