@@ -45,6 +45,7 @@
 ## 3. Schema Compliance & Attribute Completeness
 
 {% for elem_type in ["nodes", "edges"] %}
+
 ### {{ elem_type.capitalize() }}
 {% set data = schema[elem_type] %}
 
@@ -107,7 +108,53 @@
 {% endfor %}
 {% endif %}
 
-## 7. Suggested Improvements
+## 7. Harbour Topology
+Harbours hang beside the fairway as leaves: one `harbour_access` edge of at least {{ "%.0f"|format(harbours.min_access_length_m) }} m, attached to a fairway that stays connected.
+
+- **Status**: {% if harbours.status == "PASS" %}✅{% else %}⚠️{% endif %} {{ harbours.status }}
+- **Harbours**: {{ harbours.total_harbours }} (attached to {{ harbours.attachment_nodes }} fairway nodes)
+- **Not a leaf (in the fairway)**: {{ harbours.not_leaf|length }}
+- **Access shorter than {{ "%.0f"|format(harbours.min_access_length_m) }} m (on the fairway)**: {{ harbours.short_access|length }}
+- **Connection nodes without two fairway neighbours (fairway cut)**: {{ harbours.dangling_connections|length }}
+- **Outside the largest component**: {{ harbours.unreachable|length }}
+
+{% if harbours.not_leaf %}
+### Harbours That Are Not a Leaf
+| Harbour Node | Degree |
+|--------------|--------|
+{% for h in harbours.not_leaf[:20] %}
+| {{ h.node }} | {{ h.degree }} |
+{% endfor %}
+{% endif %}
+
+{% if harbours.short_access %}
+### Short Harbour Access Edges (Top 20)
+| Harbour Node | Attached To | Length (m) |
+|--------------|-------------|------------|
+{% for h in harbours.short_access[:20] %}
+| {{ h.node }} | {{ h.attached_to }} | {{ "%.2f"|format(h.length) }} |
+{% endfor %}
+{% endif %}
+
+{% if harbours.dangling_connections %}
+### Connection Nodes That Cut the Fairway
+| Connection Node | Fairway Neighbours |
+|-----------------|--------------------|
+{% for c in harbours.dangling_connections %}
+| {{ c.node }} | {{ c.fairway_neighbours|join(", ") }} |
+{% endfor %}
+{% endif %}
+
+{% if harbours.unreachable %}
+### Harbours Outside the Largest Component
+| Harbour Node |
+|--------------|
+{% for h in harbours.unreachable[:20] %}
+| {{ h.node }} |
+{% endfor %}
+{% endif %}
+
+## 8. Suggested Improvements
 - **Attribute Cleanup**: Investigate attributes with high missing/null counts (>50%) and determine if they are required or can be dropped.
 - **Graph Connectivity**: There are multiple disjoint subgraphs. Investigate whether the top 2-10 subgraphs are legitimately disconnected waterways or missing logical connections.
 - **Legacy Attributes**: If non-standard legacy attributes are flagged, ensure they are added to `schema.toml` `attributes.edges` or `attributes.nodes` to map to canonical names.

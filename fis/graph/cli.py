@@ -495,6 +495,7 @@ def validate(
     validator.check_critical_connections()
     validator.check_dropins()
     validator.check_edge_geometry()
+    validator.check_harbours()
 
     # Generate report
     report = validator.generate_markdown_report()
