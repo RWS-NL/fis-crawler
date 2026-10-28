@@ -153,6 +153,17 @@ SIMPLIFIED_LOCK_SPLICING_BUFFER_M = 10.0
 # Upper bound for lock buffers in simplified mode.
 SIMPLIFIED_LOCK_MAX_BUFFER_M = 50.0
 
+# --- Harbour Integration ---
+
+# Harbours whose projection lies within this distance (meters) along the fairway are
+# clustered onto one connection node. A cluster this close to the start or end of its
+# section attaches to the existing junction instead of splicing the section.
+HARBOUR_JUNCTION_SNAP_M = 1.0
+
+# Minimum length (meters) of a harbour_access edge. A harbour node closer to the fairway
+# is moved away from it, so the harbour stays a leaf beside the fairway, not on it.
+HARBOUR_MIN_ACCESS_LENGTH_M = 10.0
+
 # --- Spatial Matching Buffers ---
 # Used to associate structures with other geographic features.
 
