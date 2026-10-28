@@ -19,6 +19,8 @@ uv run python -m scripts.berth_analysis.analyze_spatial_capacity \
   --output-dir output/berth-analysis
 ```
 
+De toetsing beperkt zich tot het **Hoofdvaarwegennet**: Hoofdtransportassen en Hoofdvaarwegen (`is_hvwn`). Het script schrijft daarnaast nog `route_berth_capacity_all.geoparquet` en `route_segments_compliance_all.geoparquet` (alle routes); die worden nergens gebruikt en vervallen.
+
 De analyse genereert de volgende bestanden in `output/berth-analysis/`:
 
 | Bestand | Inhoud |
@@ -26,9 +28,7 @@ De analyse genereert de volgende bestanden in `output/berth-analysis/`:
 | `berths_analyzed.geoparquet` | Alle FIS-ligplaatsen verrijkt met classificatievlaggen, kegelstatus, rij-afleiding uit `width` en scheepscapaciteit (85m / 110m / 135m) |
 | `berth_clusters.geojson` | Geclusterde overnachtingslocaties ($\Delta \text{km} \le 0{,}5$ km) met toetsing op aanwezigheid van een autoafzetplaats (RVW 2020 § 6.6) |
 | `route_segments_compliance.geoparquet` (`.geojson`) | Ruimtelijke dekkingsanalyse per routetussenstuk op het **Hoofdvaarwegnet (HVWN)** (Hoofdtransportassen + Hoofdvaarwegen) |
-| `route_segments_compliance_all.geoparquet` | Ruimtelijke dekkingsanalyse per routetussenstuk over **alle** FIS-vaarwegroutes |
 | `route_berth_capacity.geoparquet` (`.csv`, `.geojson`) | Geaggregeerde ligplaatscapaciteit, corridorcapaciteit (≤ 15 km) en maximale jaarlijkse bedienbare verkeersintensiteit per **HVWN-route** |
-| `route_berth_capacity_all.geoparquet` | Geaggregeerde ligplaatscapaciteit, corridorcapaciteit (≤ 15 km) en maximale jaarlijkse bedienbare verkeersintensiteit over **alle** gekoppelde FIS-routes |
 | `berth_spatial_report.md` | Samenvattend rapport in Markdown met landelijke tabellen, knelpunten, autoafzetplaatstest en rekenvoorbeelden |
 
 ---
@@ -280,11 +280,10 @@ Dit bestand bevat de geclusterde overnachtingslocaties (overnachtingsligplaatsen
 
 ---
 
-### 3.3 `route_segments_compliance.geoparquet` & `route_segments_compliance_all.geoparquet`
-Elk record in deze bestanden vertegenwoordigt een **routetussenstuk (edge)** op de topologische vaarweggraaf tussen twee opeenvolgende splitsingsknopen (`SectionJunction`) of ligplaatsprojectiepunten op een route.
+### 3.3 `route_segments_compliance.geoparquet`
+Elk record in dit bestand vertegenwoordigt een **routetussenstuk (edge)** op de topologische vaarweggraaf tussen twee opeenvolgende splitsingsknopen (`SectionJunction`) of ligplaatsprojectiepunten op een route.
 
 * `route_segments_compliance.geoparquet` bevat uitsluitend de segmenten op het **Hoofdvaarwegnet (`is_hvwn == True`)**.
-* `route_segments_compliance_all.geoparquet` bevat de segmenten van **alle** FIS-routes.
 
 | Veldnaam | Type | Eenheid | Formule / Toelichting |
 | :--- | :--- | :--- | :--- |
@@ -311,11 +310,10 @@ Elk record in deze bestanden vertegenwoordigt een **routetussenstuk (edge)** op 
 
 ---
 
-### 3.4 `route_berth_capacity.geoparquet` (`.csv`, `.geojson`) & `route_berth_capacity_all.geoparquet`
-Elk record in deze bestanden vertegenwoordigt één **volledige FIS-vaarwegroute** (`route_id`) met zowel de **lokale ligplaatscapaciteit** (ligplaatsen met exact dezelfde `route_id`), de **ruimtelijke dekkingsgraad**, als de **corridorcapaciteit (≤ 15 km)** (alle ligplaatsen die over de vaarweggraaf binnen $\le 15\text{ km}$ resp. $\le 30\text{ km}$ vanaf de route bereikbaar zijn).
+### 3.4 `route_berth_capacity.geoparquet` (`.csv`, `.geojson`)
+Elk record in dit bestand vertegenwoordigt één **volledige FIS-vaarwegroute** (`route_id`) met zowel de **lokale ligplaatscapaciteit** (ligplaatsen met exact dezelfde `route_id`), de **ruimtelijke dekkingsgraad**, als de **corridorcapaciteit (≤ 15 km)** (alle ligplaatsen die over de vaarweggraaf binnen $\le 15\text{ km}$ resp. $\le 30\text{ km}$ vanaf de route bereikbaar zijn).
 
 * `route_berth_capacity.geoparquet` bevat de **HVWN-routes** (`is_hvwn == True`).
-* `route_berth_capacity_all.geoparquet` bevat **alle gekoppelde FIS-routes**.
 
 #### A. Algemene route-eigenschappen
 
@@ -385,7 +383,7 @@ Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot 
 
 | Aspect | Afspraak |
 | :--- | :--- |
-| Sleutel | `route_id` (string, uniek). `route_code` is in het bestand met alle routes niet uniek; gebruik daarom altijd `route_id`. |
+| Sleutel | `route_id` (string, uniek). `route_id` is de sleutel; `route_code` is niet in alle FIS-routes uniek. |
 | Niveau | Eén rij per FIS-vaarwegroute. Aanbod is lokaal (`overnight_*`, `kegel_*`) en per corridor ≤ 15 km resp. ≤ 30 km (`corridor_overnight_*`, `corridor_kegel_*`). |
 | Lengte | `total_length_km` (km): de lengte $L$ in de formule voor $P_{\text{stop}}$ in stap 3. |
 | Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen. |

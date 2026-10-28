@@ -12,7 +12,7 @@ De toetsing van ligplaatsen aan de verkeersintensiteit bestaat uit drie onafhank
 
 ## Stap 1: capaciteit (bestaand)
 
-Methodiek: [berth_spatial_capacity.md](berth_spatial_capacity.md). Eén rij per route, de 49 HVWN-routes in `route_berth_capacity.geoparquet`. De uitvoer van stap 1 is een **ruimtelijk bestand** (GeoParquet, route-`LineString` in EPSG:4326); alleen dat bestand is de koppeling met stap 2 en 3. Een CSV (zonder geometrie) is geen invoer. Het bestand `route_berth_capacity_all.geoparquet` (alle routes) valt buiten deze toetsing.
+Methodiek: [berth_spatial_capacity.md](berth_spatial_capacity.md). Eén rij per route, de 49 HVWN-routes in `route_berth_capacity.geoparquet`. De uitvoer van stap 1 is een **ruimtelijk bestand** (GeoParquet, route-`LineString` in EPSG:4326); alleen dat bestand is de koppeling met stap 2 en 3. Een CSV (zonder geometrie) is geen invoer.
 
 | Grootheid | Kolom | Eenheid | Niveau |
 |---|---|---|---|
