@@ -8,6 +8,8 @@ from .schema import load_schema
 from datetime import datetime
 import jinja2
 
+from fis import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +60,7 @@ class GraphValidator:
             "critical_connections": {},
             "dropins": {},
             "edge_geometry": {},
+            "harbours": {},
         }
 
     def check_edge_geometry(self) -> Dict[str, Any]:
@@ -361,6 +364,75 @@ class GraphValidator:
         self.results["dropins"] = dropins_health
         return dropins_health
 
+    def check_harbours(self) -> Dict[str, Any]:
+        """Check that harbours hang beside the fairway as leaves and keep it connected.
+
+        - Each harbour node is a leaf with a single harbour_access edge (beside the
+          fairway, not a through node in it).
+        - That access edge is at least HARBOUR_MIN_ACCESS_LENGTH_M long (the harbour
+          node does not sit on the fairway).
+        - Each harbour_*_connection node spliced into a fairway has exactly two fairway
+          neighbours, so splicing did not cut the fairway (issue #210).
+        - Each harbour lies in the largest connected component.
+        """
+        logger.info("Checking harbour topology...")
+
+        min_len = settings.HARBOUR_MIN_ACCESS_LENGTH_M
+        # The minimum is laid out in RD New, but length_m is geodesic; the RD scale
+        # factor (0.9999079 at the origin) makes geodesic lengths up to ~0.02% shorter.
+        min_geodesic_len = min_len * 0.999
+        largest = max(nx.connected_components(self.graph), key=len, default=set())
+
+        harbours = [
+            n for n, d in self.graph.nodes(data=True) if d.get("node_type") == "harbour"
+        ]
+        not_leaf = []
+        short_access = []
+        unreachable = []
+        attachment_nodes = set()
+        for h in harbours:
+            neighbours = list(self.graph.neighbors(h))
+            access = [
+                m
+                for m in neighbours
+                if self.graph[h][m].get("segment_type") == "harbour_access"
+            ]
+            if len(neighbours) != 1 or len(access) != 1:
+                not_leaf.append({"node": h, "degree": len(neighbours)})
+            for m in access:
+                attachment_nodes.add(m)
+                length = self.graph[h][m].get("length_m") or 0.0
+                if length < min_geodesic_len:
+                    short_access.append({"node": h, "attached_to": m, "length": length})
+            if h not in largest:
+                unreachable.append({"node": h})
+
+        dangling = []
+        for n in attachment_nodes:
+            if not str(n).endswith("_connection"):
+                continue
+            fairway = [
+                m
+                for m in self.graph.neighbors(n)
+                if self.graph[n][m].get("segment_type") != "harbour_access"
+            ]
+            if len(fairway) != 2:
+                dangling.append({"node": n, "fairway_neighbours": fairway})
+
+        failed = not_leaf or short_access or dangling or unreachable
+        harbour_health = {
+            "total_harbours": len(harbours),
+            "attachment_nodes": len(attachment_nodes),
+            "min_access_length_m": min_len,
+            "not_leaf": not_leaf,
+            "short_access": short_access,
+            "dangling_connections": dangling,
+            "unreachable": unreachable,
+            "status": "FAIL" if failed else "PASS",
+        }
+        self.results["harbours"] = harbour_health
+        return harbour_health
+
     def generate_markdown_report(self) -> str:
         """Generate a Markdown report from results using Jinja2 template."""
         stats = self.results["statistics"]
@@ -369,6 +441,7 @@ class GraphValidator:
         critical = self.results["critical_connections"]
         dropins = self.results.get("dropins", {})
         edge_geometry = self.results.get("edge_geometry", {})
+        harbours = self.results.get("harbours", {})
 
         # Calculate sources for table
         sources = set(
@@ -377,7 +450,11 @@ class GraphValidator:
         )
 
         template_dir = pathlib.Path(__file__).parent / "templates"
-        env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir))
+        env = jinja2.Environment(
+            loader=jinja2.FileSystemLoader(template_dir),
+            trim_blocks=True,
+            lstrip_blocks=True,
+        )
         template = env.get_template("validation_report.md.j2")
 
         return template.render(
@@ -388,5 +465,6 @@ class GraphValidator:
             critical=critical,
             dropins=dropins,
             edge_geometry=edge_geometry,
+            harbours=harbours,
             sources=list(sources),
         )
