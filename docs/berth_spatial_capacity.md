@@ -184,7 +184,7 @@ D_dag = v_gem * T_dag = 12 * 14 = 168,0 km/etmaal
    P_stop = L_route / 168,0   [stops / passage]
    ```
 
-   In deze stap geldt `f_overnacht = 1` (alle passanten overnachten). Het aandeel continuvaart (`f_overnacht = 1 - aandeel continuvaart`) en de definitieve waarden voor `v` en `T` worden in stap 3 toegepast. De kolommen die `P_stop` bevatten (`expected_overnight_stops`, `max_*_traffic_volume_km_yr`, `max_*_passages_*_yr`) zijn daarom indicatief en geen invoer voor de toetsing.
+   `P_stop` is het "percentage schepen dat overnacht" uit RVW 2020 § 6.4.2 (p. 146): gemiddelde reistijd (`L_route / v_gem`) gedeeld door de maximale vaartijd (`T_dag`). In deze stap wordt geen correctie voor continuvaart toegepast (aandeel continuvaart `c = 0`, alle passanten overnachten). Die correctie, `(1 - c)`, en de definitieve waarden voor `v` en `T` worden in stap 3 toegepast. De kolommen die `P_stop` bevatten (`expected_overnight_stops`, `max_*_traffic_volume_km_yr`, `max_*_passages_*_yr`) zijn daarom indicatief en geen invoer voor de toetsing.
 
 2. **Jaarlijkse kademeter-nachten (`overnight_meter_nights_yr` / `kegel_meter_nights_yr`)**:
    ```text
@@ -435,7 +435,7 @@ Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot 
 | Niveau | Eén rij per FIS-vaarwegroute. Aanbod is lokaal (`overnight_*`, `kegel_*`) en per corridor ≤ 15 km resp. ≤ 30 km (`corridor_overnight_*`, `corridor_kegel_*`). |
 | Lengte | `total_length_km` (km): de lengte `L` in de formule voor `P_stop` in stap 3. |
 | Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen. |
-| Niet gebruiken voor de toetsing | `expected_overnight_stops` en `max_*_yr` (bevatten `f_overnacht = 1`, 12 km/u, 14 u; zie § 2.6). |
+| Niet gebruiken voor de toetsing | `expected_overnight_stops` en `max_*_yr` (bevatten `c = 0`, 12 km/u, 14 u; zie § 2.6). |
 | Formaat | Ruimtelijk bestand: `route_berth_capacity.geoparquet` is de interface (de `.csv` bevat geen geometrie en is geen invoer voor de volgende stappen). |
 | Koppelen | Primair op `route_id`, terugval ruimtelijk op de routegeometrie. Daarom blijven zowel `route_id` als de geometrie in alle uitvoerbestanden van de stappen behouden en ongewijzigd (niet vereenvoudigd). |
 | Geometrie | Eén `LineString` per route in **EPSG:4326**. BIVAS en de rest van het project werken in EPSG:28992 (`PROJECTED_CRS`): stap 2 moet herprojecteren voor ruimtelijke koppeling. |
