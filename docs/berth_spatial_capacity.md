@@ -381,16 +381,16 @@ Elk record in deze bestanden vertegenwoordigt één **volledige FIS-vaarwegroute
 
 ## 4. Koppeling met stap 2 en 3 (interface)
 
-Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` (HVWN, 49 routes) of `route_berth_capacity_all.geoparquet` (alle 2.068 routes).
+Stap 2 en 3 lezen alleen `route_berth_capacity.geoparquet` en beperken zich tot het **Hoofdvaarwegennet**: de 49 routes met `network_type` Hoofdtransportas of Hoofdvaarweg (`is_hvwn`). `route_berth_capacity_all.geoparquet` (alle routes) is hiervoor niet nodig.
 
 | Aspect | Afspraak |
 | :--- | :--- |
-| Sleutel | `route_id` (string, uniek in beide bestanden). `route_code` is in `route_berth_capacity_all` **niet** uniek en niet geschikt als sleutel. |
+| Sleutel | `route_id` (string, uniek). `route_code` is in het bestand met alle routes niet uniek; gebruik daarom altijd `route_id`. |
 | Niveau | Eén rij per FIS-vaarwegroute. Aanbod is lokaal (`overnight_*`, `kegel_*`) en per corridor ≤ 15 km resp. ≤ 30 km (`corridor_overnight_*`, `corridor_kegel_*`). |
 | Lengte | `total_length_km` (km): de lengte $L$ in de formule voor $P_{\text{stop}}$ in stap 3. |
 | Aanbod voor de toetsing | `*_berth_length_m` (m kade) en `*_capacity_ships_{85m,110m,135m}` (aantal schepen per lengtescenario). Dezelfde 85/110/135 m-scenario's gebruikt stap 2 voor de scheepsklassen. |
 | Niet gebruiken voor de toetsing | `expected_overnight_stops` en `max_*_yr` (bevatten $f_{\text{overnacht}} = 1$, 12 km/u, 14 u; zie § 2.6). |
 | Geometrie | Eén `LineString` per route in **EPSG:4326**. BIVAS en de rest van het project werken in EPSG:28992 (`PROJECTED_CRS`): stap 2 moet herprojecteren voor ruimtelijke koppeling. |
-| Routes zonder BIVAS-data | Blijven in stap 3 staan met onbekende intensiteit (niet nul). |
+| HVWN-routes zonder BIVAS-data | Blijven in stap 3 staan met onbekende intensiteit (niet nul). |
 
 De uitvoer van stap 2 (`output/bivas-intensity/`) gebruikt dezelfde `route_id`, `route_code`, `total_length_km` en dezelfde routeselectie (`is_hvwn`), zodat stap 3 een directe join op `route_id` kan doen.

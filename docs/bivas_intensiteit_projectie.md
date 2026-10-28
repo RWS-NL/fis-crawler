@@ -2,6 +2,8 @@
 
 De toetsing van ligplaatsen aan de verkeersintensiteit bestaat uit drie onafhankelijke stappen. Elke stap schrijft bestanden; de volgende stap leest alleen die bestanden. Alles wordt gekoppeld op **één sleutel: FIS-vaarwegroute `route_id` (string)**.
 
+**Reikwijdte:** alleen het **Hoofdvaarwegennet**: de routes met `network_type` Hoofdtransportas of Hoofdvaarweg (`is_hvwn`, 49 routes). Alle uitspraken over koppelbaarheid, dekking en aantallen in dit document gaan over deze 49 routes; andere FIS-routes en BIVAS-arcs daarbuiten zijn buiten beschouwing.
+
 | Stap | Doet | Invoer | Uitvoer |
 |---|---|---|---|
 | 1. Capaciteit | Ligplaatsaanbod per route berekenen | FIS-export (`berth`, `route`, …) | `output/berth-analysis/route_berth_capacity.*` (bestaat) |
@@ -10,7 +12,7 @@ De toetsing van ligplaatsen aan de verkeersintensiteit bestaat uit drie onafhank
 
 ## Stap 1: capaciteit (bestaand)
 
-Methodiek: [berth_spatial_capacity.md](berth_spatial_capacity.md). Eén rij per route (49 routes op het Hoofdvaarwegnet in `route_berth_capacity.*`, alle routes in `route_berth_capacity_all.geoparquet`).
+Methodiek: [berth_spatial_capacity.md](berth_spatial_capacity.md). Eén rij per route, de 49 HVWN-routes in `route_berth_capacity.*`. Het bestand `route_berth_capacity_all.geoparquet` (alle routes) valt buiten deze toetsing.
 
 | Grootheid | Kolom | Eenheid | Niveau |
 |---|---|---|---|
@@ -20,7 +22,7 @@ Methodiek: [berth_spatial_capacity.md](berth_spatial_capacity.md). Eén rij per 
 | Ligplaatsen corridor ≤ 15 km | `corridor_overnight_berth_length_m`, `corridor_overnight_capacity_ships_{85m,110m,135m}` | m, schepen | corridor rond de route |
 | Kegelligplaatsen | `kegel_*`, `corridor_kegel_*` (idem) | m, schepen | route / corridor |
 
-Details van de methode: [berth_spatial_capacity.md](berth_spatial_capacity.md) (§ 4 beschrijft deze koppeling vanuit stap 1). `route_id` is uniek; `route_code` is in `route_berth_capacity_all` niet uniek en is geen sleutel. De routegeometrie staat in EPSG:4326, BIVAS in EPSG:28992: herprojecteer voor de ruimtelijke koppeling.
+Details van de methode: [berth_spatial_capacity.md](berth_spatial_capacity.md) (§ 4 beschrijft deze koppeling vanuit stap 1). `route_id` is uniek (ook `route_code` is dat in de 49 HVWN-routes, maar `route_id` blijft de sleutel). De routegeometrie staat in EPSG:4326, BIVAS in EPSG:28992: herprojecteer voor de ruimtelijke koppeling.
 
 Voor de toetsing in stap 3 de **aantallen schepen** (`*_capacity_ships_*`) en kadelengtes gebruiken. De kolommen `expected_overnight_stops` en `max_*_yr` bevatten al vaste aannames (`f_overnacht` = 1, 12 km/u, 14 u) en zijn daarom geen invoer voor stap 3.
 
@@ -28,7 +30,7 @@ Voor de toetsing in stap 3 de **aantallen schepen** (`*_capacity_ships_*`) en ka
 
 ### Invoer
 
-- BIVAS-netwerk: `reference/Bivas.5.10.1.sqlite`, `BranchSetId = 337`, `CountryCode = 'NL'` (9.023 arcs; `arcs.Length__m`, `arc_vin_trajectory_connection` met `TrajectCode`, `StartKilometer`, `EndKilometer`).
+- BIVAS-netwerk: `reference/Bivas.5.10.1.sqlite`, `BranchSetId = 337`, `CountryCode = 'NL'` (9.023 arcs in totaal, waarvan alleen de arcs op de 49 HVWN-routes relevant zijn; `arcs.Length__m`, `arc_vin_trajectory_connection` met `TrajectCode`, `StartKilometer`, `EndKilometer`).
 - BIVAS-rekenresultaat van het gekozen scenario: per reis de gevolgde arcs, datum/tijd, richting en schip (lengte). De repo-database bevat alleen herkomst/bestemming per reis (`trips`), geen arcbelasting; het resultaat moet uit een BIVAS-run komen. Scenario (`scenarios.ID`) en jaar vastleggen.
 - FIS-routes uit stap 1 (`route_id`, `route_code`, `total_length_km`, geometrie).
 
@@ -36,7 +38,7 @@ Voor de toetsing in stap 3 de **aantallen schepen** (`*_capacity_ships_*`) en ka
 
 1. **Exacte code plus kilometeroverlap:** `route_code` = `TrajectCode` en overlap van het kilometerbereik (`fis.graph.bivas.has_km_overlap`, met omgekeerde kilometrering).
 2. **Niet alleen `normalize_code`:** die verwijdert letters, waardoor Beerkanaal (`116a`) en Calandkanaal (`116`) dezelfde arcs krijgen (idem `101`/`101a`, `130`/`130e`, `225`/`225e`, `233`/`233y`). BIVAS-subcodes (`088a/b/c`) kunnen andere FIS-routes zijn.
-3. **Ruimtelijke terugval** (50 m-buffer, zoals `scripts/bivas/compare_networks.py`) voor routes zonder codematch: nu 13 van de 49, vooral Zeeland (o.a. `147`, `149`, `160`, `161`, `180d`, `181`–`186`).
+3. **Ruimtelijke terugval** (50 m-buffer, zoals `scripts/bivas/compare_networks.py`) voor HVWN-routes zonder codematch: nu 13 van de 49, vooral Zeeland (o.a. `147`, `149`, `160`, `161`, `180d`, `181`–`186`).
 4. **Controle:** som `Length__m` van de gekoppelde arcs tegen `total_length_km`; ratio buiten ca. 0,8–1,2 handmatig beoordelen.
 
 ### Grootheden
@@ -101,4 +103,4 @@ Toets: aanbod (stap 1, corridor) ≥ `NB` plaatsen, of ≥ `LO = NB · (LP + s)`
 
 - Snelheid `v` en regime (A1/A2/B) per vaarweg onderbouwen, bijvoorbeeld met `ship_speeds` in BIVAS of IVS-data.
 - Zijhavencapaciteit kan dubbel tellen in naburige corridors: de capaciteit is per corridor (≤ 15 km), de intensiteit per route (Voronoi-toewijzing, rapport § 7.2, is nog niet geïmplementeerd).
-- Routes zonder BIVAS-arcs (nu 13 van de 49) krijgen geen intensiteit; stap 3 moet die als "onbekend" tonen, niet als nul.
+- HVWN-routes zonder BIVAS-arcs (nu 13 van de 49) krijgen geen intensiteit; stap 3 moet die als "onbekend" tonen, niet als nul.
