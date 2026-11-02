@@ -234,28 +234,132 @@ def build_edge_structures_lookup() -> dict:
     return lookup
 
 
+def _is_dutch_struct(struct_id: any) -> bool:
+    """Checks if the structure ID indicates a Dutch (FIS/RWS) navigational structure."""
+    if not struct_id:
+        return True
+    s_id_str = str(struct_id).upper()
+    return s_id_str.isdigit() or s_id_str.startswith("FIS_") or "NL" in s_id_str
+
+
+def _calc_penalty(excess: float, struct_id: any) -> float:
+    """Computes soft penalty heuristic: 1000 for Dutch structures, 5 * excess for foreign."""
+    if _is_dutch_struct(struct_id):
+        return 1000.0
+    return max(0.0, 5.0 * excess)
+
+
+def _get_chamber_width(ch: dict) -> float | None:
+    val = ch.get("dim_gate_width", ch.get("width"))
+    if is_valid(val):
+        try:
+            return float(val)
+        except ValueError, TypeError:
+            pass
+    return None
+
+
+def _get_chamber_length(ch: dict) -> float | None:
+    val = ch.get("dim_usable_length", ch.get("length"))
+    if is_valid(val):
+        try:
+            return float(val)
+        except ValueError, TypeError:
+            pass
+    return None
+
+
+def _get_opening_width(op: dict) -> float | None:
+    val = op.get("dim_structural_width", op.get("width_convoy", op.get("width")))
+    if is_valid(val):
+        try:
+            return float(val)
+        except ValueError, TypeError:
+            pass
+    return None
+
+
+def _group_chambers_by_lock(chambers: list) -> dict[str, list]:
+    """Groups lock chambers by structure identifier (lock_id, parent_id, or name)."""
+    groups = defaultdict(list)
+    for ch in chambers:
+        lid = (
+            ch.get("lock_id")
+            or ch.get("parent_id")
+            or ch.get("name")
+            or ch.get("id")
+            or "lock"
+        )
+        groups[str(lid)].append(ch)
+    return groups
+
+
+def _group_openings_by_bridge(openings: list) -> dict[str, list]:
+    """Groups bridge openings by structure identifier (bridge_id, parent_id, or name)."""
+    groups = defaultdict(list)
+    for op in openings:
+        bid = (
+            op.get("bridge_id")
+            or op.get("parent_id")
+            or op.get("name")
+            or op.get("id")
+            or "bridge"
+        )
+        groups[str(bid)].append(op)
+    return groups
+
+
+def _is_recreation_lock(lock_chambers: list) -> bool:
+    """
+    Checks if a lock complex is exclusively dedicated to pleasure craft / recreation
+    (e.g. Jachtensluizen, recreatiesluizen) which should not be used by commercial freight vessels.
+    """
+    for ch in lock_chambers:
+        name = f"{ch.get('name', '')} {ch.get('lock_name', '')}".lower()
+        if any(term in name for term in ("jacht", "recreatie", "pleziervaart")):
+            return True
+    return False
+
+
 def _find_min_width(chambers, openings, d_edge):
-    """Return (min_width, limiting_struct) across chambers, bridge openings, and the edge."""
+    """
+    Return (min_width, limiting_struct) across lock chambers, bridge openings, and the fairway edge.
+    For each individual lock and bridge, the widest passable opening/chamber is used (parallel options).
+    Across multiple structures in series on the section and the fairway edge itself,
+    the bottleneck (minimum width) is returned.
+    """
     min_width = 999.0
     limiting_struct = None
 
-    for ch in chambers:
-        w = ch.get("dim_gate_width", ch.get("width"))
-        if is_valid(w) and float(w) < min_width:
-            min_width = float(w)
-            limiting_struct = (ch.get("id"), ch.get("name", "Lock Chamber"), "lock")
+    lock_groups = _group_chambers_by_lock(chambers)
+    for lid, l_chambers in lock_groups.items():
+        best_ch = max(l_chambers, key=lambda c: _get_chamber_width(c) or 0.0)
+        w = _get_chamber_width(best_ch)
+        if w is not None and w < min_width:
+            min_width = w
+            limiting_struct = (
+                best_ch.get("id"),
+                best_ch.get("name", "Lock Chamber"),
+                "lock",
+            )
 
-    for op in openings:
-        w = op.get("dim_structural_width", op.get("width_convoy", op.get("width")))
-        if is_valid(w) and float(w) < min_width:
-            min_width = float(w)
-            limiting_struct = (op.get("id"), op.get("name", "Bridge Opening"), "bridge")
+    bridge_groups = _group_openings_by_bridge(openings)
+    for bid, b_openings in bridge_groups.items():
+        best_op = max(b_openings, key=lambda o: _get_opening_width(o) or 0.0)
+        w = _get_opening_width(best_op)
+        if w is not None and w < min_width:
+            min_width = w
+            limiting_struct = (
+                best_op.get("id"),
+                best_op.get("name", "Bridge Opening"),
+                "bridge",
+            )
 
     edge_w = d_edge.get("dim_structural_width", d_edge.get("mwidthcm"))
     if is_valid(edge_w):
-        edge_w = float(edge_w) / 100.0 if "mwidthcm" in d_edge else float(edge_w)
-        if edge_w < min_width:
-            min_width = edge_w
+        edge_w_m = float(edge_w) / 100.0 if "mwidthcm" in d_edge else float(edge_w)
+        if edge_w_m < min_width:
+            min_width = edge_w_m
             limiting_struct = (
                 get_edge_key(d_edge),
                 d_edge.get("name", "Fairway"),
@@ -266,20 +370,32 @@ def _find_min_width(chambers, openings, d_edge):
 
 
 def _find_min_length(chambers):
-    """Return (min_length, limiting_chamber) across lock chambers."""
+    """
+    Return (min_length, limiting_chamber) across lock structures.
+    For each lock complex, the longest chamber is used (parallel options).
+    Across multiple locks in series on the section, the bottleneck (minimum length) is returned.
+    """
     min_len = 999.0
     limiting_ch = None
-    for ch in chambers:
-        ch_length = ch.get("dim_usable_length", ch.get("length"))
-        if is_valid(ch_length) and float(ch_length) < min_len:
-            min_len = float(ch_length)
-            limiting_ch = (ch.get("id"), ch.get("name", "Lock Chamber"))
+
+    lock_groups = _group_chambers_by_lock(chambers)
+    for lid, l_chambers in lock_groups.items():
+        best_ch = max(l_chambers, key=lambda c: _get_chamber_length(c) or 0.0)
+        ch_l = _get_chamber_length(best_ch)
+        if ch_l is not None and ch_l < min_len:
+            min_len = ch_l
+            limiting_ch = (best_ch.get("id"), best_ch.get("name", "Lock Chamber"))
+
     return min_len, limiting_ch
 
 
 def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict):
     """
     Evaluates physical constraints of the edge and outputs heuristic penalties and violations.
+    Parallel chambers and bridge openings per structure are treated as alternatives: a ship only
+    needs one passable chamber or opening per structure (issue #212). Multiple structures in series
+    on a fairway section must all be passable.
+    Recreation-only locks are penalized for commercial vessel traffic (issue #211).
     """
     penalties = {
         "lock": 0.0,
@@ -294,56 +410,164 @@ def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict
     chambers = struct_data.get("chambers", [])
     openings = struct_data.get("openings", [])
 
-    min_width, limiting_struct = _find_min_width(chambers, openings, d_edge)
+    ship_beam = ship_dims.get("beam", 0.0)
+    ship_length = ship_dims.get("length", 0.0)
 
-    if ship_dims["beam"] > min_width:
-        struct_id = limiting_struct[0] if limiting_struct else None
-        struct_type = limiting_struct[2] if limiting_struct else "fairway"
-        is_dutch = True
-        if struct_id:
-            s_id_str = str(struct_id).upper()
-            is_dutch = (
-                s_id_str.isdigit() or s_id_str.startswith("FIS_") or "NL" in s_id_str
+    # 1. Lock structure constraints (grouped by lock complex)
+    lock_groups = _group_chambers_by_lock(chambers)
+    for lid, l_chambers in lock_groups.items():
+        # Check recreation / yacht lock penalty for commercial freight voyages
+        if _is_recreation_lock(l_chambers):
+            first_ch = l_chambers[0]
+            penalties["lock"] += 1000.0
+            violations.append(
+                {
+                    "type": "recreation",
+                    "ship_value": ship_beam,
+                    "limit_value": 0.0,
+                    "struct_id": first_ch.get("id"),
+                    "struct_name": first_ch.get("lock_name")
+                    or first_ch.get("name", "Recreation Lock"),
+                }
             )
-        is_non_dutch = not is_dutch
 
-        if is_non_dutch:
-            excess = ship_dims["beam"] - min_width
-            p_val = 5.0 * excess
-        else:
-            p_val = 1000.0
+        # Check physical dimension constraints across parallel chambers
+        # A ship only needs ONE passable chamber in the lock complex
+        fitting = [
+            c
+            for c in l_chambers
+            if (_get_chamber_width(c) is None or _get_chamber_width(c) >= ship_beam)
+            and (
+                _get_chamber_length(c) is None or _get_chamber_length(c) >= ship_length
+            )
+        ]
+        if not fitting:
+            # No single chamber fits both beam and length; determine bottleneck dimension(s)
+            beam_ok = [
+                c
+                for c in l_chambers
+                if _get_chamber_width(c) is None or _get_chamber_width(c) >= ship_beam
+            ]
+            len_ok = [
+                c
+                for c in l_chambers
+                if _get_chamber_length(c) is None
+                or _get_chamber_length(c) >= ship_length
+            ]
 
-        penalties[struct_type] += p_val
+            if beam_ok:
+                # Beam fits in at least one chamber, length is the sole failing dimension
+                best_ch = max(beam_ok, key=lambda c: _get_chamber_length(c) or 0.0)
+                ch_len = _get_chamber_length(best_ch) or 0.0
+                penalties["lock"] += _calc_penalty(
+                    ship_length - ch_len, best_ch.get("id")
+                )
+                violations.append(
+                    {
+                        "type": "length",
+                        "ship_value": ship_length,
+                        "limit_value": ch_len,
+                        "struct_id": best_ch.get("id"),
+                        "struct_name": best_ch.get("name", "Lock Chamber"),
+                    }
+                )
+            elif len_ok:
+                # Length fits in at least one chamber, beam is the sole failing dimension
+                best_ch = max(len_ok, key=lambda c: _get_chamber_width(c) or 0.0)
+                ch_w = _get_chamber_width(best_ch) or 0.0
+                penalties["lock"] += _calc_penalty(ship_beam - ch_w, best_ch.get("id"))
+                violations.append(
+                    {
+                        "type": "beam",
+                        "ship_value": ship_beam,
+                        "limit_value": ch_w,
+                        "struct_id": best_ch.get("id"),
+                        "struct_name": best_ch.get("name", "Lock Chamber"),
+                    }
+                )
+            else:
+                # Both beam and length fail across all chambers
+                best_ch = max(
+                    l_chambers,
+                    key=lambda c: (
+                        _get_chamber_width(c) or 0.0,
+                        _get_chamber_length(c) or 0.0,
+                    ),
+                )
+                ch_w = _get_chamber_width(best_ch) or 0.0
+                ch_len = _get_chamber_length(best_ch) or 0.0
+                if ship_beam > ch_w:
+                    penalties["lock"] += _calc_penalty(
+                        ship_beam - ch_w, best_ch.get("id")
+                    )
+                    violations.append(
+                        {
+                            "type": "beam",
+                            "ship_value": ship_beam,
+                            "limit_value": ch_w,
+                            "struct_id": best_ch.get("id"),
+                            "struct_name": best_ch.get("name", "Lock Chamber"),
+                        }
+                    )
+                if ship_length > ch_len:
+                    penalties["lock"] += _calc_penalty(
+                        ship_length - ch_len, best_ch.get("id")
+                    )
+                    violations.append(
+                        {
+                            "type": "length",
+                            "ship_value": ship_length,
+                            "limit_value": ch_len,
+                            "struct_id": best_ch.get("id"),
+                            "struct_name": best_ch.get("name", "Lock Chamber"),
+                        }
+                    )
 
-        violations.append(
-            {
-                "type": "beam",
-                "ship_value": ship_dims["beam"],
-                "limit_value": min_width,
-                "struct_id": struct_id,
-                "struct_name": limiting_struct[1] if limiting_struct else None,
-            }
-        )
+    # 2. Bridge structure constraints (grouped by bridge)
+    bridge_groups = _group_openings_by_bridge(openings)
+    for bid, b_openings in bridge_groups.items():
+        fitting_openings = [
+            op
+            for op in b_openings
+            if _get_opening_width(op) is None or _get_opening_width(op) >= ship_beam
+        ]
+        if not fitting_openings:
+            best_op = max(b_openings, key=lambda o: _get_opening_width(o) or 0.0)
+            op_w = _get_opening_width(best_op) or 0.0
+            penalties["bridge"] += _calc_penalty(ship_beam - op_w, best_op.get("id"))
+            violations.append(
+                {
+                    "type": "beam",
+                    "ship_value": ship_beam,
+                    "limit_value": op_w,
+                    "struct_id": best_op.get("id"),
+                    "struct_name": best_op.get("name", "Bridge Opening"),
+                }
+            )
 
-    min_len, limiting_ch = _find_min_length(chambers)
-
-    if limiting_ch and ship_dims["length"] > min_len:
-        penalties["lock"] += 1000.0
-        violations.append(
-            {
-                "type": "length",
-                "ship_value": ship_dims["length"],
-                "limit_value": min_len,
-                "struct_id": limiting_ch[0],
-                "struct_name": limiting_ch[1],
-            }
-        )
+    # 3. Fairway edge width constraint
+    edge_w = d_edge.get("dim_structural_width", d_edge.get("mwidthcm"))
+    if is_valid(edge_w):
+        edge_w_m = float(edge_w) / 100.0 if "mwidthcm" in d_edge else float(edge_w)
+        if ship_beam > edge_w_m:
+            penalties["fairway"] += _calc_penalty(
+                ship_beam - edge_w_m, get_edge_key(d_edge)
+            )
+            violations.append(
+                {
+                    "type": "beam",
+                    "ship_value": ship_beam,
+                    "limit_value": edge_w_m,
+                    "struct_id": get_edge_key(d_edge),
+                    "struct_name": d_edge.get("name", "Fairway"),
+                }
+            )
 
     # Bridge height checks disabled as clearance heights are dynamically dependent on water levels.
 
     # Depth checks disabled as raw values are referenced to NAP and need water levels to determine actual water depth.
 
-    # Sea route check
+    # 4. Sea route check
     water_name = str(d_edge.get("water_name", "")).strip().lower()
     if "noordzee" in water_name or "sea" in water_name:
         penalties["sea"] += 100000.0
@@ -357,7 +581,7 @@ def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict
             }
         )
 
-    # CEMT Class check
+    # 5. CEMT Class check
     edge_cemt = d_edge.get("cemt_class")
     if is_valid(edge_cemt) and ship_dims.get("cemt"):
         norm_edge = normalize_cemt(str(edge_cemt))
@@ -383,7 +607,17 @@ def check_edge_constraints_soft(d_edge: dict, struct_data: dict, ship_dims: dict
 
 
 def get_edge_weight_soft(d_edge: dict, struct_data: dict, ship_dims: dict) -> float:
-    """Calculates Dijkstra cost: travel time + lock delays + soft penalties."""
+    """
+    Calculates Dijkstra cost: travel time + lock delays + soft penalties.
+
+    NOTE: Lock delays and capacities:
+    - Current (Step 1): Count one passage duration per lock complex (rather than summing
+      all parallel chambers, issue #211). Recreation locks are penalized for commercial traffic.
+    - Future (Step 2 - Kooman capacity): Determine lock complex capacity C based on chamber
+      dimensions, leveling time, door time and cycle duration (C. Kooman & P.A. De Bruijn).
+    - Future (Step 3 - Kooman I/C delay): Compute dynamic waiting time W(rho) from the
+      Intensity/Capacity ratio (rho = I / C) according to queuing theory.
+    """
     # Enforce strict length_m consistency
     length_km = float(d_edge["length_m"]) / 1000.0
 
@@ -414,10 +648,30 @@ def get_edge_weight_soft(d_edge: dict, struct_data: dict, ship_dims: dict) -> fl
     speed_km_h = max(1.0, speed_km_h)
     travel_time = length_km / speed_km_h
 
+    # Lock delay: 1 passage per lock structure (not summed per chamber)
     lock_delay = 0.0
     chambers = struct_data.get("chambers", [])
-    for ch in chambers:
-        passage_m = ch.get("passage_duration_m", 30.0)
+    lock_groups = _group_chambers_by_lock(chambers)
+    for lid, lock_chambers in lock_groups.items():
+        # Pick the chamber that fits the vessel; fallback to the largest chamber
+        fitting = [
+            ch
+            for ch in lock_chambers
+            if (
+                _get_chamber_width(ch) is None
+                or _get_chamber_width(ch) >= ship_dims.get("beam", 0.0)
+            )
+            and (
+                _get_chamber_length(ch) is None
+                or _get_chamber_length(ch) >= ship_dims.get("length", 0.0)
+            )
+        ]
+        chosen_ch = (
+            fitting[0]
+            if fitting
+            else max(lock_chambers, key=lambda c: _get_chamber_width(c) or 0.0)
+        )
+        passage_m = chosen_ch.get("passage_duration_m", 30.0)
         if not is_valid(passage_m):
             passage_m = 30.0
         lock_delay += float(passage_m) / 60.0
