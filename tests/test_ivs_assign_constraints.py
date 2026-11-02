@@ -235,8 +235,8 @@ def test_find_min_width_and_length_helper_functions(
     assert lim_l[0] == "39760"
 
 
-def test_foreign_structure_soft_penalty():
-    """Foreign structures (e.g. French/German EURIS locks) receive 5.0 * excess penalty."""
+def test_consistent_network_penalty_on_foreign_structure():
+    """Foreign structures (e.g. French/German EURIS locks) receive the same physical penalty (PENALTY_PHYSICAL = 1000.0)."""
     d_edge = {"length_m": 1000.0, "code": "FRVN18800003"}
     structures = {
         "chambers": [
@@ -250,9 +250,10 @@ def test_foreign_structure_soft_penalty():
         ],
         "openings": [],
     }
-    # Ship of beam 14.0m -> excess = 2.0m -> penalty = 5.0 * 2.0 = 10.0
+    # Ship of beam 14.0m exceeds gate width 12.0m -> PENALTY_PHYSICAL = 1000.0
     ship = {"beam": 14.0, "length": 110.0, "cemt": "VA"}
     pen, viol = check_edge_constraints_soft(d_edge, structures, ship)
-    assert pen["lock"] == 10.0
+    assert pen["lock"] == 1000.0
     assert len(viol) == 1
     assert viol[0]["type"] == "beam"
+    assert viol[0]["limit_value"] == 12.0
