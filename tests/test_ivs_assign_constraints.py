@@ -2,8 +2,12 @@ import pytest
 from fis.ivs.assign import (
     _find_min_length,
     _find_min_width,
+    calc_lock_delay,
+    calc_travel_time,
     check_edge_constraints_soft,
+    get_edge_constraints,
     get_edge_weight_soft,
+    AnnotatedPenalty,
 )
 
 
@@ -257,3 +261,124 @@ def test_consistent_network_penalty_on_foreign_structure():
     assert len(viol) == 1
     assert viol[0]["type"] == "beam"
     assert viol[0]["limit_value"] == 12.0
+
+
+def test_parallel_lock_crossed_dimensions_blocked():
+    """
+    Test crossed dimensions (Copilot review comment):
+    Chamber 1 is wide but short (20 x 80 m).
+    Chamber 2 is narrow but long (10 x 150 m).
+    A vessel of 15 x 100 m fits neither chamber and must receive a physical penalty.
+    """
+    crossed_chambers = [
+        {
+            "id": "c1",
+            "name": "Wide Short Chamber",
+            "lock_id": "lock_crossed",
+            "dim_gate_width": 20.0,
+            "dim_usable_length": 80.0,
+        },
+        {
+            "id": "c2",
+            "name": "Narrow Long Chamber",
+            "lock_id": "lock_crossed",
+            "dim_gate_width": 10.0,
+            "dim_usable_length": 150.0,
+        },
+    ]
+    d_edge = {"length_m": 1000.0, "fis_id": "edge_crossed"}
+    struct_data = {"chambers": crossed_chambers, "openings": []}
+
+    ship = {"beam": 15.0, "length": 100.0, "cemt": "VB"}
+    pen, viols = check_edge_constraints_soft(d_edge, struct_data, ship)
+    assert pen["lock"] >= 1000.0
+    assert len(viols) > 0
+
+
+def test_mixed_commercial_and_recreation_complex():
+    """
+    A complex with both a commercial chamber and a recreation chamber must allow commercial
+    traffic through the commercial chamber without recreation penalty (Copilot review comment).
+    """
+    mixed_chambers = [
+        {
+            "id": "c_rec",
+            "name": "Jachtensluis kolk",
+            "lock_id": "lock_mixed",
+            "dim_gate_width": 12.0,
+            "dim_usable_length": 60.0,
+        },
+        {
+            "id": "c_comm",
+            "name": "Beroepskolk",
+            "lock_id": "lock_mixed",
+            "dim_gate_width": 24.0,
+            "dim_usable_length": 200.0,
+        },
+    ]
+    d_edge = {"length_m": 1000.0, "fis_id": "edge_mixed"}
+    struct_data = {"chambers": mixed_chambers, "openings": []}
+
+    ship = {"beam": 15.0, "length": 110.0, "cemt": "VB"}
+    pen, viols = check_edge_constraints_soft(d_edge, struct_data, ship)
+    assert pen["lock"] == 0.0
+    assert len(viols) == 0
+
+
+def test_get_edge_constraints_annotated_penalties():
+    """get_edge_constraints returns total penalty cost, AnnotatedPenalty list with sources, and by_source dict."""
+    d_edge = {
+        "length_m": 1000.0,
+        "fis_id": "edge_annotated",
+        "water_name": "Noordzee kustlijn",
+        "dim_structural_width": 12.0,
+    }
+    struct_data = {
+        "chambers": [
+            {
+                "id": "ch_small",
+                "name": "Sluisje",
+                "lock_id": "lock_sm",
+                "dim_gate_width": 8.0,
+                "dim_usable_length": 50.0,
+            }
+        ],
+        "openings": [
+            {
+                "id": "op_narrow",
+                "name": "Smalle brug",
+                "bridge_id": "br_sm",
+                "dim_structural_width": 9.0,
+            }
+        ],
+    }
+    ship = {"beam": 14.0, "length": 80.0, "cemt": "VA"}
+
+    total_cost, penalties, by_source = get_edge_constraints(d_edge, struct_data, ship)
+
+    # lock (1000 beam + 1000 length) + bridge (1000 beam) + fairway (1000 beam) + sea (100000)
+    assert by_source["lock"] == 2000.0
+    assert by_source["bridge"] == 1000.0
+    assert by_source["fairway"] == 1000.0
+    assert by_source["sea"] == 100000.0
+    assert total_cost == 104000.0
+    assert by_source["total"] == total_cost
+
+    # Check that each penalty is an AnnotatedPenalty with source, cost, and description
+    assert all(isinstance(p, AnnotatedPenalty) for p in penalties)
+    sources = [p.source for p in penalties]
+    assert "lock" in sources
+    assert "bridge" in sources
+    assert "fairway" in sources
+    assert "sea" in sources
+
+
+def test_calc_travel_time_and_lock_delay(volkerak_chambers):
+    """calc_travel_time and calc_lock_delay compute respective edge components in hours."""
+    d_edge = {"length_m": 15000.0, "maxspeed": 10.0}
+    t_time = calc_travel_time(d_edge)
+    assert pytest.approx(t_time, rel=1e-5) == 1.5
+
+    ship = {"beam": 11.4, "length": 110.0, "cemt": "VA"}
+    delay = calc_lock_delay(volkerak_chambers, ship)
+    assert pytest.approx(delay, rel=1e-5) == 0.5
