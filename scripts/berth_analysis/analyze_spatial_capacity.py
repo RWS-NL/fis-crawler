@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 import click
@@ -30,19 +31,31 @@ logger = logging.getLogger(__name__)
 SHIP_LENGTH_85_M = 85.0  # CEMT IV Johann Welker
 SHIP_LENGTH_110_M = 110.0  # CEMT Va Groot Rijnschip
 SHIP_LENGTH_135_M = 135.0  # CEMT Vb Verlengd Groot Rijnschip
-CLEARANCE_SPACING_M = 10.0  # RVW 2020 p. 146 longitudinal spacing s
+# RVW 2020 § 6.4.2 p. 146: distance s to the next ship is 5 m for class I-IV and 10 m for
+# class V and higher (class IV ships are at most 85 m long).
+CLEARANCE_SPACING_CLASS_I_IV_M = 5.0
+CLEARANCE_SPACING_CLASS_V_M = 10.0
+CLASS_IV_MAX_SHIP_LENGTH_M = 85.0
 SHIP_SCENARIOS = (
     ("85m", SHIP_LENGTH_85_M),
     ("110m", SHIP_LENGTH_110_M),
     ("135m", SHIP_LENGTH_135_M),
 )
 
-# RVW 2020 § 6.3 p. 144 (~12 km/h network average) & Binnenvaartwet A1 (14h/day)
+# A1 exploitation mode: at most 14 h sailing per 24 h (Binnenvaartregeling art. 23.10, see
+# Corporate uitvoeringskader ligplaatsen RWS 2011, p. 41). The 12 km/h average speed is a
+# project assumption (RVW 2020 § 6.3: ~2 h sailing = ~30 km, i.e. 15 km/h).
 NORMAL_DAY_SAILING_HOURS = 14.0
 AVERAGE_SAILING_SPEED_KMH = 12.0
 DAILY_SAILING_DISTANCE_KM = (
     NORMAL_DAY_SAILING_HOURS * AVERAGE_SAILING_SPEED_KMH
 )  # 168.0 km
+
+# Share of passing ships that needs an overnight berth: 1 - share of continuous sailing
+# (23:00-06:00). 18% on the Waal in 2012 (RWS WVL, Toekomstige Ligplaatsbehoefte
+# Overnachtingshaven Lobith 2013, p. 10); not part of RVW 2020.
+CONTINUOUS_SAILING_SHARE = 0.18
+FRACTION_OVERNIGHT = round(1.0 - CONTINUOUS_SAILING_SHARE, 2)  # 0.82
 
 OVERNIGHT_RADIUS_KM = 15.0  # Max 30 km spacing between overnight ports
 KEGEL_RADIUS_KM = 30.0  # Max 60 km spacing between kegel berths
@@ -54,13 +67,25 @@ CAR_DROPOFF_SEARCH_RADIUS_M = (
 SHIP_WIDTH_M = (
     11.4  # Standard CEMT Va/Vb reference ship width (m) for width-to-rows fallback
 )
-MAX_QUAY_ROWS = (
-    3.0  # Max abreast mooring rows for quays/jetties (RVW § 6.4.2 / BPR Art. 7.05)
-)
+# RVW 2020 § 6.4.2 p. 147: along a bank or quay at most two abreast, at jetties at most three
+MAX_QUAY_ROWS = 2.0
+MAX_PIER_ROWS = 3.0  # berths with shoreline_category == "PIER" (steiger)
 ANCHORAGE_SWING_DIAMETER_M = (
     300.0  # Min swinging corridor diameter (m) for open-water anchorages (PIANC WG 121)
 )
 
+RAW_DELIVERY_DIR = "raw"
+RAW_CONFIG_FILE = Path(__file__).resolve().parents[2] / "config" / "schema.toml"
+DOCS_DELIVERY_DIR = "docs"
+DOCS_SOURCE_DIR = Path(__file__).resolve().parents[2] / "docs" / "berths"
+RAW_DELIVERY_FILES = (
+    "route.geoparquet",
+    "routejunction.geoparquet",
+    "berth.geoparquet",
+    "cardropoff.geoparquet",
+    "fairwayclassification.geoparquet",
+)
+EXAMPLE_ROUTE_ID = "40230"  # Beerkanaal, used in the worked example of the report
 HVWN_TYPES = ("Hoofdtransportas", "Hoofdvaarweg")
 NETWORK_CATEGORIES = {
     "Hoofdtransportas": "Hoofdtransportassen (HTA)",
@@ -143,14 +168,27 @@ def determine_kegels(
     return 0
 
 
+def clearance_spacing_m(ship_length_m: float) -> float:
+    """Distance s to the next ship (RVW 2020 § 6.4.2, p. 146): 5 m up to class IV, else 10 m."""
+    if ship_length_m <= CLASS_IV_MAX_SHIP_LENGTH_M:
+        return CLEARANCE_SPACING_CLASS_I_IV_M
+    return CLEARANCE_SPACING_CLASS_V_M
+
+
 def calc_berth_ship_slots(
     length: pd.Series,
     rows: pd.Series,
     max_ship_length: pd.Series,
     ship_length_m: float,
-    spacing_m: float = CLEARANCE_SPACING_M,
+    spacing_m: float | None = None,
 ) -> pd.Series:
-    """Computes discrete ship slots for a reference ship length where allowed by maximal_ship_length."""
+    """Computes discrete ship slots for a reference ship length where allowed by maximal_ship_length.
+
+    The distance s to the next ship follows RVW 2020 § 6.4.2 (see `clearance_spacing_m`)
+    unless `spacing_m` is given.
+    """
+    if spacing_m is None:
+        spacing_m = clearance_spacing_m(ship_length_m)
     allowed = max_ship_length.isna() | (max_ship_length >= ship_length_m)
     slots = np.floor((length + spacing_m) / (ship_length_m + spacing_m)) * rows
     ship_slots = pd.Series(
@@ -208,10 +246,7 @@ def classify_berths(
 
     name_lower = df.get("name", pd.Series("", index=df.index)).fillna("").str.lower()
     note_lower = (
-        df.get("note", pd.Series("", index=df.index))
-        .fillna("")
-        .astype(str)
-        .str.lower()
+        df.get("note", pd.Series("", index=df.index)).fillna("").astype(str).str.lower()
     )
     route_id_str = df.get("route_id", pd.Series("", index=df.index)).astype(str)
 
@@ -288,10 +323,22 @@ def calculate_berth_capacities(berths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         | (category_upper == "ANCHORAGE")
     )
 
-    # For standard quays/jetties: derive rows from width, capped at MAX_QUAY_ROWS (RVW § 6.4.2 / BPR art. 7.05)
-    quay_width_rows = np.clip(np.floor(width / SHIP_WIDTH_M), 1.0, MAX_QUAY_ROWS).where(
-        width > 0, 1.0
+    # Quays/jetties: derive rows from width, capped at two abreast along a quay and three
+    # at a jetty (RVW 2020 § 6.4.2, p. 147). Berths without a known shoreline type
+    # (FIS ShorelineCategory is mostly empty) are treated as quay.
+    shoreline_upper = (
+        df.get("shoreline_category", pd.Series("", index=df.index))
+        .fillna("")
+        .astype(str)
+        .str.upper()
     )
+    max_rows = pd.Series(
+        np.where(shoreline_upper == "PIER", MAX_PIER_ROWS, MAX_QUAY_ROWS),
+        index=df.index,
+    )
+    quay_width_rows = np.minimum(
+        np.maximum(1.0, np.floor(width / SHIP_WIDTH_M)), max_rows
+    ).where(width > 0, 1.0)
 
     # For open-water anchorages: vessels swing freely on bow anchors and do not moor abreast.
     # Rows represent independent swinging corridors along the fairway corridor (~300 m per file),
@@ -638,11 +685,16 @@ def compute_route_berth_capacity(
         .reset_index()
     )
 
+    # P_stop = f_overnacht * (L / v) / T: RVW 2020 § 6.4.2 percentage of ships that
+    # overnights (travel time / maximum sailing time), corrected for continuous sailing.
     df["expected_overnight_stops"] = np.where(
         df["total_length_km"] > 0,
-        df["total_length_km"] / DAILY_SAILING_DISTANCE_KM,
+        FRACTION_OVERNIGHT * df["total_length_km"] / DAILY_SAILING_DISTANCE_KM,
         0.0,
     )
+    df["f_overnacht"] = FRACTION_OVERNIGHT
+    df["sailing_speed_kmh"] = AVERAGE_SAILING_SPEED_KMH
+    df["sailing_hours_per_day"] = NORMAL_DAY_SAILING_HOURS
 
     kind_radii = {
         "overnight": OVERNIGHT_RADIUS_KM,
@@ -737,6 +789,14 @@ def fmt_num(
     return f"{fval:,.{decimals}f}{unit}"
 
 
+def fmt_nl(val: float | int | None, decimals: int = 0) -> str:
+    """Formats a number with Dutch separators (thousands '.', decimal ',')."""
+    if val is None or pd.isna(val) or np.isinf(val):
+        return "-"
+    text = f"{float(val):,.{decimals}f}"
+    return text.replace(",", "_").replace(".", ",").replace("_", ".")
+
+
 def fmt_pct(val: float | None) -> str:
     """Formats a percentage with 1 decimal place, returning '-' when missing."""
     if val is None or pd.isna(val) or np.isinf(val):
@@ -767,6 +827,14 @@ def summarize_segments(
         "kg_km": kg,
         "kg_pct": (kg / tot * 100.0) if tot > 0 else 0.0,
     }
+
+
+def get_example_route(gdf_routes: gpd.GeoDataFrame) -> dict:
+    """Returns the row of the worked-example route (Beerkanaal) for the report."""
+    rows = gdf_routes[gdf_routes["route_id"] == EXAMPLE_ROUTE_ID]
+    if rows.empty:
+        raise ValueError(f"Example route {EXAMPLE_ROUTE_ID} not found in route output")
+    return rows.drop(columns=["geometry"], errors="ignore").iloc[0].to_dict()
 
 
 def calculate_report_metrics(
@@ -877,6 +945,7 @@ def calculate_report_metrics(
         "zero_local_hvwn": zero_local_hvwn_df.drop(
             columns=["geometry"], errors="ignore"
         ).to_dict(orient="records"),
+        "example_route": get_example_route(gdf_routes),
         "hvwn_total_count": int(gdf_routes["is_hvwn"].sum()),
         "hvwn_zero_local_count": int(
             (gdf_routes["is_hvwn"] & (gdf_routes["num_overnight_berths"] == 0)).sum()
@@ -905,6 +974,7 @@ def generate_markdown_summary(
         lstrip_blocks=True,
     )
     env.filters["fmt_num"] = fmt_num
+    env.filters["fmt_nl"] = fmt_nl
     env.filters["fmt_pct"] = fmt_pct
     env.filters["fmt_dist"] = fmt_dist
 
@@ -921,6 +991,26 @@ def generate_markdown_summary(
         logger.info("Rendered styled HTML report to %s", html_out)
     except Exception as e:
         logger.warning("Could not render HTML report: %s", e)
+
+
+def deliver_documentation(output_dir: Path) -> None:
+    """Copies the method documents (docs/berths) with a rendered HTML version."""
+    from scripts.render_reports_html import convert_markdown_to_html
+
+    docs_out = output_dir / DOCS_DELIVERY_DIR
+    docs_out.mkdir(exist_ok=True)
+    for md_path in sorted(DOCS_SOURCE_DIR.glob("*.md")):
+        md_out = docs_out / md_path.name
+        shutil.copy2(md_path, md_out)
+        html_out = convert_markdown_to_html(md_out)
+        # Links between the delivered documents should open the rendered versions
+        html_out.write_text(
+            html_out.read_text(encoding="utf-8")
+            .replace('.md"', '.html"')
+            .replace(".md#", ".html#"),
+            encoding="utf-8",
+        )
+    logger.info("Documentation delivered to %s", docs_out)
 
 
 @click.command()
@@ -953,7 +1043,7 @@ def main(export_dir: Path, output_dir: Path) -> None:
 
     gdf_clusters = cluster_berths_and_check_facilities(classified_berths, cardropoffs)
     if not gdf_clusters.empty:
-        gdf_clusters.to_file(output_dir / "berth_clusters.geojson", driver="GeoJSON")
+        gdf_clusters.to_parquet(output_dir / "berth_clusters.geoparquet")
 
     G, route_segments = build_route_network_graph(
         routes, rjs, classified_berths, type_map, expected_parallel_edges=1
@@ -966,18 +1056,19 @@ def main(export_dir: Path, output_dir: Path) -> None:
     logger.info("Exporting route compliance and carrying capacity outputs...")
     gdf_hvwn = gdf_routes[gdf_routes["is_hvwn"]].copy()
     gdf_hvwn.to_parquet(output_dir / "route_berth_capacity.geoparquet")
-    gdf_hvwn.drop(columns=["geometry"], errors="ignore").to_csv(
-        output_dir / "route_berth_capacity.csv", index=False
-    )
-    gdf_hvwn.to_file(output_dir / "route_berth_capacity.geojson", driver="GeoJSON")
-    gdf_routes.to_parquet(output_dir / "route_berth_capacity_all.geoparquet")
+
+    # Raw FIS input files, delivered unchanged as input for the intensity step.
+    raw_dir = output_dir / RAW_DELIVERY_DIR
+    raw_dir.mkdir(exist_ok=True)
+    for name in RAW_DELIVERY_FILES:
+        shutil.copy2(export_dir / name, raw_dir / name)
+    # Column mapping (FIS name -> snake_case) that the analysis applies to the raw files
+    shutil.copy2(RAW_CONFIG_FILE, raw_dir / RAW_CONFIG_FILE.name)
+
+    deliver_documentation(output_dir)
 
     gdf_segments_hvwn = gdf_segments[gdf_segments["is_hvwn"]].copy()
     gdf_segments_hvwn.to_parquet(output_dir / "route_segments_compliance.geoparquet")
-    gdf_segments_hvwn.to_file(
-        output_dir / "route_segments_compliance.geojson", driver="GeoJSON"
-    )
-    gdf_segments.to_parquet(output_dir / "route_segments_compliance_all.geoparquet")
 
     generate_markdown_summary(
         gdf_segments,
