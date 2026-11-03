@@ -100,3 +100,26 @@ Omitting `--graph-path` and `--base-graph` (as above) uses the two default graph
 | `--output-dir` | `output/ivs-assignment` | Output directory for traffic assignment datasets |
 | `--year` | _(unset)_ → all years | Optional year filter for voyages to route |
 | `--month` | _(unset)_ → all months | Optional month filter for voyages to route |
+
+### UN/LOCODE Fairway Geocoding
+
+The routing algorithm matches UN/LOCODE origin and destination ports to network graph nodes. In dense port regions, naive spatial nearest-neighbour matching or generic harbour node prioritization can select shallow recreational basins, historic city canals, or dead-end berths behind restrictive structures (e.g., Rotterdam's historic Spinhuis behind low bridges, Amsterdam's Singelgracht with 4.2 m air draft, or Lelystad's 63 m recreational lock).
+
+To guarantee robust routing for commercial inland navigation, major European and Dutch ports are pinned directly to designated high-capacity fairway junction nodes (`KEY_PORT_FAIRWAY_NODES` in [`fis.ivs.assign`](file:///workspaces/fis/fis/ivs/assign.py)):
+
+| UN/LOCODE | Port Name | Node ID | Fairway Junction | CEMT Class | Coordinates (lon, lat) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `NLRTM` | Rotterdam | `FIS_8863496` | Nieuwe Maas / Waalhaven / Eemhaven junction | VI_c | 4.3689, 51.8992 |
+| `NLAMS` | Amsterdam | `FIS_8864384` | Buiten-IJ / Amsterdam-Rijnkanaal entrance | VI_b | 4.9523, 52.3819 |
+| `BEANR` | Antwerpen | `FIS_35228495` | Westerschelde / Rede Antwerpen fairway | VI_c | 4.3966, 51.2357 |
+| `DEDUI` | Duisburg | `EURIS_DE_J1140` | Rhein / Ruhr junction (Hafenmund) | VI_b | 6.7208, 51.4516 |
+| `NLLEY` | Lelystad | `FIS_8865470` | Markermeer / IJsselmeer approach | VI_a | 5.4283, 52.5128 |
+| `BEGNE` | Gent | `FIS_35228492` | Kanaal Gent-Terneuzen commercial corridor | VI_b | 3.7402, 51.1067 |
+| `NLTNZ` | Terneuzen | `FIS_8867489` | Kanaal Gent-Terneuzen / Westerschelde approach | VI_b | 3.8247, 51.3189 |
+| `NLDOR` | Dordrecht | `FIS_8867986` | Beneden-Merwede / Oude Maas junction | VI_c | 4.6762, 51.8209 |
+
+For all other locations, geocoding follows a three-tier hierarchy:
+1. **Direct Fairway Pinning:** Check `KEY_PORT_FAIRWAY_NODES`.
+2. **Network Attribute Matching:** Match exact UN/LOCODE or 5-character prefix against nodes tagged with `locode`, prioritizing `harbour` and `terminal` node types.
+3. **Spatial Reference Fallback:** Query a spatial KDTree against official Zenodo UN/LOCODE geocoded coordinates to locate the nearest waterway node.
+

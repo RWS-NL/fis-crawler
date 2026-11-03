@@ -1,13 +1,22 @@
+import pathlib
+import pickle
+import networkx as nx
 import pytest
+from scipy.spatial import KDTree
+from shapely.geometry import Point
 from fis.ivs.assign import (
+    KEY_PORT_FAIRWAY_NODES,
+    AnnotatedPenalty,
     _find_min_length,
     _find_min_width,
     calc_lock_delay,
     calc_travel_time,
+    build_edge_structures_lookup,
     check_edge_constraints_soft,
+    geocode_unlocode,
     get_edge_constraints,
+    get_edge_key,
     get_edge_weight_soft,
-    AnnotatedPenalty,
 )
 
 
@@ -382,3 +391,109 @@ def test_calc_travel_time_and_lock_delay(volkerak_chambers):
     ship = {"beam": 11.4, "length": 110.0, "cemt": "VA"}
     delay = calc_lock_delay(volkerak_chambers, ship)
     assert pytest.approx(delay, rel=1e-5) == 0.5
+
+
+def test_geocode_unlocode_pinned_ports():
+    """Verify that KEY_PORT_FAIRWAY_NODES resolves directly to designated fairway nodes."""
+    # Graph containing all pinned nodes
+    G = nx.Graph()
+    for code, node_id in KEY_PORT_FAIRWAY_NODES.items():
+        G.add_node(node_id, geometry=Point(4.0, 52.0))
+
+    tree = KDTree([(0.0, 0.0)])
+    node_ids = ["fallback_node"]
+
+    for code, expected_node in KEY_PORT_FAIRWAY_NODES.items():
+        # Exact code
+        assert geocode_unlocode(code, {}, {}, tree, node_ids, G) == expected_node
+        # Lowercase and whitespace
+        assert (
+            geocode_unlocode(f"  {code.lower()}  ", {}, {}, tree, node_ids, G)
+            == expected_node
+        )
+
+
+def test_geocode_unlocode_fallback_when_pinned_missing():
+    """Verify that if a pinned fairway node is missing from graph, it falls back to standard lookup."""
+    G = nx.Graph()
+    G.add_node("harbour_fallback", geometry=Point(4.5, 52.0), node_type="harbour")
+
+    # Node locode map pointing to fallback
+    node_locode_map = {"NLAMS": [("harbour_fallback", "harbour")]}
+    tree = KDTree([(4.5, 52.0)])
+    node_ids = ["harbour_fallback"]
+
+    # Graph does not have FIS_8864384, so it should fall back to harbour_fallback
+    res = geocode_unlocode("NLAMS", {}, node_locode_map, tree, node_ids, G)
+    assert res == "harbour_fallback"
+
+
+def test_key_ports_routing_real_network():
+    """Integration check on real merged graph: all pinned ports resolve and route with zero penalty."""
+    graph_path = pathlib.Path("output/merged-graph/graph.pickle")
+    if not graph_path.exists():
+        pytest.skip(
+            "Full merged network graph not found; skipping integration routing test."
+        )
+
+    with open(graph_path, "rb") as f:
+        G_merged = pickle.load(f)
+
+    try:
+        lookup = build_edge_structures_lookup()
+    except Exception:
+        lookup = {}
+
+    # 1. Verify every pinned port node exists in G_merged
+    for code, node_id in KEY_PORT_FAIRWAY_NODES.items():
+        assert node_id in G_merged, (
+            f"Pinned node {node_id} for {code} not found in G_merged"
+        )
+
+    # 2. Test routing between major port pairs with a standard Class Va vessel
+    ship = {"beam": 11.4, "length": 110.0, "draft": 2.8, "height": 6.0, "cemt": "VA"}
+    test_pairs = [
+        ("NLRTM", "NLAMS"),
+        ("NLAMS", "NLLEY"),
+        ("NLRTM", "BEANR"),
+        ("NLRTM", "DEDUI"),
+        ("BEGNE", "NLTNZ"),
+        ("NLDOR", "NLRTM"),
+    ]
+
+    for orig, dest in test_pairs:
+        orig_node = KEY_PORT_FAIRWAY_NODES[orig]
+        dest_node = KEY_PORT_FAIRWAY_NODES[dest]
+
+        def weight_func(u, v, d):
+            edge_id = get_edge_key(d)
+            struct_data = lookup.get(edge_id, {"chambers": [], "openings": []})
+            return get_edge_weight_soft(d, struct_data, ship)
+
+        path = nx.shortest_path(
+            G_merged,
+            orig_node,
+            dest_node,
+            weight=weight_func,
+        )
+        assert len(path) > 1
+
+        # Check total penalty along the shortest path
+        total_penalties = 0.0
+        violations = []
+        for u, v in zip(path[:-1], path[1:]):
+            edge_data = G_merged[u][v]
+            if isinstance(edge_data, dict) and 0 in edge_data:
+                edge_data = edge_data[0]
+            edge_id = get_edge_key(edge_data)
+            struct_data = lookup.get(edge_id, {"chambers": [], "openings": []})
+            pen_dict, v_list = check_edge_constraints_soft(edge_data, struct_data, ship)
+            total_penalties += sum(pen_dict.values())
+            violations.extend(v_list)
+
+        assert total_penalties == 0.0, (
+            f"Route between {orig} ({orig_node}) and {dest} ({dest_node}) incurred {total_penalties} penalties: {violations}"
+        )
+        assert len(violations) == 0, (
+            f"Route between {orig} and {dest} had unexpected violations: {violations}"
+        )
