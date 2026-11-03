@@ -431,18 +431,23 @@ def test_geocode_unlocode_fallback_when_pinned_missing():
 def test_key_ports_routing_real_network():
     """Integration check on real merged graph: all pinned ports resolve and route with zero penalty."""
     graph_path = pathlib.Path("output/merged-graph/graph.pickle")
-    if not graph_path.exists():
+    required_paths = [
+        graph_path,
+        pathlib.Path("output/dropins-fis-detailed/chambers.geoparquet"),
+        pathlib.Path("output/dropins-fis-detailed/openings.geoparquet"),
+        pathlib.Path("output/dropins-euris-detailed/edges.geoparquet"),
+        pathlib.Path("output/dropins-euris-detailed/chambers.geoparquet"),
+        pathlib.Path("output/dropins-euris-detailed/openings.geoparquet"),
+    ]
+    if not all(p.exists() for p in required_paths):
         pytest.skip(
-            "Full merged network graph not found; skipping integration routing test."
+            "Full merged network graph or detailed structure files not found; skipping integration routing test."
         )
 
     with open(graph_path, "rb") as f:
         G_merged = pickle.load(f)
 
-    try:
-        lookup = build_edge_structures_lookup()
-    except Exception:
-        lookup = {}
+    lookup = build_edge_structures_lookup()
 
     # 1. Verify every pinned port node exists in G_merged
     for code, node_id in KEY_PORT_FAIRWAY_NODES.items():
