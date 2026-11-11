@@ -843,6 +843,29 @@ def build_locode_node_lookup(G_merged: nx.Graph) -> dict:
     return node_locode_map
 
 
+# Key commercial fairway junction nodes for major inland ports (#213)
+# Explicitly pins high-volume commercial ports to unhindered CEMT fairway junctions
+# to avoid geocoding into shallow, narrow, or restricted harbour/city basins.
+KEY_PORT_FAIRWAY_NODES: dict[str, str] = {
+    # Rotterdam (Nieuwe Maas / Waalhaven / Eemhaven junction, CEMT VI_c)
+    "NLRTM": "FIS_8863496",
+    # Amsterdam (Buiten-IJ / Amsterdam-Rijnkanaal junction, CEMT VI_b)
+    "NLAMS": "FIS_8864384",
+    # Antwerpen (Westerschelde / Rede Antwerpen fairway, CEMT VI_c)
+    "BEANR": "FIS_35228495",
+    # Duisburg (Rhein / Ruhr junction Hafenmund, CEMT VI_b)
+    "DEDUI": "EURIS_DE_J1140",
+    # Lelystad (Markermeer / IJsselmeer approach, CEMT VI_a)
+    "NLLEY": "FIS_8865470",
+    # Gent (Kanaal Gent-Terneuzen commercial corridor, CEMT VI_b)
+    "BEGNE": "FIS_35228492",
+    # Terneuzen (Kanaal Gent-Terneuzen / Westerschelde approach, CEMT VI_b)
+    "NLTNZ": "FIS_8867489",
+    # Dordrecht (Beneden-Merwede / Oude Maas junction, CEMT VI_c)
+    "NLDOR": "FIS_8867986",
+}
+
+
 def geocode_unlocode(
     unlocode: str,
     zenodo_coords: dict,
@@ -850,9 +873,20 @@ def geocode_unlocode(
     tree: KDTree,
     node_ids: list,
     G_merged: nx.Graph,
-) -> str:
-    """Matches a single UN/LOCODE to the nearest suitable graph node."""
+) -> str | None:
+    """Matches a single UN/LOCODE to the nearest suitable graph node.
+
+    Major commercial ports defined in `KEY_PORT_FAIRWAY_NODES` are mapped directly to
+    designated high-capacity fairway junction nodes if present in `G_merged` (#213).
+    For other locations, the lookup first prefers harbour or terminal nodes tagged with
+    the UN/LOCODE, falling back to spatial nearest-neighbour matching via KDTree.
+    """
     unlocode = str(unlocode).strip().upper()
+    if unlocode in KEY_PORT_FAIRWAY_NODES:
+        pinned_node = KEY_PORT_FAIRWAY_NODES[unlocode]
+        if pinned_node in G_merged:
+            return pinned_node
+
     geom = zenodo_coords.get(unlocode)
     if unlocode in node_locode_map:
         candidates = node_locode_map[unlocode]
