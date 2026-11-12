@@ -276,6 +276,7 @@ def merge_graphs(
         edge_attrs = conn.get("edge_attrs", {}).copy()
 
         # Override/Set metadata
+        a, b = sorted((u, v))
         edge_attrs.update(
             {
                 "data_source": "BORDER",
@@ -284,6 +285,10 @@ def merge_graphs(
                 "connection_type": conn["type"],
             }
         )
+        if not edge_attrs.get("code"):
+            edge_attrs["code"] = f"virtual_{a}_{b}"
+        if not edge_attrs.get("segment_type"):
+            edge_attrs["segment_type"] = "border_connection"
 
         combined.add_edge(u, v, **edge_attrs)
 

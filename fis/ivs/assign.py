@@ -148,10 +148,51 @@ def get_ship_dimensions(
     }
 
 
-def get_edge_key(d: dict) -> str | None:
-    """Extracts the lookup ID key from a merged graph edge."""
+# Canonical redirects for FIS fairway_section_id values overwritten in the merged
+# graph by parallel sections between the same junctions or harbour splicing (#214).
+FIS_SECTION_ID_REDIRECTS: dict[str, str] = {
+    "12840": "47304",  # Prinses Irenesluizen
+    "38667": "43326",  # Sluiskolk Hartelsluis & Hartelbrug
+    "7426": "49924",  # Oost/Westkolk Prinses Marijkesluis & brug
+    "28025": "39670",  # Sluiskolk Algerasluis & Algerabrug
+    "30984601": "30985410",  # Brug sluis Heumen (keersluis)
+    "54334": "30985692",  # Nieuwe Langebrug
+    "35228475": "35228494",  # Hoeksterpoortbrug (oost)
+    "36567535": "36567845",  # Brug in de Himdyk & Smellebrêge
+    "59275111": "59275532",  # Brug Molenspoor
+    "16765": "39904",  # Van Brienenoordbrug (Zuiddiepje), De Arend en de Zeemeeuwbrug, Ben Schopbrug
+}
+
+
+def get_edge_key(d: dict, u: str | None = None, v: str | None = None) -> str | None:
+    """Extracts the lookup ID key from a merged graph edge.
+
+    Falls back to a deterministic synthetic key ``virtual_<u>_<v>`` for
+    non-harbour connector edges (such as EURIS or FIS-EURIS border links)
+    that lack ``fis_id`` and ``code`` (#214).
+    """
     val = d.get("fis_id") or d.get("code")
-    return str(val) if is_valid(val) else None
+    if is_valid(val):
+        return str(val)
+    if (
+        u is not None
+        and v is not None
+        and d.get("segment_type") != "harbour_access"
+        and d.get("data_source") != "vinharbour"
+    ):
+        a, b = sorted((str(u), str(v)))
+        return f"virtual_{a}_{b}"
+    return None
+
+
+def _resolve_fis_section_id(sid: object, name: str) -> str | None:
+    """Resolves a FIS dropin fairway_section_id to its canonical graph fis_id."""
+    if "Irenesluis" in name or "Irenesluizen" in name:
+        return "47304"
+    if not is_valid(sid):
+        return None
+    sid_str = str(int(float(sid)))
+    return FIS_SECTION_ID_REDIRECTS.get(sid_str, sid_str)
 
 
 def build_edge_structures_lookup() -> dict:
@@ -174,27 +215,15 @@ def build_edge_structures_lookup() -> dict:
 
     lookup = defaultdict(lambda: {"chambers": [], "openings": []})
 
-    # Load FIS chambers
-    df_fis_ch = pd.read_parquet(fis_ch_path)
-    for _, r in df_fis_ch.iterrows():
-        sid = r.get("fairway_section_id")
-        name = str(r.get("name", ""))
-        # Map chamber name variants of Irenesluis to its canonical FIS fairway section ID 47304.
-        if "Irenesluis" in name or "Irenesluizen" in name:
-            sid = 47304
-        if is_valid(sid):
-            lookup[str(int(float(sid)))]["chambers"].append(r.to_dict())
-
-    # Load FIS openings
-    df_fis_op = pd.read_parquet(fis_op_path)
-    for _, r in df_fis_op.iterrows():
-        sid = r.get("fairway_section_id")
-        name = str(r.get("name", ""))
-        # Map opening name variants of Irenesluis to its canonical FIS fairway section ID 47304.
-        if "Irenesluis" in name or "Irenesluizen" in name:
-            sid = 47304
-        if is_valid(sid):
-            lookup[str(int(float(sid)))]["openings"].append(r.to_dict())
+    # Load FIS chambers and openings
+    for path, bucket in ((fis_ch_path, "chambers"), (fis_op_path, "openings")):
+        df_fis = pd.read_parquet(path)
+        for _, r in df_fis.iterrows():
+            sid = _resolve_fis_section_id(
+                r.get("fairway_section_id"), str(r.get("name", ""))
+            )
+            if sid is not None:
+                lookup[sid][bucket].append(r.to_dict())
 
     # Load EURIS edges, chambers, and openings
     df_eur_edges = pd.read_parquet(eur_edges_path)
@@ -753,7 +782,7 @@ def route_batch_voyages_dask(
         )
 
         def weight_func(u, v, d):
-            edge_id = get_edge_key(d)
+            edge_id = get_edge_key(d, u, v)
             struct_data = lookup.get(edge_id, {"chambers": [], "openings": []})
             return get_edge_weight_soft(d, struct_data, ship_dims)
 
@@ -767,7 +796,7 @@ def route_batch_voyages_dask(
 
             for u, v in zip(path[:-1], path[1:]):
                 d = G_merged[u][v]
-                edge_id = get_edge_key(d)
+                edge_id = get_edge_key(d, u, v)
                 if edge_id:
                     struct_data = lookup.get(edge_id, {"chambers": [], "openings": []})
                     pen_dict, violations = check_edge_constraints_soft(
@@ -1045,7 +1074,7 @@ def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
     # Pre-build edge metadata dictionary to avoid nested O(E) searches
     edge_metadata = {}
     for u, v, d in G_merged.edges(data=True):
-        eid = get_edge_key(d)
+        eid = get_edge_key(d, u, v)
         if eid:
             edge_metadata[eid] = {
                 "geometry": d.get("geometry"),

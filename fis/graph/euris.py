@@ -165,10 +165,18 @@ def build_euris_graph(
         target_geometry = graph.nodes[row["target"]]["geometry"]
         return shapely.LineString([source_geometry, target_geometry])
 
+    def border_edge_code(row):
+        a, b = sorted((f"EURIS_{row['source']}", f"EURIS_{row['target']}"))
+        return f"virtual_{a}_{b}"
+
     if len(border_locode_connections) > 0:
         border_locode_connections["geometry"] = border_locode_connections.apply(
             geometry_for_border, axis=1
         )
+        border_locode_connections["code"] = border_locode_connections.apply(
+            border_edge_code, axis=1
+        )
+        border_locode_connections["segment_type"] = "border_connection"
         border_graph = nx.from_pandas_edgelist(
             border_locode_connections, source="source", target="target", edge_attr=True
         )

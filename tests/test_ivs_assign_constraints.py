@@ -4,11 +4,14 @@ import networkx as nx
 import pytest
 from scipy.spatial import KDTree
 from shapely.geometry import Point
+from fis.graph.validation import GraphValidator
 from fis.ivs.assign import (
+    FIS_SECTION_ID_REDIRECTS,
     KEY_PORT_FAIRWAY_NODES,
     AnnotatedPenalty,
     _find_min_length,
     _find_min_width,
+    _resolve_fis_section_id,
     calc_lock_delay,
     calc_travel_time,
     build_edge_structures_lookup,
@@ -502,3 +505,92 @@ def test_key_ports_routing_real_network():
         assert len(violations) == 0, (
             f"Route between {orig} and {dest} had unexpected violations: {violations}"
         )
+
+
+def test_get_edge_key_border_fallback():
+    """Verify get_edge_key handles fis_id, code, synthetic border fallback, and ignores harbours."""
+    assert get_edge_key({"fis_id": 12345}) == "12345"
+    assert get_edge_key({"code": "DE_123"}) == "DE_123"
+
+    # Non-harbour edge without fis_id/code gets a deterministic sorted virtual key
+    border_edge = {"data_source": "EURIS", "is_border": True}
+    k1 = get_edge_key(border_edge, "EURIS_DE_J1230", "EURIS_FR_J1937")
+    k2 = get_edge_key(border_edge, "EURIS_FR_J1937", "EURIS_DE_J1230")
+    assert k1 == "virtual_EURIS_DE_J1230_EURIS_FR_J1937"
+    assert k1 == k2
+
+    # Harbour access edges should not get a synthetic key
+    harbour_edge = {"data_source": "vinharbour", "segment_type": "harbour_access"}
+    assert get_edge_key(harbour_edge, "FIS_1", "FIS_harbour_1") is None
+
+
+def test_resolve_fis_section_id_redirects():
+    """Verify all overwritten FIS section IDs resolve to their canonical graph fis_id."""
+    for old_sid, canonical_sid in FIS_SECTION_ID_REDIRECTS.items():
+        assert _resolve_fis_section_id(old_sid, "Some structure") == canonical_sid
+        assert (
+            _resolve_fis_section_id(float(old_sid), "Some structure") == canonical_sid
+        )
+
+    assert _resolve_fis_section_id("12840", "Sluiskolk Irenesluis") == "47304"
+    assert _resolve_fis_section_id("99999", "Regular lock") == "99999"
+    assert _resolve_fis_section_id(None, "Missing sid") is None
+
+
+def test_graph_validator_edge_keys():
+    """Verify GraphValidator.check_edge_keys flags unkeyed non-harbour edges and ignores harbours."""
+    G = nx.Graph()
+    G.add_edge("FIS_1", "FIS_2", fis_id="100", data_source="FIS")
+    G.add_edge(
+        "FIS_2",
+        "FIS_harbour_1",
+        data_source="vinharbour",
+        segment_type="harbour_access",
+    )
+    v_pass = GraphValidator(G)
+    res_pass = v_pass.check_edge_keys()
+    assert res_pass["status"] == "PASS"
+    assert res_pass["missing_key_count"] == 0
+
+    # Add an unkeyed EURIS border connector
+    G.add_edge("EURIS_DE_1", "EURIS_FR_1", data_source="EURIS", is_border=True)
+    v_fail = GraphValidator(G)
+    res_fail = v_fail.check_edge_keys()
+    assert res_fail["status"] == "FAIL"
+    assert res_fail["missing_key_count"] == 1
+
+
+def test_all_fis_structures_resolve_to_merged_graph():
+    """Integration check: every FIS chamber/opening section ID resolves to an active edge in G_merged."""
+    graph_path = pathlib.Path("output/merged-graph/graph.pickle")
+    required_paths = [
+        graph_path,
+        pathlib.Path("output/dropins-fis-detailed/chambers.geoparquet"),
+        pathlib.Path("output/dropins-fis-detailed/openings.geoparquet"),
+        pathlib.Path("output/dropins-euris-detailed/edges.geoparquet"),
+        pathlib.Path("output/dropins-euris-detailed/chambers.geoparquet"),
+        pathlib.Path("output/dropins-euris-detailed/openings.geoparquet"),
+    ]
+    if not all(p.exists() for p in required_paths):
+        pytest.skip(
+            "Full merged network graph or detailed structure files not found; skipping."
+        )
+
+    with open(graph_path, "rb") as f:
+        G_merged = pickle.load(f)
+
+    validator = GraphValidator(G_merged)
+    res = validator.check_structure_lookup()
+    assert res["status"] == "PASS", (
+        f"Unresolved FIS structures: {res.get('fis_missing_examples')}"
+    )
+    assert res["fis_missing_count"] == 0
+
+    # Verify specific redirected structures from #214 are present in lookup
+    lookup = build_edge_structures_lookup()
+    assert any("Hartelsluis" in c.get("name", "") for c in lookup["43326"]["chambers"])
+    assert any("Marijkesluis" in c.get("name", "") for c in lookup["49924"]["chambers"])
+    assert any("Algerasluis" in c.get("name", "") for c in lookup["39670"]["chambers"])
+    assert any(
+        "Brienenoordbrug" in o.get("name", "") for o in lookup["39904"]["openings"]
+    )

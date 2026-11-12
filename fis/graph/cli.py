@@ -496,6 +496,8 @@ def validate(
     validator.check_dropins()
     validator.check_edge_geometry()
     validator.check_harbours()
+    validator.check_edge_keys()
+    validator.check_structure_lookup()
 
     # Generate report
     report = validator.generate_markdown_report()
