@@ -285,7 +285,13 @@ def merge_graphs(
                 "connection_type": conn["type"],
             }
         )
-        if not edge_attrs.get("code"):
+        existing_code = edge_attrs.get("code")
+        if (
+            not existing_code
+            or (isinstance(existing_code, float) and existing_code != existing_code)
+            or str(existing_code).strip().lower() in ("", "nan", "none")
+            or str(existing_code).startswith("virtual_")
+        ):
             edge_attrs["code"] = f"virtual_{a}_{b}"
         if not edge_attrs.get("segment_type"):
             edge_attrs["segment_type"] = "border_connection"

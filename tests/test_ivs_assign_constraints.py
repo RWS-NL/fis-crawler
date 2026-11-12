@@ -552,12 +552,14 @@ def test_graph_validator_edge_keys():
     assert res_pass["status"] == "PASS"
     assert res_pass["missing_key_count"] == 0
 
-    # Add an unkeyed EURIS border connector
+    # Add an unkeyed EURIS border connector and NaN-keyed edges
     G.add_edge("EURIS_DE_1", "EURIS_FR_1", data_source="EURIS", is_border=True)
+    G.add_edge("EURIS_DE_2", "EURIS_FR_2", fis_id=float("nan"), data_source="EURIS")
+    G.add_edge("EURIS_DE_3", "EURIS_FR_3", code="nan", data_source="EURIS")
     v_fail = GraphValidator(G)
     res_fail = v_fail.check_edge_keys()
     assert res_fail["status"] == "FAIL"
-    assert res_fail["missing_key_count"] == 1
+    assert res_fail["missing_key_count"] == 3
 
 
 def test_all_fis_structures_resolve_to_merged_graph():

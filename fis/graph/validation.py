@@ -438,6 +438,8 @@ class GraphValidator:
     def check_edge_keys(self) -> Dict[str, Any]:
         """Check that every non-harbour edge has an edge key (fis_id or code)."""
         logger.info("Checking non-harbour edge keys...")
+        from fis.ivs.assign import is_valid
+
         total_non_harbour = 0
         missing_keys = []
         for u, v, d in self.graph.edges(data=True):
@@ -447,7 +449,7 @@ class GraphValidator:
             ):
                 continue
             total_non_harbour += 1
-            if not (d.get("fis_id") or d.get("code")):
+            if not (is_valid(d.get("fis_id")) or is_valid(d.get("code"))):
                 missing_keys.append(
                     {
                         "u": u,
