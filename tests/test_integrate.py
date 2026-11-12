@@ -155,3 +155,28 @@ def test_merge_graphs_deduplicates_be_nl_borders():
     assert edge["data_source"] == "BORDER"
     assert edge["segment_type"] == "border_connection"
     assert edge["code"] == "virtual_EURIS_BE_D7511_FIS_35228583"
+
+
+def test_split_edge_at_node():
+    """Missing T-junctions split the target EURIS section edge into two segments."""
+    from shapely.geometry import LineString
+    from fis.graph.euris import _split_edge_at_node
+
+    g = nx.Graph()
+    g.add_node("BE_T3999", geometry=Point(5.46, 50.59))
+    g.add_node("BE_T4036", geometry=Point(5.61, 50.65))
+    g.add_node("BE_T2691", geometry=Point(5.58, 50.62))
+    g.add_edge(
+        "BE_T3999",
+        "BE_T4036",
+        code="BE6659300015",
+        geometry=LineString([(5.46, 50.59), (5.58, 50.62), (5.61, 50.65)]),
+    )
+
+    _split_edge_at_node(g, "BE6659300015", "BE_T2691")
+
+    assert not g.has_edge("BE_T3999", "BE_T4036")
+    assert g.has_edge("BE_T3999", "BE_T2691")
+    assert g.has_edge("BE_T2691", "BE_T4036")
+    assert g.edges["BE_T3999", "BE_T2691"]["code"] == "BE6659300015"
+    assert g.edges["BE_T2691", "BE_T4036"]["code"] == "BE6659300015"

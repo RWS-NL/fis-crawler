@@ -150,7 +150,7 @@ def get_ship_dimensions(
 
 # Canonical redirects for FIS fairway_section_id values overwritten in the merged
 # graph by parallel sections between the same junctions or harbour splicing (#214).
-FIS_SECTION_ID_REDIRECTS: dict[str, str] = {
+FIS_SECTION_ID_REDIRECTS: dict[str, str | None] = {
     "12840": "47304",  # Prinses Irenesluizen
     "38667": "43326",  # Sluiskolk Hartelsluis & Hartelbrug
     "7426": "49924",  # Oost/Westkolk Prinses Marijkesluis & brug
@@ -160,7 +160,9 @@ FIS_SECTION_ID_REDIRECTS: dict[str, str] = {
     "35228475": "35228494",  # Hoeksterpoortbrug (oost)
     "36567535": "36567845",  # Brug in de Himdyk & Smellebrêge
     "59275111": "59275532",  # Brug Molenspoor
-    "16765": "39904",  # Van Brienenoordbrug (Zuiddiepje), De Arend en de Zeemeeuwbrug, Ben Schopbrug
+    # Zuiddiepje (0102B side channel behind Eiland van Brienenoord) is pruned in
+    # the merged graph; do not redirect its narrow bridges onto Nieuwe Maas 39904.
+    "16765": None,
 }
 
 
@@ -895,6 +897,17 @@ KEY_PORT_FAIRWAY_NODES: dict[str, str] = {
 }
 
 
+def _get_unlocode_node_overrides() -> dict[str, str]:
+    """Return pinned UN/LOCODE -> graph node overrides from defaults and schema.toml."""
+    from fis.utils import load_schema
+
+    overrides = dict(KEY_PORT_FAIRWAY_NODES)
+    schema_nodes = load_schema().get("ivs", {}).get("unlocode_nodes", {})
+    for code, node_id in schema_nodes.items():
+        overrides[str(code).strip().upper()] = str(node_id)
+    return overrides
+
+
 def geocode_unlocode(
     unlocode: str,
     zenodo_coords: dict,
@@ -905,14 +918,16 @@ def geocode_unlocode(
 ) -> str | None:
     """Matches a single UN/LOCODE to the nearest suitable graph node.
 
-    Major commercial ports defined in `KEY_PORT_FAIRWAY_NODES` are mapped directly to
-    designated high-capacity fairway junction nodes if present in `G_merged` (#213).
+    Major commercial ports defined in `KEY_PORT_FAIRWAY_NODES` or
+    `[ivs.unlocode_nodes]` in `config/schema.toml` are mapped directly to
+    designated fairway junction nodes if present in `G_merged` (#213).
     For other locations, the lookup first prefers harbour or terminal nodes tagged with
     the UN/LOCODE, falling back to spatial nearest-neighbour matching via KDTree.
     """
     unlocode = str(unlocode).strip().upper()
-    if unlocode in KEY_PORT_FAIRWAY_NODES:
-        pinned_node = KEY_PORT_FAIRWAY_NODES[unlocode]
+    overrides = _get_unlocode_node_overrides()
+    if unlocode in overrides:
+        pinned_node = overrides[unlocode]
         if pinned_node in G_merged:
             return pinned_node
 

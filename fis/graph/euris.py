@@ -10,6 +10,7 @@ import networkx as nx
 import pandas as pd
 import pyproj
 import shapely
+from shapely.ops import substring
 import json
 from tqdm.auto import tqdm
 
@@ -167,15 +168,66 @@ def concat_sections(data_dir: pathlib.Path) -> gpd.GeoDataFrame:
     return section_gdf
 
 
+def _split_edge_at_node(graph: nx.Graph, section_code: str, split_node: str) -> None:
+    """Split a EURIS section edge at an intermediate junction node (e.g. missing T-junction)."""
+    if split_node not in graph:
+        return
+    split_pt = graph.nodes[split_node].get("geometry")
+    if split_pt is None:
+        return
+
+    match = next(
+        (
+            (u, v, d)
+            for u, v, d in graph.edges(data=True)
+            if d.get("code") == section_code
+        ),
+        None,
+    )
+    if match is None:
+        return
+
+    u, v, attrs = match
+    if split_node in (u, v):
+        return
+
+    geom = attrs.get("geometry")
+    if geom is not None and geom.length > 0:
+        u_pt = graph.nodes[u].get("geometry")
+        start_pt = shapely.Point(geom.coords[0])
+        end_pt = shapely.Point(geom.coords[-1])
+        if u_pt is not None and u_pt.distance(end_pt) < u_pt.distance(start_pt):
+            u, v = v, u
+        frac = geom.project(split_pt, normalized=True)
+        geom_1 = substring(geom, 0.0, frac, normalized=True)
+        geom_2 = substring(geom, frac, 1.0, normalized=True)
+    else:
+        geom_1 = geom
+        geom_2 = geom
+
+    attrs_1 = {**attrs, "geometry": geom_1}
+    attrs_2 = {**attrs, "geometry": geom_2}
+    graph.remove_edge(u, v)
+    graph.add_edge(u, split_node, **attrs_1)
+    graph.add_edge(split_node, v, **attrs_2)
+    logger.info(
+        "Split EURIS section %s (%s -- %s) at %s", section_code, u, v, split_node
+    )
+
+
 def build_euris_graph(
     node_gdf: gpd.GeoDataFrame,
     section_gdf: gpd.GeoDataFrame,
+    edge_splits: list[dict[str, str]] | None = None,
 ) -> nx.Graph:
     """Build EURIS network graph from nodes and sections.
 
     Args:
         node_gdf: Node GeoDataFrame with node_id column.
         section_gdf: Section GeoDataFrame with code column.
+        edge_splits: Optional list of edge split overrides with
+            ``section_code`` and ``split_node`` keys. Defaults to
+            ``[euris.edge_splits]`` in ``config/schema.toml``.
 
     Returns:
         NetworkX graph with nodes and edges.
@@ -214,6 +266,14 @@ def build_euris_graph(
         euris_nodes.append(row.to_dict())
         node["euris_nodes"] = euris_nodes
         node.update(row.to_dict())
+
+    if edge_splits is None:
+        from fis.utils import load_schema
+
+        edge_splits = load_schema().get("euris", {}).get("edge_splits", [])
+
+    for split in edge_splits:
+        _split_edge_at_node(graph, split["section_code"], split["split_node"])
 
     # Connect borders
     logger.info("Connecting border nodes...")

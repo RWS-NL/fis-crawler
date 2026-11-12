@@ -326,3 +326,25 @@ columns = [
 ]
 target_type = "string"
 
+# =============================================================================
+# EURIS Network Overrides
+# =============================================================================
+# Manual topology fixes for missing junctions in EURIS.
+# Format: [[euris.edge_splits]]
+
+[[euris.edge_splits]]
+section_code = "BE6659300015"
+split_node = "BE_T2691"
+comment = "Connect Canal de l'Ourthe (BE_T2691) to Meuse 40-13 Ivoz Canal Albert (BE6659300015); Node_BE omits the T-junction sectionref"
+
+# =============================================================================
+# IVS Assignment Overrides
+# =============================================================================
+# Manual UN/LOCODE -> graph node mappings (e.g. pseudo-UN/LOCODEs absent from
+# the official UN/LOCODE directory).
+
+[ivs.unlocode_nodes]
+BESEA = "FIS_59276122"  # Belgian coast / North Sea approach (Westerschelde mouth)
+
+
+
