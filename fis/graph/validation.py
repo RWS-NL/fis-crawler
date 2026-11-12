@@ -61,6 +61,8 @@ class GraphValidator:
             "dropins": {},
             "edge_geometry": {},
             "harbours": {},
+            "edge_keys": {},
+            "structure_lookup": {},
         }
 
     def check_edge_geometry(self) -> Dict[str, Any]:
@@ -433,6 +435,92 @@ class GraphValidator:
         self.results["harbours"] = harbour_health
         return harbour_health
 
+    def check_edge_keys(self) -> Dict[str, Any]:
+        """Check that every non-harbour edge has an edge key (fis_id or code)."""
+        logger.info("Checking non-harbour edge keys...")
+        from fis.ivs.assign import is_valid
+
+        total_non_harbour = 0
+        missing_keys = []
+        for u, v, d in self.graph.edges(data=True):
+            if (
+                d.get("segment_type") == "harbour_access"
+                or d.get("data_source") == "vinharbour"
+            ):
+                continue
+            total_non_harbour += 1
+            if not (is_valid(d.get("fis_id")) or is_valid(d.get("code"))):
+                missing_keys.append(
+                    {
+                        "u": u,
+                        "v": v,
+                        "data_source": d.get("data_source", "unknown"),
+                        "length_m": d.get("length_m"),
+                    }
+                )
+
+        edge_keys_health = {
+            "total_non_harbour_edges": total_non_harbour,
+            "missing_key_count": len(missing_keys),
+            "missing_key_examples": missing_keys[:20],
+            "status": "FAIL" if missing_keys else "PASS",
+        }
+        self.results["edge_keys"] = edge_keys_health
+        return edge_keys_health
+
+    def check_structure_lookup(self) -> Dict[str, Any]:
+        """Check that dropin structure lookup keys resolve to graph edges (excluding EURIS-NL)."""
+        logger.info("Checking structure lookup resolution against graph edges...")
+        required_paths = [
+            pathlib.Path("output/dropins-fis-detailed/chambers.geoparquet"),
+            pathlib.Path("output/dropins-fis-detailed/openings.geoparquet"),
+            pathlib.Path("output/dropins-euris-detailed/edges.geoparquet"),
+            pathlib.Path("output/dropins-euris-detailed/chambers.geoparquet"),
+            pathlib.Path("output/dropins-euris-detailed/openings.geoparquet"),
+        ]
+        if not all(p.exists() for p in required_paths):
+            res = {
+                "status": "SKIPPED",
+                "reason": "Detailed dropin parquet files not found",
+            }
+            self.results["structure_lookup"] = res
+            return res
+
+        from fis.ivs.assign import build_edge_structures_lookup, is_valid
+
+        lookup = build_edge_structures_lookup()
+        graph_keys = set()
+        for _, _, d in self.graph.edges(data=True):
+            val = d.get("fis_id") or d.get("code")
+            if is_valid(val):
+                graph_keys.add(str(val))
+
+        fis_missing = []
+        euris_nl_excluded = 0
+        euris_foreign_missing = []
+
+        for key in sorted(lookup.keys()):
+            if key in graph_keys:
+                continue
+            if key.isdigit():
+                fis_missing.append(key)
+            elif key.startswith("NL"):
+                euris_nl_excluded += 1
+            else:
+                euris_foreign_missing.append(key)
+
+        res = {
+            "total_lookup_keys": len(lookup),
+            "fis_missing_count": len(fis_missing),
+            "fis_missing_examples": fis_missing[:20],
+            "euris_nl_excluded_count": euris_nl_excluded,
+            "euris_foreign_missing_count": len(euris_foreign_missing),
+            "euris_foreign_missing_examples": euris_foreign_missing[:20],
+            "status": "FAIL" if fis_missing else "PASS",
+        }
+        self.results["structure_lookup"] = res
+        return res
+
     def generate_markdown_report(self) -> str:
         """Generate a Markdown report from results using Jinja2 template."""
         stats = self.results["statistics"]
@@ -442,6 +530,8 @@ class GraphValidator:
         dropins = self.results.get("dropins", {})
         edge_geometry = self.results.get("edge_geometry", {})
         harbours = self.results.get("harbours", {})
+        edge_keys = self.results.get("edge_keys", {})
+        structure_lookup = self.results.get("structure_lookup", {})
 
         # Calculate sources for table
         sources = set(
@@ -466,5 +556,7 @@ class GraphValidator:
             dropins=dropins,
             edge_geometry=edge_geometry,
             harbours=harbours,
+            edge_keys=edge_keys,
+            structure_lookup=structure_lookup,
             sources=list(sources),
         )

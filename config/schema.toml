@@ -326,3 +326,56 @@ columns = [
 ]
 target_type = "string"
 
+# =============================================================================
+# EURIS Network Overrides
+# =============================================================================
+# Manual topology fixes for missing junctions in EURIS.
+# Format: [[euris.edge_splits]]
+
+[[euris.edge_splits]]
+section_code = "BE6659300015"
+split_node = "BE_T2691"
+comment = "Connect Canal de l'Ourthe (BE_T2691) to Meuse 40-13 Ivoz Canal Albert (BE6659300015); Node_BE omits the T-junction sectionref"
+
+# =============================================================================
+# IVS Assignment Overrides
+# =============================================================================
+# Manual UN/LOCODE -> graph node mappings (commercial fairway junctions and
+# pseudo-UN/LOCODEs absent from the official UN/LOCODE directory), plus
+# canonical FIS fairway_section_id redirects for overwritten/pruned sections.
+
+[ivs]
+# Side-channel sections pruned during schematization whose structures should
+# not be redirected onto the main fairway.
+ignored_section_ids = [
+    "16765",  # Zuiddiepje (0102B side channel behind Eiland van Brienenoord)
+]
+
+[ivs.unlocode_nodes]
+NLRTM = "FIS_8863496"       # Rotterdam (Nieuwe Maas / Waalhaven / Eemhaven, CEMT VI_c)
+NLAMS = "FIS_8864384"       # Amsterdam (Buiten-IJ / Amsterdam-Rijnkanaal, CEMT VI_b)
+BEANR = "FIS_35228495"      # Antwerpen (Westerschelde / Rede Antwerpen, CEMT VI_c)
+DEDUI = "EURIS_DE_J1140"    # Duisburg (Rhein / Ruhr Hafenmund, CEMT VI_b)
+NLLEY = "FIS_8865470"       # Lelystad (Markermeer / IJsselmeer approach, CEMT VI_a)
+BEGNE = "FIS_35228492"      # Gent (Kanaal Gent-Terneuzen, CEMT VI_b)
+NLTNZ = "FIS_8867489"       # Terneuzen (Kanaal Gent-Terneuzen / Westerschelde, CEMT VI_b)
+NLDOR = "FIS_8867986"       # Dordrecht (Beneden-Merwede / Oude Maas, CEMT VI_c)
+BESEA = "FIS_59276122"      # Belgian coast / North Sea approach (Westerschelde mouth)
+
+[ivs.section_id_redirects]
+"12840" = "47304"       # Prinses Irenesluizen
+"38667" = "43326"       # Sluiskolk Hartelsluis & Hartelbrug
+"7426" = "49924"        # Oost/Westkolk Prinses Marijkesluis & brug
+"28025" = "39670"       # Sluiskolk Algerasluis & Algerabrug
+"30984601" = "30985410" # Brug sluis Heumen (keersluis)
+"54334" = "30985692"    # Nieuwe Langebrug
+"35228475" = "35228494" # Hoeksterpoortbrug (oost)
+"36567535" = "36567845" # Brug in de Himdyk & Smellebrêge
+"59275111" = "59275532" # Brug Molenspoor
+
+[ivs.structure_name_section_redirects]
+"Irenesluis" = "47304"
+"Irenesluizen" = "47304"
+
+
+

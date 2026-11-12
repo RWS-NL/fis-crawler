@@ -154,7 +154,37 @@ Harbours hang beside the fairway as leaves: one `harbour_access` edge of at leas
 {% endfor %}
 {% endif %}
 
-## 8. Suggested Improvements
+## 8. Non-Harbour Edge Keys
+{% if edge_keys %}
+- **Status**: {% if edge_keys.status == "PASS" %}✅{% else %}⚠️{% endif %} {{ edge_keys.status }}
+- **Non-Harbour Edges**: {{ edge_keys.total_non_harbour_edges }}
+- **Missing Key Count**: {{ edge_keys.missing_key_count }}
+{% if edge_keys.missing_key_examples %}
+| Source Node | Target Node | Data Source | Length (m) |
+|-------------|-------------|-------------|------------|
+{% for e in edge_keys.missing_key_examples %}
+| {{ e.u }} | {{ e.v }} | {{ e.data_source }} | {{ "%.2f"|format(e.length_m or 0.0) }} |
+{% endfor %}
+{% endif %}
+{% endif %}
+
+## 9. Structure Lookup Resolution
+{% if structure_lookup %}
+- **Status**: {% if structure_lookup.status == "PASS" %}✅{% else %}⚠️{% endif %} {{ structure_lookup.status }}
+{% if structure_lookup.status == "SKIPPED" %}
+- **Reason**: {{ structure_lookup.reason }}
+{% else %}
+- **Total Lookup Keys**: {{ structure_lookup.total_lookup_keys }}
+- **Missing FIS Section Keys**: {{ structure_lookup.fis_missing_count }}
+- **Excluded EURIS-NL Keys**: {{ structure_lookup.euris_nl_excluded_count }}
+- **Missing Foreign EURIS Keys**: {{ structure_lookup.euris_foreign_missing_count }}
+{% if structure_lookup.fis_missing_examples %}
+- **Missing FIS Keys**: {{ structure_lookup.fis_missing_examples|join(", ") }}
+{% endif %}
+{% endif %}
+{% endif %}
+
+## 10. Suggested Improvements
 - **Attribute Cleanup**: Investigate attributes with high missing/null counts (>50%) and determine if they are required or can be dropped.
 - **Graph Connectivity**: There are multiple disjoint subgraphs. Investigate whether the top 2-10 subgraphs are legitimately disconnected waterways or missing logical connections.
 - **Legacy Attributes**: If non-standard legacy attributes are flagged, ensure they are added to `schema.toml` `attributes.edges` or `attributes.nodes` to map to canonical names.

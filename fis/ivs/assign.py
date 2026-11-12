@@ -148,10 +148,82 @@ def get_ship_dimensions(
     }
 
 
-def get_edge_key(d: dict) -> str | None:
-    """Extracts the lookup ID key from a merged graph edge."""
+def _get_ivs_config() -> dict:
+    """Load the `[ivs]` section from `config/schema.toml`."""
+    from fis.utils import load_schema
+
+    return load_schema().get("ivs", {})
+
+
+def get_edge_key(d: dict, u: str | None = None, v: str | None = None) -> str | None:
+    """Return the canonical lookup/output identifier for a merged-graph edge.
+
+    Most graph edges carry an authoritative section identifier in ``fis_id``
+    (FIS) or ``code`` (EURIS). Non-harbour connector edges—such as stitched
+    FIS-EURIS border links (``data_source == "BORDER"``) or synthetic EURIS
+    connectors—lack both attributes and instead receive a deterministic
+    undirected key ``virtual_<u>_<v>`` (with endpoints sorted lexicographically).
+    Harbour access edges (``segment_type == "harbour_access"`` or
+    ``data_source == "vinharbour"``) are intentionally excluded and return
+    ``None`` because they represent port-basin approaches rather than main
+    fairway or border-connector segments.
+
+    Args:
+        d: Edge attribute dictionary from the merged NetworkX graph.
+        u: Source node ID of the edge (used only for the ``virtual_`` fallback).
+        v: Target node ID of the edge (used only for the ``virtual_`` fallback).
+
+    Returns:
+        Section ID string, ``virtual_<u>_<v>`` for unkeyed non-harbour
+        connectors, or ``None`` for harbour access edges or when ``u``/``v`` are
+        omitted.
+    """
     val = d.get("fis_id") or d.get("code")
-    return str(val) if is_valid(val) else None
+    if is_valid(val):
+        return str(val)
+    if (
+        u is not None
+        and v is not None
+        and d.get("segment_type") != "harbour_access"
+        and d.get("data_source") != "vinharbour"
+    ):
+        a, b = sorted((str(u), str(v)))
+        return f"virtual_{a}_{b}"
+    return None
+
+
+def _resolve_fis_section_id(sid: object, name: str) -> str | None:
+    """Resolve a FIS dropin ``fairway_section_id`` to its canonical graph ``fis_id``.
+
+    All manual section redirects and ignored side-channel IDs are configured in
+    ``config/schema.toml`` under ``[ivs]``.
+
+    Args:
+        sid: Raw ``fairway_section_id`` value from a FIS dropins GeoParquet row.
+        name: Structure or opening name used for name-based overrides.
+
+    Returns:
+        Canonical ``fis_id`` string, or ``None`` when ``sid`` is invalid or
+        listed in ``[ivs].ignored_section_ids``.
+    """
+    ivs_cfg = _get_ivs_config()
+    for pattern, target_sid in ivs_cfg.get(
+        "structure_name_section_redirects", {}
+    ).items():
+        if pattern in name:
+            return str(target_sid)
+
+    if not is_valid(sid):
+        return None
+
+    # GeoParquet/pandas columns with nullable integer IDs often deserialize as
+    # floats (e.g. 12840.0 or "12840.0"); converting float -> int -> str strips
+    # any ".0" suffix to produce the canonical integer ID string.
+    sid_str = str(int(float(sid)))
+    if sid_str in set(ivs_cfg.get("ignored_section_ids", [])):
+        return None
+    redirects = ivs_cfg.get("section_id_redirects", {})
+    return str(redirects.get(sid_str, sid_str))
 
 
 def build_edge_structures_lookup() -> dict:
@@ -174,27 +246,15 @@ def build_edge_structures_lookup() -> dict:
 
     lookup = defaultdict(lambda: {"chambers": [], "openings": []})
 
-    # Load FIS chambers
-    df_fis_ch = pd.read_parquet(fis_ch_path)
-    for _, r in df_fis_ch.iterrows():
-        sid = r.get("fairway_section_id")
-        name = str(r.get("name", ""))
-        # Map chamber name variants of Irenesluis to its canonical FIS fairway section ID 47304.
-        if "Irenesluis" in name or "Irenesluizen" in name:
-            sid = 47304
-        if is_valid(sid):
-            lookup[str(int(float(sid)))]["chambers"].append(r.to_dict())
-
-    # Load FIS openings
-    df_fis_op = pd.read_parquet(fis_op_path)
-    for _, r in df_fis_op.iterrows():
-        sid = r.get("fairway_section_id")
-        name = str(r.get("name", ""))
-        # Map opening name variants of Irenesluis to its canonical FIS fairway section ID 47304.
-        if "Irenesluis" in name or "Irenesluizen" in name:
-            sid = 47304
-        if is_valid(sid):
-            lookup[str(int(float(sid)))]["openings"].append(r.to_dict())
+    # Load FIS chambers and openings
+    for path, bucket in ((fis_ch_path, "chambers"), (fis_op_path, "openings")):
+        df_fis = pd.read_parquet(path)
+        for _, r in df_fis.iterrows():
+            sid = _resolve_fis_section_id(
+                r.get("fairway_section_id"), str(r.get("name", ""))
+            )
+            if sid is not None:
+                lookup[sid][bucket].append(r.to_dict())
 
     # Load EURIS edges, chambers, and openings
     df_eur_edges = pd.read_parquet(eur_edges_path)
@@ -753,7 +813,7 @@ def route_batch_voyages_dask(
         )
 
         def weight_func(u, v, d):
-            edge_id = get_edge_key(d)
+            edge_id = get_edge_key(d, u, v)
             struct_data = lookup.get(edge_id, {"chambers": [], "openings": []})
             return get_edge_weight_soft(d, struct_data, ship_dims)
 
@@ -767,7 +827,7 @@ def route_batch_voyages_dask(
 
             for u, v in zip(path[:-1], path[1:]):
                 d = G_merged[u][v]
-                edge_id = get_edge_key(d)
+                edge_id = get_edge_key(d, u, v)
                 if edge_id:
                     struct_data = lookup.get(edge_id, {"chambers": [], "openings": []})
                     pen_dict, violations = check_edge_constraints_soft(
@@ -843,27 +903,13 @@ def build_locode_node_lookup(G_merged: nx.Graph) -> dict:
     return node_locode_map
 
 
-# Key commercial fairway junction nodes for major inland ports (#213)
-# Explicitly pins high-volume commercial ports to unhindered CEMT fairway junctions
-# to avoid geocoding into shallow, narrow, or restricted harbour/city basins.
-KEY_PORT_FAIRWAY_NODES: dict[str, str] = {
-    # Rotterdam (Nieuwe Maas / Waalhaven / Eemhaven junction, CEMT VI_c)
-    "NLRTM": "FIS_8863496",
-    # Amsterdam (Buiten-IJ / Amsterdam-Rijnkanaal junction, CEMT VI_b)
-    "NLAMS": "FIS_8864384",
-    # Antwerpen (Westerschelde / Rede Antwerpen fairway, CEMT VI_c)
-    "BEANR": "FIS_35228495",
-    # Duisburg (Rhein / Ruhr junction Hafenmund, CEMT VI_b)
-    "DEDUI": "EURIS_DE_J1140",
-    # Lelystad (Markermeer / IJsselmeer approach, CEMT VI_a)
-    "NLLEY": "FIS_8865470",
-    # Gent (Kanaal Gent-Terneuzen commercial corridor, CEMT VI_b)
-    "BEGNE": "FIS_35228492",
-    # Terneuzen (Kanaal Gent-Terneuzen / Westerschelde approach, CEMT VI_b)
-    "NLTNZ": "FIS_8867489",
-    # Dordrecht (Beneden-Merwede / Oude Maas junction, CEMT VI_c)
-    "NLDOR": "FIS_8867986",
-}
+def _get_unlocode_node_overrides() -> dict[str, str]:
+    """Return pinned UN/LOCODE -> graph node overrides from `[ivs.unlocode_nodes]` in `config/schema.toml`."""
+    schema_nodes = _get_ivs_config().get("unlocode_nodes", {})
+    return {
+        str(code).strip().upper(): str(node_id)
+        for code, node_id in schema_nodes.items()
+    }
 
 
 def geocode_unlocode(
@@ -876,14 +922,16 @@ def geocode_unlocode(
 ) -> str | None:
     """Matches a single UN/LOCODE to the nearest suitable graph node.
 
-    Major commercial ports defined in `KEY_PORT_FAIRWAY_NODES` are mapped directly to
-    designated high-capacity fairway junction nodes if present in `G_merged` (#213).
+    Pinned port and pseudo-UN/LOCODE mappings defined under
+    ``[ivs.unlocode_nodes]`` in ``config/schema.toml`` are resolved directly to
+    designated fairway junction nodes if present in ``G_merged`` (#213).
     For other locations, the lookup first prefers harbour or terminal nodes tagged with
     the UN/LOCODE, falling back to spatial nearest-neighbour matching via KDTree.
     """
     unlocode = str(unlocode).strip().upper()
-    if unlocode in KEY_PORT_FAIRWAY_NODES:
-        pinned_node = KEY_PORT_FAIRWAY_NODES[unlocode]
+    overrides = _get_unlocode_node_overrides()
+    if unlocode in overrides:
+        pinned_node = overrides[unlocode]
         if pinned_node in G_merged:
             return pinned_node
 
@@ -1045,7 +1093,7 @@ def aggregate_results(results: list, G_merged: nx.Graph) -> tuple:
     # Pre-build edge metadata dictionary to avoid nested O(E) searches
     edge_metadata = {}
     for u, v, d in G_merged.edges(data=True):
-        eid = get_edge_key(d)
+        eid = get_edge_key(d, u, v)
         if eid:
             edge_metadata[eid] = {
                 "geometry": d.get("geometry"),
