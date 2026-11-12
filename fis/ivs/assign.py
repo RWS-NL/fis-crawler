@@ -148,30 +148,35 @@ def get_ship_dimensions(
     }
 
 
-# Canonical redirects for FIS fairway_section_id values overwritten in the merged
-# graph by parallel sections between the same junctions or harbour splicing (#214).
-FIS_SECTION_ID_REDIRECTS: dict[str, str | None] = {
-    "12840": "47304",  # Prinses Irenesluizen
-    "38667": "43326",  # Sluiskolk Hartelsluis & Hartelbrug
-    "7426": "49924",  # Oost/Westkolk Prinses Marijkesluis & brug
-    "28025": "39670",  # Sluiskolk Algerasluis & Algerabrug
-    "30984601": "30985410",  # Brug sluis Heumen (keersluis)
-    "54334": "30985692",  # Nieuwe Langebrug
-    "35228475": "35228494",  # Hoeksterpoortbrug (oost)
-    "36567535": "36567845",  # Brug in de Himdyk & Smellebrêge
-    "59275111": "59275532",  # Brug Molenspoor
-    # Zuiddiepje (0102B side channel behind Eiland van Brienenoord) is pruned in
-    # the merged graph; do not redirect its narrow bridges onto Nieuwe Maas 39904.
-    "16765": None,
-}
+def _get_ivs_config() -> dict:
+    """Load the `[ivs]` section from `config/schema.toml`."""
+    from fis.utils import load_schema
+
+    return load_schema().get("ivs", {})
 
 
 def get_edge_key(d: dict, u: str | None = None, v: str | None = None) -> str | None:
-    """Extracts the lookup ID key from a merged graph edge.
+    """Return the canonical lookup/output identifier for a merged-graph edge.
 
-    Falls back to a deterministic synthetic key ``virtual_<u>_<v>`` for
-    non-harbour connector edges (such as EURIS or FIS-EURIS border links)
-    that lack ``fis_id`` and ``code`` (#214).
+    Most graph edges carry an authoritative section identifier in ``fis_id``
+    (FIS) or ``code`` (EURIS). Non-harbour connector edges—such as stitched
+    FIS-EURIS border links (``data_source == "BORDER"``) or synthetic EURIS
+    connectors—lack both attributes and instead receive a deterministic
+    undirected key ``virtual_<u>_<v>`` (with endpoints sorted lexicographically).
+    Harbour access edges (``segment_type == "harbour_access"`` or
+    ``data_source == "vinharbour"``) are intentionally excluded and return
+    ``None`` because they represent port-basin approaches rather than main
+    fairway or border-connector segments.
+
+    Args:
+        d: Edge attribute dictionary from the merged NetworkX graph.
+        u: Source node ID of the edge (used only for the ``virtual_`` fallback).
+        v: Target node ID of the edge (used only for the ``virtual_`` fallback).
+
+    Returns:
+        Section ID string, ``virtual_<u>_<v>`` for unkeyed non-harbour
+        connectors, or ``None`` for harbour access edges or when ``u``/``v`` are
+        omitted.
     """
     val = d.get("fis_id") or d.get("code")
     if is_valid(val):
@@ -188,13 +193,37 @@ def get_edge_key(d: dict, u: str | None = None, v: str | None = None) -> str | N
 
 
 def _resolve_fis_section_id(sid: object, name: str) -> str | None:
-    """Resolves a FIS dropin fairway_section_id to its canonical graph fis_id."""
-    if "Irenesluis" in name or "Irenesluizen" in name:
-        return "47304"
+    """Resolve a FIS dropin ``fairway_section_id`` to its canonical graph ``fis_id``.
+
+    All manual section redirects and ignored side-channel IDs are configured in
+    ``config/schema.toml`` under ``[ivs]``.
+
+    Args:
+        sid: Raw ``fairway_section_id`` value from a FIS dropins GeoParquet row.
+        name: Structure or opening name used for name-based overrides.
+
+    Returns:
+        Canonical ``fis_id`` string, or ``None`` when ``sid`` is invalid or
+        listed in ``[ivs].ignored_section_ids``.
+    """
+    ivs_cfg = _get_ivs_config()
+    for pattern, target_sid in ivs_cfg.get(
+        "structure_name_section_redirects", {}
+    ).items():
+        if pattern in name:
+            return str(target_sid)
+
     if not is_valid(sid):
         return None
+
+    # GeoParquet/pandas columns with nullable integer IDs often deserialize as
+    # floats (e.g. 12840.0 or "12840.0"); converting float -> int -> str strips
+    # any ".0" suffix to produce the canonical integer ID string.
     sid_str = str(int(float(sid)))
-    return FIS_SECTION_ID_REDIRECTS.get(sid_str, sid_str)
+    if sid_str in set(ivs_cfg.get("ignored_section_ids", [])):
+        return None
+    redirects = ivs_cfg.get("section_id_redirects", {})
+    return str(redirects.get(sid_str, sid_str))
 
 
 def build_edge_structures_lookup() -> dict:
@@ -874,38 +903,13 @@ def build_locode_node_lookup(G_merged: nx.Graph) -> dict:
     return node_locode_map
 
 
-# Key commercial fairway junction nodes for major inland ports (#213)
-# Explicitly pins high-volume commercial ports to unhindered CEMT fairway junctions
-# to avoid geocoding into shallow, narrow, or restricted harbour/city basins.
-KEY_PORT_FAIRWAY_NODES: dict[str, str] = {
-    # Rotterdam (Nieuwe Maas / Waalhaven / Eemhaven junction, CEMT VI_c)
-    "NLRTM": "FIS_8863496",
-    # Amsterdam (Buiten-IJ / Amsterdam-Rijnkanaal junction, CEMT VI_b)
-    "NLAMS": "FIS_8864384",
-    # Antwerpen (Westerschelde / Rede Antwerpen fairway, CEMT VI_c)
-    "BEANR": "FIS_35228495",
-    # Duisburg (Rhein / Ruhr junction Hafenmund, CEMT VI_b)
-    "DEDUI": "EURIS_DE_J1140",
-    # Lelystad (Markermeer / IJsselmeer approach, CEMT VI_a)
-    "NLLEY": "FIS_8865470",
-    # Gent (Kanaal Gent-Terneuzen commercial corridor, CEMT VI_b)
-    "BEGNE": "FIS_35228492",
-    # Terneuzen (Kanaal Gent-Terneuzen / Westerschelde approach, CEMT VI_b)
-    "NLTNZ": "FIS_8867489",
-    # Dordrecht (Beneden-Merwede / Oude Maas junction, CEMT VI_c)
-    "NLDOR": "FIS_8867986",
-}
-
-
 def _get_unlocode_node_overrides() -> dict[str, str]:
-    """Return pinned UN/LOCODE -> graph node overrides from defaults and schema.toml."""
-    from fis.utils import load_schema
-
-    overrides = dict(KEY_PORT_FAIRWAY_NODES)
-    schema_nodes = load_schema().get("ivs", {}).get("unlocode_nodes", {})
-    for code, node_id in schema_nodes.items():
-        overrides[str(code).strip().upper()] = str(node_id)
-    return overrides
+    """Return pinned UN/LOCODE -> graph node overrides from `[ivs.unlocode_nodes]` in `config/schema.toml`."""
+    schema_nodes = _get_ivs_config().get("unlocode_nodes", {})
+    return {
+        str(code).strip().upper(): str(node_id)
+        for code, node_id in schema_nodes.items()
+    }
 
 
 def geocode_unlocode(
@@ -918,9 +922,9 @@ def geocode_unlocode(
 ) -> str | None:
     """Matches a single UN/LOCODE to the nearest suitable graph node.
 
-    Major commercial ports defined in `KEY_PORT_FAIRWAY_NODES` or
-    `[ivs.unlocode_nodes]` in `config/schema.toml` are mapped directly to
-    designated fairway junction nodes if present in `G_merged` (#213).
+    Pinned port and pseudo-UN/LOCODE mappings defined under
+    ``[ivs.unlocode_nodes]`` in ``config/schema.toml`` are resolved directly to
+    designated fairway junction nodes if present in ``G_merged`` (#213).
     For other locations, the lookup first prefers harbour or terminal nodes tagged with
     the UN/LOCODE, falling back to spatial nearest-neighbour matching via KDTree.
     """

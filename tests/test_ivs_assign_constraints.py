@@ -6,11 +6,11 @@ from scipy.spatial import KDTree
 from shapely.geometry import Point
 from fis.graph.validation import GraphValidator
 from fis.ivs.assign import (
-    FIS_SECTION_ID_REDIRECTS,
-    KEY_PORT_FAIRWAY_NODES,
     AnnotatedPenalty,
     _find_min_length,
     _find_min_width,
+    _get_ivs_config,
+    _get_unlocode_node_overrides,
     _resolve_fis_section_id,
     calc_lock_delay,
     calc_travel_time,
@@ -397,16 +397,16 @@ def test_calc_travel_time_and_lock_delay(volkerak_chambers):
 
 
 def test_geocode_unlocode_pinned_ports():
-    """Verify that KEY_PORT_FAIRWAY_NODES resolves directly to designated fairway nodes."""
-    # Graph containing all pinned nodes
+    """Verify that [ivs.unlocode_nodes] in schema.toml resolves directly to designated fairway nodes."""
+    pinned_nodes = _get_unlocode_node_overrides()
     G = nx.Graph()
-    for code, node_id in KEY_PORT_FAIRWAY_NODES.items():
+    for node_id in pinned_nodes.values():
         G.add_node(node_id, geometry=Point(4.0, 52.0))
 
     tree = KDTree([(0.0, 0.0)])
     node_ids = ["fallback_node"]
 
-    for code, expected_node in KEY_PORT_FAIRWAY_NODES.items():
+    for code, expected_node in pinned_nodes.items():
         # Exact code
         assert geocode_unlocode(code, {}, {}, tree, node_ids, G) == expected_node
         # Lowercase and whitespace
@@ -452,8 +452,10 @@ def test_key_ports_routing_real_network():
 
     lookup = build_edge_structures_lookup()
 
+    pinned_nodes = _get_unlocode_node_overrides()
+
     # 1. Verify every pinned port node exists in G_merged
-    for code, node_id in KEY_PORT_FAIRWAY_NODES.items():
+    for code, node_id in pinned_nodes.items():
         assert node_id in G_merged, (
             f"Pinned node {node_id} for {code} not found in G_merged"
         )
@@ -470,8 +472,8 @@ def test_key_ports_routing_real_network():
     ]
 
     for orig, dest in test_pairs:
-        orig_node = KEY_PORT_FAIRWAY_NODES[orig]
-        dest_node = KEY_PORT_FAIRWAY_NODES[dest]
+        orig_node = pinned_nodes[orig]
+        dest_node = pinned_nodes[dest]
 
         def weight_func(u, v, d):
             edge_id = get_edge_key(d)
@@ -526,10 +528,17 @@ def test_get_edge_key_border_fallback():
 
 def test_resolve_fis_section_id_redirects():
     """Verify all overwritten FIS section IDs resolve to their canonical graph fis_id."""
-    for old_sid, canonical_sid in FIS_SECTION_ID_REDIRECTS.items():
+    ivs_cfg = _get_ivs_config()
+    for old_sid, canonical_sid in ivs_cfg.get("section_id_redirects", {}).items():
         assert _resolve_fis_section_id(old_sid, "Some structure") == canonical_sid
         assert (
             _resolve_fis_section_id(float(old_sid), "Some structure") == canonical_sid
+        )
+
+    for ignored_sid in ivs_cfg.get("ignored_section_ids", []):
+        assert _resolve_fis_section_id(ignored_sid, "Ignored side channel") is None
+        assert (
+            _resolve_fis_section_id(float(ignored_sid), "Ignored side channel") is None
         )
 
     assert _resolve_fis_section_id("12840", "Sluiskolk Irenesluis") == "47304"

@@ -339,13 +339,19 @@ def merge_graphs(
                 "connection_type": conn["type"],
             }
         )
+        # Synthetic `virtual_<u>_<v>` codes identify non-harbour connector edges
+        # (e.g. stitched FIS-EURIS border links) that have no native EURIS
+        # section code. Regenerate any missing/NaN or copied `virtual_...` code
+        # from the final endpoints so IDs stay consistent after NL stitching.
         existing_code = edge_attrs.get("code")
-        if (
+        is_missing_code = (
             not existing_code
             or (isinstance(existing_code, float) and existing_code != existing_code)
             or str(existing_code).strip().lower() in ("", "nan", "none")
-            or str(existing_code).startswith("virtual_")
-        ):
+        )
+        is_copied_virtual_code = str(existing_code).startswith("virtual_")
+        needs_virtual_code = is_missing_code or is_copied_virtual_code
+        if needs_virtual_code:
             edge_attrs["code"] = f"virtual_{a}_{b}"
         if not edge_attrs.get("segment_type"):
             edge_attrs["segment_type"] = "border_connection"
