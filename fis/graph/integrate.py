@@ -7,9 +7,54 @@ from typing import Dict, List
 
 import geopandas as gpd
 import networkx as nx
-from shapely.geometry import Point
+from shapely.geometry import LineString, Point
 
 logger = logging.getLogger(__name__)
+
+# Belgian EURIS sections that physically overlap with the authoritative FIS network
+# without a `cntrycode_cb == "NL"` tag: code -> (outer_euris_node, inner_euris_node)
+_REDUNDANT_BE_BORDER_SECTIONS: dict[str, tuple[str, str]] = {
+    "BE0173200000": ("BE_F7792", "BE_D7511"),  # Antwerpen / Schelde
+    "BE0532800000": ("BE_F6151", "BE_F5919"),  # Kanaal Gent-Terneuzen
+    "BE0210100000": ("BE_W3531", "BE_W3523"),  # Petit-Lanaye
+}
+
+
+def _extract_node_point(attrs: Dict) -> Point | None:
+    """Return a node's Point geometry from `geometry`, `Geometry`, or `(x, y)`."""
+    if "geometry" in attrs and isinstance(attrs["geometry"], Point):
+        return attrs["geometry"]
+    if "Geometry" in attrs and isinstance(attrs["Geometry"], Point):
+        return attrs["Geometry"]
+    if "x" in attrs and "y" in attrs:
+        return Point(attrs["x"], attrs["y"])
+    return None
+
+
+def _build_fis_nodes_gdf(fis_graph: nx.Graph) -> gpd.GeoDataFrame | None:
+    """Build a UTM 31N GeoDataFrame of FIS nodes with valid Point geometries."""
+    fis_points = []
+    fis_ids = []
+    for n, d in fis_graph.nodes(data=True):
+        p = _extract_node_point(d)
+        if p is not None:
+            fis_points.append(p)
+            fis_ids.append(n)
+    if not fis_points:
+        return None
+    return gpd.GeoDataFrame(
+        {"node_id": fis_ids, "geometry": fis_points}, crs="EPSG:4326"
+    ).to_crs("EPSG:32631")
+
+
+def _nearest_fis_node(fis_gdf: gpd.GeoDataFrame, point: Point) -> tuple[object, float]:
+    """Return `(fis_node_id, distance_m)` for the nearest FIS node to an EPSG:4326 Point."""
+    from ..lock.utils import project_geometry
+
+    pt_rd = project_geometry(point, "EPSG:4326", "EPSG:32631")
+    dists = fis_gdf.distance(pt_rd)
+    nearest_idx = dists.idxmin()
+    return fis_gdf.iloc[nearest_idx].node_id, float(dists.min())
 
 
 def load_euris_graph(path: pathlib.Path) -> nx.Graph:
@@ -79,30 +124,10 @@ def find_geometric_border_connections(
     """
 
     # 1. Prepare FIS nodes spatial index
-    fis_points = []
-    fis_ids = []
-    for n, d in fis_graph.nodes(data=True):
-        # Extract geometry (could be x,y or shapely obj)
-        p = None
-        if "geometry" in d and isinstance(d["geometry"], Point):
-            p = d["geometry"]
-        elif "Geometry" in d and isinstance(d["Geometry"], Point):
-            p = d["Geometry"]
-        elif "x" in d and "y" in d:
-            p = Point(d["x"], d["y"])
-
-        if p:
-            fis_points.append(p)
-            fis_ids.append(n)
-
-    if not fis_points:
+    fis_gdf = _build_fis_nodes_gdf(fis_graph)
+    if fis_gdf is None:
         logger.warning("No valid geometry found in FIS graph nodes")
         return []
-
-    # Create GDF in projected CRS for distance calculation (UTM 31N covers NL)
-    fis_gdf = gpd.GeoDataFrame(
-        {"node_id": fis_ids, "geometry": fis_points}, crs="EPSG:4326"
-    ).to_crs("EPSG:32631")
 
     # 2. Find bridgehead nodes in EURIS
     border_edges = []
@@ -131,27 +156,12 @@ def find_geometric_border_connections(
     matches = {}  # bridgehead_id -> {fis_node, distance}
 
     for bh in bridgeheads:
-        d = euris_graph.nodes[bh]
-        p = None
-        if "geometry" in d and isinstance(d["geometry"], Point):
-            p = d["geometry"]
-        elif "x" in d and "y" in d:
-            p = Point(d["x"], d["y"])
-
-        if p:
-            # Project point and find nearest FIS node
-            from ..lock.utils import project_geometry
-
-            bh_geom_rd = project_geometry(p, "EPSG:4326", "EPSG:32631")
-
-            # Simple distance to all (fast enough for <10k nodes)
-            dists = fis_gdf.distance(bh_geom_rd)
-            min_dist = dists.min()
-            nearest_idx = dists.idxmin()
-
+        p = _extract_node_point(euris_graph.nodes[bh])
+        if p is not None:
+            fis_node_id, min_dist = _nearest_fis_node(fis_gdf, p)
             if min_dist < distance_threshold:
                 matches[bh] = {
-                    "fis_node": fis_gdf.iloc[nearest_idx].node_id,
+                    "fis_node": fis_node_id,
                     "distance": min_dist,
                 }
                 logger.debug(
@@ -242,11 +252,20 @@ def merge_graphs(
         edge_attrs = {"data_source": "FIS", **attrs}
         combined.add_edge(f"FIS_{u}", f"FIS_{v}", **edge_attrs)
 
+    # Identify redundant BE-NL overlap sections present in EURIS so we can drop
+    # the duplicate BE edge + outer node and snap the inner BE node directly to FIS.
+    skip_euris_nodes: set[str] = set()
+    retarget_outer_to_inner: dict[str, str] = {}
+    for code, (outer, inner) in _REDUNDANT_BE_BORDER_SECTIONS.items():
+        if euris_graph.has_edge(outer, inner):
+            skip_euris_nodes.add(outer)
+            retarget_outer_to_inner[outer] = inner
+
     # Add EURIS nodes (already have country prefix like NL_J3524)
     logger.info("Adding EURIS nodes to combined graph (excluding NL)")
     for node_id, attrs in euris_graph.nodes(data=True):
         # Skip Dutch nodes in EURIS as FIS provides the authoritative network
-        if attrs.get("countrycode") == "NL":
+        if attrs.get("countrycode") == "NL" or node_id in skip_euris_nodes:
             continue
         node_attrs = {"data_source": "EURIS", **attrs}
         combined.add_node(f"EURIS_{node_id}", **node_attrs)
@@ -254,26 +273,61 @@ def merge_graphs(
     # Add EURIS edges
     logger.info("Adding EURIS edges to combined graph (excluding NL)")
     for u, v, attrs in euris_graph.edges(data=True):
-        # Skip edges where either node is Dutch
+        # Skip edges where either node is Dutch or skipped outer border node
         u_cc = euris_graph.nodes[u].get("countrycode")
         v_cc = euris_graph.nodes[v].get("countrycode")
 
         if u_cc == "NL" or v_cc == "NL":
+            continue
+        if u in skip_euris_nodes or v in skip_euris_nodes:
+            continue
+        if attrs.get("cntrycode_cb") == "NL":
+            logger.info(
+                "Skipping common-border EURIS edge %s (covered by FIS)",
+                attrs.get("code"),
+            )
+            continue
+        if attrs.get("code") in _REDUNDANT_BE_BORDER_SECTIONS:
+            logger.info(
+                "Skipping overlapping BE border edge %s (covered by FIS)",
+                attrs.get("code"),
+            )
             continue
 
         edge_attrs = {"data_source": "EURIS", **attrs}
         combined.add_edge(f"EURIS_{u}", f"EURIS_{v}", **edge_attrs)
 
     # Add new border connections
+    fis_nodes_gdf = _build_fis_nodes_gdf(fis_graph) if retarget_outer_to_inner else None
     logger.info("Adding %d border connections", len(connections))
     for conn in connections:
+        foreign_node = conn["foreign_node"]
+        fis_node = conn["fis_node"]
+        distance = conn["distance"]
+        edge_attrs = conn.get("edge_attrs", {}).copy()
+
+        if foreign_node in retarget_outer_to_inner:
+            inner_node = retarget_outer_to_inner[foreign_node]
+            inner_pt = _extract_node_point(euris_graph.nodes[inner_node])
+            if fis_nodes_gdf is not None and inner_pt is not None:
+                fis_node, distance = _nearest_fis_node(fis_nodes_gdf, inner_pt)
+                fis_pt = _extract_node_point(fis_graph.nodes[fis_node])
+                if fis_pt is not None:
+                    edge_attrs["geometry"] = LineString([fis_pt, inner_pt])
+                    edge_attrs["length_m"] = distance
+            logger.info(
+                "Retargeted border connection %s -> %s (FIS:%s, %.1fm)",
+                foreign_node,
+                inner_node,
+                fis_node,
+                distance,
+            )
+            foreign_node = inner_node
+
         # Link: FIS_<fis_node> <--> EURIS_<foreign_node>
         # Skipping the bridgehead node effectively stitches the networks
-        u = f"FIS_{conn['fis_node']}"
-        v = f"EURIS_{conn['foreign_node']}"
-
-        # Base attributes for border connection
-        edge_attrs = conn.get("edge_attrs", {}).copy()
+        u = f"FIS_{fis_node}"
+        v = f"EURIS_{foreign_node}"
 
         # Override/Set metadata
         a, b = sorted((u, v))
@@ -281,7 +335,7 @@ def merge_graphs(
             {
                 "data_source": "BORDER",
                 "bridgehead": conn["bridgehead_node"],
-                "distance_gap": conn["distance"],
+                "distance_gap": distance,
                 "connection_type": conn["type"],
             }
         )

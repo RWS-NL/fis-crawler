@@ -16,6 +16,70 @@ from tqdm.auto import tqdm
 logger = logging.getLogger(__name__)
 
 
+def _latest_paths_by_country(
+    paths: list[pathlib.Path], prefix: str
+) -> list[pathlib.Path]:
+    """Keep only the newest dated GeoJSON snapshot per country code."""
+    pattern = re.compile(
+        rf"^{re.escape(prefix)}_(?P<cc>[A-Z]+)_(?P<date>\d+)\.geojson$"
+    )
+    latest_by_cc: dict[str, tuple[str, pathlib.Path]] = {}
+    unmatched: list[pathlib.Path] = []
+    for path in sorted(paths):
+        match = pattern.match(path.name)
+        if not match:
+            unmatched.append(path)
+            continue
+        cc = match.group("cc")
+        date = match.group("date")
+        if cc not in latest_by_cc or date > latest_by_cc[cc][0]:
+            latest_by_cc[cc] = (date, path)
+    if len(latest_by_cc) + len(unmatched) < len(paths):
+        logger.info(
+            "Filtered %d %s files to %d latest per country",
+            len(paths),
+            prefix,
+            len(latest_by_cc) + len(unmatched),
+        )
+    return [p for _, p in latest_by_cc.values()] + unmatched
+
+
+def _drop_mutual_common_border_duplicates(
+    section_gdf: gpd.GeoDataFrame,
+) -> gpd.GeoDataFrame:
+    """Drop one side of mutual EURIS-EURIS common border section pairs.
+
+    Pairs where country A's ``code_cb`` points to country B's ``code`` and vice
+    versa represent the same physical border section supplied by both countries.
+    Dutch (``NL``) sections are excluded here because NL is skipped during FIS
+    integration.
+    """
+    if "code_cb" not in section_gdf.columns or "code" not in section_gdf.columns:
+        return section_gdf
+
+    cb_map = (
+        section_gdf.dropna(subset=["code", "code_cb"])
+        .set_index("code")["code_cb"]
+        .to_dict()
+    )
+    to_drop: set[str] = set()
+    for code, code_cb in cb_map.items():
+        if str(code).startswith("NL") or str(code_cb).startswith("NL"):
+            continue
+        if cb_map.get(code_cb) == code:
+            _, drop = sorted((str(code), str(code_cb)))
+            to_drop.add(drop)
+
+    if to_drop:
+        logger.info(
+            "Dropping %d mutual common-border duplicate section(s): %s",
+            len(to_drop),
+            sorted(to_drop),
+        )
+        section_gdf = section_gdf[~section_gdf["code"].isin(to_drop)]
+    return section_gdf
+
+
 def concat_nodes(data_dir: pathlib.Path) -> gpd.GeoDataFrame:
     """Concatenate all EURIS node files into a single GeoDataFrame.
 
@@ -25,7 +89,9 @@ def concat_nodes(data_dir: pathlib.Path) -> gpd.GeoDataFrame:
     Returns:
         Concatenated GeoDataFrame with deduplicated nodes.
     """
-    node_paths = list(data_dir.glob("Node_*.geojson"))
+    node_paths = _latest_paths_by_country(
+        list(data_dir.glob("Node_*.geojson")), prefix="Node"
+    )
     logger.info("Found %d node files", len(node_paths))
 
     if not node_paths:
@@ -72,7 +138,9 @@ def concat_sections(data_dir: pathlib.Path) -> gpd.GeoDataFrame:
     Returns:
         Concatenated GeoDataFrame with deduplicated sections.
     """
-    section_paths = list(data_dir.glob("FairwaySection_*.geojson"))
+    section_paths = _latest_paths_by_country(
+        list(data_dir.glob("FairwaySection_*.geojson")), prefix="FairwaySection"
+    )
     logger.info("Found %d section files", len(section_paths))
 
     if not section_paths:
@@ -113,6 +181,7 @@ def build_euris_graph(
         NetworkX graph with nodes and edges.
     """
     logger.info("Building node-section administration...")
+    section_gdf = _drop_mutual_common_border_duplicates(section_gdf)
     node_section = section_gdf[["code"]].merge(
         node_gdf[["sectionref", "node_id"]], left_on="code", right_on="sectionref"
     )[["sectionref", "node_id"]]
@@ -158,6 +227,10 @@ def build_euris_graph(
     border_locode_connections = border_locode_connections.rename(
         columns={"node_id_x": "source", "node_id_y": "target"}
     )
+    border_locode_connections = border_locode_connections[
+        border_locode_connections["source"].isin(graph.nodes)
+        & border_locode_connections["target"].isin(graph.nodes)
+    ]
     logger.info("Found %d border connections", len(border_locode_connections))
 
     def geometry_for_border(row):
